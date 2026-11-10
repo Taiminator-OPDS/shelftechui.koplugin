@@ -2,7 +2,7 @@
 
 A complete retro-tech interface for KOReader, with **Bookshelf**, **Glimpse** and **Bookdrop** built in.
 
-ShelfTechUI is Bookshelf OS and AndyHazz's Bookshelf home screen merged into one plugin, in one design language: square boxes with a 2px outline and a hard black shadow, pinstriped title strips, monospaced bold capitals for chrome, pinstriped tracks with square handles.
+ShelfTechUI is a fork of AndyHazz's Bookshelf home screen 
 
 ## What's in it
 
