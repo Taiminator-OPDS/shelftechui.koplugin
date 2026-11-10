@@ -1,0 +1,46 @@
+# A tag v1.2.3 (or v1.2.3-beta.1, published as a pre-release) builds the
+# pruned plugin from the source and publishes it as a GitHub release, with
+# that version's notes from CHANGELOG.md. Storefront picks the release up.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The tag must match _meta.lua
+        run: |
+          v=$(sed -n 's/.*version = "\([^"]*\)".*/\1/p' shelftechui.koplugin/_meta.lua)
+          if [ "v$v" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME, but _meta.lua says $v" >&2
+            exit 1
+          fi
+
+      - name: Build the release copy
+        run: |
+          python3 tools/build.py shelftechui.koplugin dist/shelftechui.koplugin
+          find dist -type d -empty -delete
+          (cd dist && zip -qr -9 ../shelftechui.koplugin.zip shelftechui.koplugin)
+
+      - name: Release notes
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v v="$v" 'index($0, "## " v) == 1 { f = 1; next } /^## / { f = 0 } f' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "ShelfTechUI $v" > notes.md
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pre=""
+          case "$GITHUB_REF_NAME" in *-*) pre="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" shelftechui.koplugin.zip \
+            --title "ShelfTechUI ${GITHUB_REF_NAME#v}" --notes-file notes.md $pre

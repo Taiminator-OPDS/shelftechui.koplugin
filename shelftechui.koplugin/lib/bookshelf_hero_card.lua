@@ -1,0 +1,1553 @@
+-- bookshelf_hero_card.lua
+-- Currently-reading detail card: cover thumbnail + an editable right column
+-- composed from five region templates (status / title / author / description
+-- / progress). All region styling and content is driven by hero_regions.
+
+local FrameContainer  = require("ui/widget/container/framecontainer")
+local BookshelfSettings = require("lib/bookshelf_settings_store")
+local InputContainer  = require("ui/widget/container/inputcontainer")
+local CenterContainer = require("ui/widget/container/centercontainer")
+local LeftContainer   = require("ui/widget/container/leftcontainer")
+local RightContainer  = require("ui/widget/container/rightcontainer")
+local TopContainer    = require("ui/widget/container/topcontainer")
+local BottomContainer = require("ui/widget/container/bottomcontainer")
+local HorizontalGroup = require("ui/widget/horizontalgroup")
+local HorizontalSpan  = require("ui/widget/horizontalspan")
+local VerticalGroup   = require("ui/widget/verticalgroup")
+local VerticalSpan    = require("ui/widget/verticalspan")
+local OverlapGroup    = require("ui/widget/overlapgroup")
+local LineWidget      = require("ui/widget/linewidget")
+local TextBoxWidget   = require("ui/widget/textboxwidget")
+local TextWidget      = require("lib/bookshelf_colour_text")
+local Geom            = require("ui/geometry")
+local GestureRange    = require("ui/gesturerange")
+local Size            = require("ui/size")
+local Space           = require("lib/bookshelf_space")
+local Font            = require("ui/font")
+local logger          = require("logger")
+local _gettime        = require("lib/bookshelf_gettime")
+local BFont           = require("lib/bookshelf_fonts")
+local Blitbuffer      = require("ffi/blitbuffer")
+local Screen          = require("device").screen
+
+-- The shelf theme's text colour. KOReader's TextWidget defaults to black, and
+-- a night frame inverts that to white -- which is why the hero has never
+-- needed to say. Under a dark shelf on a light device nothing inverts, so
+-- black title text lands on a black panel.
+local _ink_memo = nil
+-- buildStatusRow(..., ink): the ink its text takes, for a row standing on a
+-- ground other than the shelf's (set only while it builds).
+local _ink_override = nil
+local function _ink()
+    -- type(), not ~= nil: a Blitbuffer colour raises on a compare with nil.
+    if type(_ink_override) ~= "nil" then return _ink_override end
+    -- Twelve call sites per hero build; the answer moves only with the
+    -- settings generation or the night flag.
+    local gen   = BookshelfSettings.generation and BookshelfSettings.generation() or 0
+    local night = require("lib/bookshelf_night_mode_sync").active()
+    local m = _ink_memo
+    if m and m.gen == gen and m.night == night then return m.v end
+    local v
+    local ok, CP = pcall(require, "lib/bookshelf_cover_progress")
+    -- Colors > Panel text (or a panel colour's own) before the shelf's ink:
+    -- this is text on the top panel.
+    if ok and CP and CP.panelInk then v = CP.panelInk() end
+    if type(v) == "nil" and ok and CP and CP.ink then v = CP.ink() end
+    _ink_memo = { gen = gen, night = night, v = v }
+    return v
+end
+
+-- Which text-block widget the column builds with. Over a painted ground (a
+-- wallpaper, or the dark theme's own page) a stock TextBoxWidget blits an
+-- opaque box, so the column used to be rendered a second time through
+-- Wallpaper.mask as one single-colour stencil. TransparentTextBox composites
+-- through its own render instead, per block, so the second render of the
+-- text is gone (the stencil survives only around the progress bar, see
+-- HeroCard.buildStatusRow). On a plain page the stock widget's straight blit is the
+-- cheaper of the two and there is nothing to show through anyway.
+--
+-- Module state, set at the top of every _buildRightColumn from the card's
+-- has_wallpaper. A build that throws leaves it as it was, and the worst that
+-- does to the NEXT build is a transparent render over a plain page, which
+-- looks identical.
+local TransparentTextBox = require("lib/bookshelf_transparent_text")
+local _over_ground = false
+local function textBoxClass()
+    return _over_ground and TransparentTextBox or TextBoxWidget
+end
+local SpineWidget     = require("lib/bookshelf_spine_widget")
+local Tokens          = require("lib/bookshelf_tokens")
+local Regions         = require("lib/bookshelf_hero_regions")
+local HeroBar         = require("lib/bookshelf_hero_bar")
+local TextSegments    = require("lib/bookshelf_text_segments")
+local TextFit         = require("lib/bookshelf_text_fit")
+
+local HC_STAR       = "\xef\x80\x85" -- nf-fa-star            (U+F005)
+local HC_HALF_STAR  = "\xef\x84\xa3" -- nf-fa-star_half_empty (U+F123)
+local HC_EMPTY_STAR = "\xef\x80\x86" -- nf-fa-star_o          (U+F006)
+
+local HeroCard = InputContainer:extend{
+    -- Set by the shelf when something is painted behind the card.
+    has_wallpaper = false,
+    book                = nil,
+    width               = nil,
+    height              = nil,
+    cover_w             = 116,
+    cover_h             = nil,
+    pad                 = nil,
+    device_state        = nil,
+    on_tap              = nil,
+    on_hold             = nil,
+    -- Double tap on the hero cover opens the book directly (#271). Passed
+    -- through to the cover SpineWidget; inert unless the user enabled
+    -- KOReader's global double tap.
+    on_double_tap       = nil,
+    -- Fires when the user taps inside the description region. Receives
+    -- the book record so the widget can open a scrollable viewer for
+    -- the full text. Tap on the rest of the hero still goes to on_tap
+    -- (open the book) -- the description's tap zone is a child input
+    -- area that consumes the event before the parent sees it.
+    on_description_tap  = nil,
+    -- Fires when the user taps a star in the rating row. Receives the
+    -- book record and the new rating (1-5, or nil to clear). The widget
+    -- is responsible for persisting to DocSettings and triggering a
+    -- hero rebuild.
+    on_rating_change    = nil,
+    -- Fires when the user taps the display-only Hardcover rating row.
+    -- The parent fetches/shows reviews explicitly so normal hero
+    -- rendering remains cache-only and offline.
+    on_hardcover_reviews_tap = nil,
+    is_selected         = false,
+    is_bulk_selected    = false,
+    -- Builder callback returning a fresh tappable pill-strip widget for
+    -- the "Tags (interactive)" hero region. BookshelfWidget supplies it
+    -- (it owns _buildPillSpecs + _buildPillGroup); HeroCard calls it on
+    -- every right-column rebuild so a fresh widget tree is wired in
+    -- after each free(), rather than reusing one whose internals have
+    -- been torn down.
+    tags_builder        = nil,
+}
+
+-- Reads the user's font-scale setting (% of nominal). Applied on top of
+-- per-region font_size so the user can dial the whole hero up or down.
+-- Defensive fallback: if Font:getFace errors or returns nil for the
+-- requested face_name (e.g. a stale "@family:serif" sentinel from a
+-- prior bookends-picker tap, or a font file that has since been
+-- removed from the filesystem), drop back to "infofont" so the render
+-- never crashes on a missing face.
+-- want_italic resolves an ITALIC FILE, because slant cannot be synthesised the
+-- way weight can -- TextWidget's bold flag faux-bolds, and there is no
+-- equivalent for italic. Without a variant on disk the line renders upright,
+-- which is the honest degrade.
+--
+-- Deliberately italic-only, never bold: every caller passes region.bold to its
+-- widget separately, so returning a bold FILE here would get faux-bolded on top
+-- of real weight. A bold-italic line therefore gets the italic file plus the
+-- caller's faux bold, which is right and changes nothing about how bold has
+-- always worked here.
+local function fontFace(face_name, base, want_italic)
+    local scale = (BookshelfSettings.read("font_scale") or 100) / 100
+    local size = math.max(8, math.floor(base * scale + 0.5))
+    if face_name then
+        if want_italic then
+            local v = BFont.variantOf(face_name, false, true)
+            if v then
+                local ok_v, vf = pcall(Font.getFace, Font, v, size)
+                if ok_v and vf then return vf end
+            end
+        end
+        local ok, face = pcall(Font.getFace, Font, face_name, size)
+        if ok and face then return face end
+    end
+    return (BFont:getFace("infofont", size, { italic = want_italic }))
+end
+
+-- Elastic tokens: tokens that, when present in a region's expanded text,
+-- trigger horizontal-layout rendering ([before-text, elastic-widget, after-
+-- text]) where the elastic widget fills the remaining width. The order
+-- here matters only as documentation; the renderer detects whichever
+-- elastic token appears first in the template.
+--   %bar    -> progress-bar widget (HeroBar). Has a small visual gap on
+--              either side so the bar doesn't weld onto adjacent glyphs.
+--   %spacer -> HorizontalSpan. Pure whitespace; no boundary gap (the span
+--              pixels ARE the gap). Lets users right-align some tokens
+--              against left-aligned ones in any region, e.g.
+--              "Reading%spacer47%" -> "Reading" left, "47%" right.
+local BAR_TOKEN_PATTERN    = "%%bar"
+-- The style tags a hero region DROPS, as opposed to the one it honours.
+--
+-- A region is a named slot with its own face, size and weight controls, so
+-- [b] / [i] / [u] have always been stripped here -- the buttons do that job.
+-- [size=N] joins them: it is a LIST-line feature (the row shares one band
+-- between several lines and can afford a run at another size; a hero region is
+-- laid out against the cover and cannot), and now that the token picker offers
+-- the tag under Style, a reader will type it here sooner or later. Stripped it
+-- is ignored, which is what the menu preview already shows; left in it would
+-- print "[size=12]" in the middle of the title.
+--
+-- [font=NAME] is deliberately NOT in here. buildText reads it off the text to
+-- pick the region's face and strips it afterwards (issue #144), so removing it
+-- this early would take the feature away.
+local INLINE_TAG_PATTERN   = "%[/?[biu]%]"
+local SIZE_TAG_PATTERN     = "%[/?size=?[^%]]*%]"
+local SPACER_TOKEN_PATTERN = "%%spacer"
+
+local function stripStyleTags(text)
+    return (text:gsub(INLINE_TAG_PATTERN, ""):gsub(SIZE_TAG_PATTERN, ""))
+end
+
+function HeroCard:init()
+    self.cover_h = self.cover_h or self.height
+    self.dimen = Geom:new{ w = self.width, h = self.height }
+    if not self.book then
+        self[1] = self:_renderEmpty()
+    else
+        self[1] = self:_renderFull()
+    end
+    -- Only Hold is registered at the HeroCard level. A whole-hero Tap
+    -- zone caused two problems: (1) it absorbed taps that the cover /
+    -- description / star children needed to receive, and (2) when it
+    -- matched, InputContainer:onGesture dispatches a generic "Tap"
+    -- event that propagates through children -- firing the cover
+    -- SpineWidget's onTap and opening the book even on taps far outside
+    -- the cover's pixel bounds. Children own their own Tap zones now.
+    self.ges_events = {
+        Hold = { GestureRange:new{ ges = "hold", range = self.dimen } },
+    }
+end
+
+function HeroCard:_renderEmpty()
+    -- Its border in the ink on every colour screen (Color.colourBorder).
+    return require("lib/bookshelf_color").colourBorder(FrameContainer:new{
+        width      = self.width,
+        height     = self.height,
+        bordersize = Size.border.thin,
+        -- FrameContainer's border defaults to black, which on a dark panel is
+        -- an outline nobody can see.
+        color      = _ink(),
+        padding    = 0,
+        CenterContainer:new{
+            dimen = Geom:new{ w = self.width, h = self.height },
+            (self.has_wallpaper and TransparentTextBox or TextBoxWidget):new{
+                text      = require("lib/bookshelf_i18n").gettext("Welcome to Bookshelf · Tap a cover to start reading"),
+                face      = fontFace("infofont", 14),
+                fgcolor   = _ink(),
+                width     = self.width - Space.padding.large * 2,
+                alignment = "center",
+            },
+        },
+    })
+end
+
+-- Resolve a region's face: honour the user's saved font_face when set,
+-- otherwise fall through to the default infofont. font_size is always
+-- multiplied by the global bookshelf_font_scale via fontFace().
+local function regionFace(region)
+    return fontFace(region.font_face, region.font_size, region.italic == true)
+end
+
+-- _buildSegmentedInline(text, face, bold) -- returns a single widget
+-- (TextWidget if homogeneous, HorizontalGroup of TextWidgets if the
+-- text mixes text + icon segments). When bold is false the function
+-- short-circuits to a plain TextWidget regardless of content -- the
+-- whole point of segmenting is to keep glyphs out of the bold path,
+-- so non-bold lines have nothing to gain. The returned widget always
+-- has a getSize() so callers' width math works.
+local function _buildSegmentedInline(text, face, bold, max_width, truncate_left)
+    -- One line means one line: a template can carry a literal newline (issue
+    -- 345's Line 1 did), and TextWidget's max_width truncation stops AT a
+    -- newline - everything after it silently vanishes, but only once the
+    -- line overflows. Same collapse as the list row's piece().
+    if type(text) == "string" and text:find("\n", 1, true) then
+        text = text:gsub("%s*\n%s*", " ")
+    end
+    -- max_width set => truncate to one line with an ellipsis (issue #170). The
+    -- segmented icon/bold path can't be partially truncated, so a clamped side
+    -- always uses the plain TextWidget path (loses the per-segment bold split on
+    -- that side only, which is an overflow edge case). truncate_left puts the
+    -- ellipsis at the START (used for the right-aligned, after-spacer side so its
+    -- right-anchored tail -- battery/wifi/etc -- stays and the cut sits by the spacer).
+    if max_width or not bold or not text:find("[\x80-\xFF]") then
+        return TextWidget:new{ text = text, face = face, bold = bold or false,
+            fgcolor = _ink(),
+            max_width = max_width, truncate_left = truncate_left or false }
+    end
+    local segments = TextSegments.labelSegments(text)
+    if #segments <= 1 then
+        return TextWidget:new{ text = text, face = face, bold = bold,
+                               fgcolor = _ink() }
+    end
+    local hg = HorizontalGroup:new{ align = "center" }
+    for _i, seg in ipairs(segments) do
+        hg[#hg + 1] = TextWidget:new{
+            text = seg.text,
+            face = face,
+            bold = seg.class == "text",
+            fgcolor = _ink(),
+        }
+    end
+    return hg
+end
+
+-- Title line-balancing lives in bookshelf_text_fit (shared with the no-cover
+-- placeholder card). See TextFit.balanceLines for the algorithm.
+local balanceLines = TextFit.balanceLines
+
+-- Build a widget for a single region using the resolved settings. Uses
+-- TextBoxWidget for the normal multi-line wrapping case. Switches to a
+-- segmented HorizontalGroup when the region is bold AND the rendered
+-- text contains nerd-font / emoji glyphs AND it's a single line --
+-- keeps the glyphs at the font's native weight while bolding the
+-- surrounding text. (TextBoxWidget can't do per-segment bold, so the
+-- segmented path loses line wrapping; reserved for short single-line
+-- content like the status clock line, which is the common case for
+-- icon-bearing region templates.)
+local function buildText(text, region, width, max_height)
+    -- [font=NAME] whole-region override (issue #144): when the text is wrapped
+    -- in a single [font=NAME]...[/font] spanning the whole content, render this
+    -- region in that font -- FACE ONLY; size, bold and alignment stay from the
+    -- region. Lets a template conditionally pick a font (e.g.
+    -- [if:lang=ja][font=...]%title[/font][else]...[/if]) on top of the line
+    -- editor's default. An unresolvable name falls back to the region font;
+    -- partial / mid-line [font] tags are stripped (inline spans unsupported).
+    local override_face
+    -- Apply the FIRST [font=NAME] found anywhere to the WHOLE region, not only
+    -- when it wraps the entire line. Mid-line spans aren't supported, so if a
+    -- font tag is present at all the whole line takes that font (text outside
+    -- the tag included). After a conditional resolves only one branch's [font]
+    -- survives, so the first match is the right one.
+    local fname = text:match("%[font=([^%]]+)%]")
+    if fname then
+        local file = BFont.resolveFontNameToFile(fname)
+        if file then override_face = fontFace(file, region.font_size) end
+    end
+    text = text:gsub("%[font=[^%]]*%]", ""):gsub("%[/font%]", "")
+    local rendered = text
+    if region.uppercase then rendered = TextSegments.upper(rendered) end
+    local face = override_face or regionFace(region)
+    local is_bold = region.bold or false
+    if is_bold and rendered:find("[\x80-\xFF]") and not rendered:find("\n") then
+        local segments = TextSegments.labelSegments(rendered)
+        if #segments > 1 then
+            local hg = HorizontalGroup:new{ align = "center" }
+            for _i, seg in ipairs(segments) do
+                hg[#hg + 1] = TextWidget:new{
+                    text    = seg.text,
+                    face    = face,
+                    bold    = seg.class == "text",
+                    -- Was hard black. That is the status line and the hero's
+                    -- bold segments, which under a dark shelf land on a dark
+                    -- panel.
+                    fgcolor = _ink() or Blitbuffer.COLOR_BLACK,
+                }
+            end
+            -- HorizontalGroup doesn't honour region.alignment the way
+            -- TextBoxWidget does -- it just sits at its natural width.
+            -- Wrap in the matching alignment container sized to the
+            -- region's allotted width so center / right alignment work.
+            local alignment = region.alignment or "left"
+            local hg_h = hg:getSize().h
+            local dimen = Geom:new{ w = width, h = hg_h }
+            if alignment == "center" then
+                return CenterContainer:new{ dimen = dimen, hg }
+            elseif alignment == "right" then
+                return RightContainer:new{ dimen = dimen, hg }
+            end
+            return LeftContainer:new{ dimen = dimen, hg }
+        end
+    end
+    return textBoxClass():new{
+        text        = rendered,
+        face        = face,
+        bold        = is_bold,
+        fgcolor     = _ink(),
+        width       = width,
+        alignment   = region.alignment or "left",
+        -- region.line_height (em multiplier) overrides TextBoxWidget's
+        -- 0.3 default. Only the title region sets this today; other
+        -- regions fall through to the default leading.
+        line_height = region.line_height,
+        -- Optional height cap (the title in a short hero): truncate with an
+        -- ellipsis rather than wrapping unbounded. height_adjust keeps short
+        -- text tight (shrinks to natural height, no reserved gap below).
+        height                        = max_height,
+        height_adjust                 = max_height and true or nil,
+        height_overflow_show_ellipsis = max_height and true or nil,
+    }
+end
+
+-- Forward declaration so HeroCard.buildStatusRow below can reference
+-- buildLine before the function body is parsed. Lua free-variable
+-- resolution captures by lexical position, so without this the call
+-- inside buildStatusRow would resolve to a missing global.
+local buildLine
+
+-- buildStatusRow(book, state, width) — module-level helper that produces the
+-- exact status block (status TextBoxWidget + hairline + small gap) rendered
+-- inside _buildRightColumn. Exposed so BookshelfWidget can drop the same
+-- widget tree into its expanded-mode strip, guaranteeing the status sits at
+-- the same y position and uses identical face / alignment / region settings
+-- as the in-hero version.
+-- with_hairline (default true): include the gray hairline + small gap below
+-- the status text. Normal-mode hero passes default; collapsed-mode strip
+-- passes false because the chip strip below it serves the same separator
+-- role and doubling up reads as visual noise.
+-- buildJobRow(region, width) -> the status line's stand-in while a
+-- background job runs (lib/bookshelf_scan_progress), or nil when none is:
+-- what it is doing, a bar, and Stop. One height whatever the text, so each
+-- progress tick swaps the strip in place. Drawn in the status region's face
+-- and the shelf's ink, and the bar is the %bar token's own, so it follows the
+-- reader's bar style and colours on every theme.
+function HeroCard.buildJobRow(region, width)
+    local ok_p, Progress = pcall(require, "lib/bookshelf_scan_progress")
+    local job = ok_p and Progress.active() and Progress.job()
+    if not job then return nil end
+    region = region or {}
+    local face = regionFace(region)
+    local ink  = _ink() or Blitbuffer.COLOR_BLACK
+    local gap  = Space.padding.large
+    local _    = require("lib/bookshelf_i18n").gettext
+    -- Filled with the ink and lettered in the panel's own ground (black on
+    -- white by day, flipped on a dark shelf), so it stands out in the line.
+    -- A size down from the line's text, so the filled box sits inside the
+    -- row's height rather than pressing on the hairline below.
+    local paper = Blitbuffer.COLOR_WHITE
+    local ok_cp, CP = pcall(require, "lib/bookshelf_cover_progress")
+    if ok_cp and CP and CP.resolvedColors then
+        local ok_c, colors = pcall(CP.resolvedColors)
+        if ok_c and colors and colors.panel_bg then paper = colors.panel_tint or colors.panel_bg end
+    end
+    local label_size = math.max(8, math.floor((region.font_size or 14) * 0.85 + 0.5))
+    local label = TextWidget:new{
+        text = _("Stop"),
+        face = fontFace(region.font_face, label_size, false),
+        fgcolor = paper,
+        bold = true,
+    }
+    local stop_frame = FrameContainer:new{
+        bordersize = 0,
+        radius     = Space.radius.button,
+        padding    = 0,
+        padding_top    = Space.padding.tiny,
+        padding_bottom = Space.padding.tiny,
+        padding_left   = Space.padding.large,
+        padding_right  = Space.padding.large,
+        margin     = 0,
+        background = ink,
+        label,
+    }
+    local stop = InputContainer:new{
+        dimen = Geom:new{ w = stop_frame:getSize().w, h = stop_frame:getSize().h },
+        stop_frame,
+    }
+    stop.ges_events = { Tap = { GestureRange:new{ ges = "tap", range = stop.dimen } } }
+    function stop:onTap()
+        Progress.stop()
+        return true
+    end
+    local stop_w = stop.dimen.w
+    local bar_w  = math.floor(width * 0.28)
+    local text_w = math.max(0, width - bar_w - stop_w - 2 * gap)
+    local text = job.title or ""
+    local icon = Progress.icon and Progress.icon()
+    if icon then text = icon .. " " .. text end
+    if job.detail and job.detail ~= "" then text = text .. "  \xC2\xB7  " .. job.detail end
+    local text_widget = _buildSegmentedInline(text, face, region.bold or false, text_w, false)
+    local bar = buildLine("%bar", region, bar_w, { book_pct = job.fraction or 0 }, nil, true)
+    local h = math.max(text_widget:getSize().h, bar:getSize().h, stop.dimen.h)
+    local function cell(w, widget)
+        return LeftContainer:new{ dimen = Geom:new{ w = w, h = h }, widget }
+    end
+    -- Air under the row, so the Stop box does not sit on the hairline below.
+    return VerticalGroup:new{ align = "left", HorizontalGroup:new{
+        align = "center",
+        cell(text_w, text_widget),
+        HorizontalSpan:new{ width = gap },
+        CenterContainer:new{ dimen = Geom:new{ w = bar_w, h = h }, bar },
+        HorizontalSpan:new{ width = gap },
+        CenterContainer:new{ dimen = Geom:new{ w = stop_w, h = h }, stop },
+    }, VerticalSpan:new{ width = Space.padding.default } }
+end
+
+-- allow_job (5th): shelf surfaces pass true, so a running background job's
+-- progress takes the line's place (shown even when the line is switched
+-- off). The reader's copy of the line (bookshelf_reader_status) does not.
+local function _buildStatusRow(book, state, width, with_hairline, allow_job)
+    if with_hairline == nil then with_hairline = true end
+    local regions = Regions.read()
+    local job_row = allow_job and HeroCard.buildJobRow(regions.status, width)
+    if job_row then
+        local vg = VerticalGroup:new{ align = "left", job_row }
+        if with_hairline then
+            vg[#vg + 1] = LineWidget:new{
+                dimen      = Geom:new{ w = width, h = Size.line.medium },
+                background = Blitbuffer.gray(0.4),
+            }
+            vg[#vg + 1] = VerticalSpan:new{ width = Space.padding.default }
+        end
+        return vg
+    end
+    if not regions.status or regions.status.disabled then return nil end
+    if not book then return nil end
+    -- This is the FULL-WIDTH status line (micro-module hero + full-screen
+    -- overlay), so [if:full_width]…[/if] in the template activates here but not
+    -- in the narrow cover-view status (_buildRightColumn, which passes the raw
+    -- state). A metatable proxy adds the flag without mutating the shared,
+    -- cached device_state.
+    local st = setmetatable({ full_width = true }, { __index = state })
+    local status_text = Tokens.expand(regions.status.template, book, st)
+    status_text = stripStyleTags(status_text)
+    if Tokens.isEmpty(status_text) then return nil end
+    local vg = VerticalGroup:new{ align = "left" }
+    vg[#vg + 1] = buildLine(status_text, regions.status, width, book, nil, true)
+    if with_hairline then
+        vg[#vg + 1] = LineWidget:new{
+            dimen      = Geom:new{ w = width, h = Size.line.medium },
+            background = Blitbuffer.gray(0.4),
+        }
+        vg[#vg + 1] = VerticalSpan:new{ width = Space.padding.default }
+    end
+    return vg
+end
+
+-- ink (optional): the colour its text takes instead of the shelf's, for a
+-- row on another ground (the full-screen view on plain white inside a book,
+-- where a dark theme's ink would be white on white).
+function HeroCard.buildStatusRow(book, state, width, with_hairline, allow_job, ink)
+    if type(ink) == "nil" then return _buildStatusRow(book, state, width, with_hairline, allow_job) end
+    _ink_override = ink
+    local ok, row = pcall(_buildStatusRow, book, state, width, with_hairline, allow_job)
+    _ink_override = nil
+    if not ok then error(row, 0) end
+    return row
+end
+
+-- buildLine: if `expanded` contains an elastic token (%bar or %spacer),
+-- returns a HorizontalGroup of [text-before, elastic-widget, text-after]
+-- where the elastic widget fills the remaining width. Without an elastic
+-- token, returns a plain TextBoxWidget via buildText. The first elastic
+-- token wins; any further occurrences of either elastic pattern in the
+-- trailing segment are stripped so they don't render as literal text.
+-- Assigned (not `local function`) so the forward declaration above
+-- resolves; HeroCard.buildStatusRow references this by name.
+buildLine = function(expanded, region, width, book, max_height, single_line)
+    -- Locate the first elastic token (%bar or %spacer), whichever appears
+    -- earliest. Same one-shot semantics either way.
+    -- %bar{rel} -- the bar's length reflects how long the book is. Read (and
+    -- removed) BEFORE the elastic split so the split sees a plain %bar and the
+    -- braces cannot survive into the rendered text. Same modifier, same
+    -- arithmetic and same reference as the list's; see
+    -- ListGeom.relativeBarFraction for why the curve is a square root.
+    local bar_rel = false
+    do
+        local stripped, n = expanded:gsub(BAR_TOKEN_PATTERN .. "{rel}",
+                                          "%%bar")
+        if n > 0 then bar_rel, expanded = true, stripped end
+        -- Any other modifier is not ours: drop the braces rather than render
+        -- them, matching what the list does with an unknown one.
+        expanded = expanded:gsub(BAR_TOKEN_PATTERN .. "{[%w_,]*}", "%%bar")
+    end
+    local bar_pos    = expanded:find(BAR_TOKEN_PATTERN)
+    local spacer_pos = expanded:find(SPACER_TOKEN_PATTERN)
+    local first_pos, first_pattern, kind
+    -- A bar wins wherever it sits, not on position: a spacer that came first
+    -- used to swallow the slack and strip the bar out of the trailing segment,
+    -- so "%authors %spacer %bar" silently lost its bar. Giving the slack to the
+    -- bar still separates the two halves; the reverse discards content. Fixed
+    -- in the list first, and the hero had the identical bug.
+    if bar_pos then
+        first_pos, first_pattern, kind = bar_pos, BAR_TOKEN_PATTERN, "bar"
+    elseif spacer_pos then
+        first_pos, first_pattern, kind = spacer_pos, SPACER_TOKEN_PATTERN, "spacer"
+    end
+    if not first_pattern then
+        -- single_line (the status strip): no elastic token, but the line must
+        -- stay one line -- truncate instead of wrapping (issue #170). The
+        -- truncated TextWidget is sized to its own (clamped) text width, so it
+        -- ignores region.alignment on its own; wrap it in the matching alignment
+        -- container sized to the full width so left/center/right work again
+        -- (issue #182 regression). The ellipsis sits on the end the alignment
+        -- does NOT anchor to: right-aligned keeps its right (ellipsis at start),
+        -- otherwise keep the left (ellipsis at end).
+        if single_line then
+            local display   = region.uppercase and TextSegments.upper(expanded) or expanded
+            local alignment = region.alignment or "left"
+            local seg = _buildSegmentedInline(display, regionFace(region),
+                region.bold or false, width, alignment == "right")
+            local dimen = Geom:new{ w = width, h = seg:getSize().h }
+            if alignment == "center" then
+                return CenterContainer:new{ dimen = dimen, seg }
+            elseif alignment == "right" then
+                return RightContainer:new{ dimen = dimen, seg }
+            end
+            return LeftContainer:new{ dimen = dimen, seg }
+        end
+        return buildText(expanded, region, width, max_height)
+    end
+
+    -- Split on the FIRST occurrence of the winning token. Defensively
+    -- strip any further occurrences of either elastic pattern from the
+    -- trailing segment so a hand-edited template containing more than one
+    -- doesn't render extras as literal text.
+    local before, after = expanded:match("^(.-)" .. first_pattern .. "(.*)$")
+    before = before or expanded
+    -- BOTH sides, not just the trailing one. Now that a bar wins wherever it
+    -- sits, a %spacer can be in FRONT of it -- and "%authors%spacer%bar" then
+    -- rendered the literal word "%spacer" between the author and the bar.
+    before = before:gsub(BAR_TOKEN_PATTERN, ""):gsub(SPACER_TOKEN_PATTERN, "")
+    after  = (after or ""):gsub(BAR_TOKEN_PATTERN, ""):gsub(SPACER_TOKEN_PATTERN, "")
+    -- Trim LINE-EDGE whitespace only -- leading of `before` and trailing
+    -- of `after`. Preserve whatever the user typed at the TOKEN BOUNDARY
+    -- (trailing of before, leading of after) so a template like
+    -- "%book_pct  %bar  %book_time_left" honours the double space as
+    -- visual breathing room. TextWidget renders the spaces as part of
+    -- its text, so their pixels contribute to the widget's width and
+    -- naturally form the gap to the elastic widget.
+    before = before:gsub("^%s+", "")
+    after  = after:gsub("%s+$", "")
+
+    local face = regionFace(region)
+
+    -- Build a text side, optionally clamped to max_w (truncates, one line).
+    local function mkseg(text, max_w, trunc_left)
+        local display = region.uppercase and TextSegments.upper(text) or text
+        return _buildSegmentedInline(display, face, region.bold or false, max_w, trunc_left)
+    end
+    local b_widget = before ~= "" and mkseg(before) or nil
+    local a_widget = after  ~= "" and mkseg(after)  or nil
+    local b_w = b_widget and b_widget:getSize().w or 0
+    local a_w = a_widget and a_widget:getSize().w or 0
+
+    -- Boundary gap: padding.small only kicks in for %bar (the bar has a
+    -- visible body that benefits from breathing room from adjacent text)
+    -- and only when the user has NOT typed any whitespace at that
+    -- boundary. With a typed space, the rendered TextWidget already
+    -- contains those pixels and adding more would compound the gap. For
+    -- %spacer the elastic widget IS the gap -- adding padding around it
+    -- would just shift the right text inward by a few pixels.
+    local apply_gap  = (kind == "bar")
+    local before_gap = (apply_gap and b_widget and not before:match("%s$")) and Space.padding.small or 0
+    local after_gap  = (apply_gap and a_widget and not after:match("^%s"))  and Space.padding.small or 0
+
+    -- #170: a %spacer line must stay on ONE line within `width`. When the two
+    -- sides together overflow, the centred HorizontalGroup renders at its
+    -- natural (over-)width and spills LEFT over the cover. Truncate to fit,
+    -- the RIGHT side first (keep the left text whole); only if the left alone
+    -- still doesn't fit is the left truncated too (and the right dropped).
+    if kind == "spacer" and (b_w + a_w) > width then
+        -- Reserve a little separation so a truncated line reads
+        -- "4:27 PM   …right", not "4:27 PM…right" -- the leftover becomes the
+        -- elastic span (gap) between the two sides.
+        local trunc_gap = Space.padding.large
+        if a_widget and (b_w + trunc_gap) < width then
+            -- truncate_left: the after-spacer side is right-aligned, so keep its
+            -- right-anchored tail and put the ellipsis by the spacer (issue #170).
+            a_widget = mkseg(after, math.max(0, width - b_w - trunc_gap), true)
+            a_w = a_widget:getSize().w
+        else
+            a_widget, a_w = nil, 0
+            if b_widget then b_widget = mkseg(before, width); b_w = b_widget:getSize().w end
+        end
+    end
+
+    local used_w    = b_w + a_w
+    local elastic_w = math.max(0, width - used_w - before_gap - after_gap)
+
+    if kind == "bar" and elastic_w < 1 then
+        -- No room for the bar. Render text only, joined.
+        local joined = before
+        if after ~= "" then joined = joined ~= "" and (joined .. " " .. after) or after end
+        return buildText(joined ~= "" and joined or "", region, width, max_height)
+    end
+
+    local elastic_widget
+    if kind == "bar" then
+        -- Bar height: percentage of the face's nominal point size. The
+        -- earlier probe-via-getSize().h approach measured the FULL line
+        -- height (height + leading + descender), so 100% rendered ~2x
+        -- taller than the visible glyphs -- user reported 50% looked
+        -- right, which is roughly the cap height. Using face.size
+        -- directly gives the cap-height-ish baseline the user expects,
+        -- matching how bookends sizes its own bars. region.bar_height
+        -- (default 100 = match text) scales from there.
+        local face_size = face.size or region.font_size or 14
+        local bar_pct   = region.bar_height or 100
+        local bar_h     = math.max(2, math.floor(face_size * bar_pct / 100 + 0.5))
+        local pct       = book and book.book_pct or 0
+        local style     = region.bar_style or "bordered"
+        -- Resolve user-chosen Progress bar / Progress bar track colors for
+        -- the hero strip:
+        --
+        -- * Pacman has a fixed identity baked into the bar painter
+        --   (lib/bookshelf_bar_paint: yellow body, peach pellets) and
+        --   ignores per-bar color overrides. Skip the color plumbing
+        --   entirely for this style so the user's bar-color picks don't
+        --   bleed in.
+        --
+        -- * For every other style, only pass the color fields when the
+        --   user has actually picked something. Each painter style has
+        --   its own internal defaults; passing bookshelf's default fill /
+        --   track values (dark grey + white) would wash those out for
+        --   users who never opened the colors menu.
+        local colors
+        if style ~= "pacman" then
+            colors = require("lib/bookshelf_cover_progress").pickedBarColors()
+        end
+        -- {rel}: shorten the bar in proportion to the book's length, and hand
+        -- the pixels it gives up to a plain gap AFTER it, so every bar starts
+        -- at the same x and their lengths are what the eye compares.
+        local bar_w, slack = elastic_w, 0
+        if bar_rel then
+            local ListGeom = require("lib/bookshelf_list_geom")
+            bar_w = math.max(2, math.floor(
+                elastic_w * ListGeom.relativeBarFraction(book and book.page_count)))
+            slack = elastic_w - bar_w
+        end
+        -- A bar in picked colours on a colour screen keeps them over a
+        -- wallpaper too (see the mask below): the track is left see-through
+        -- unless one was picked, and the border takes the ink, which is what
+        -- the mask used to make of both. false = transparent to both painters.
+        local keeps_colour = colors ~= nil and Screen:isColorEnabled()
+        if keeps_colour and _over_ground then
+            if type(colors.bg) == "nil" then colors.bg = false end
+            if type(colors.border) == "nil" then colors.border = _ink() end
+        end
+        elastic_widget = HeroBar:new{
+            width      = bar_w,
+            height     = bar_h,
+            percentage = pct,
+            style      = style,
+            colors     = colors,
+        }
+        -- The bar is the one thing in the column that still goes through the
+        -- stencil. Its default track is a white fill, and over a wallpaper
+        -- there is no one colour to paint a track in; the stencil makes the
+        -- track nothing and the fill and border densities of the ink, which
+        -- is the look the whole column had when it was masked. It is a strip
+        -- a few thousand pixels big, so the second render costs nothing
+        -- worth measuring, unlike the text blocks it used to be wrapped with.
+        --
+        -- Except a bar in picked colours on a colour screen: a mask has ONE
+        -- colour, so it turned a red bar the grey of red (reported). Its
+        -- see-through track and ink border are set up above instead.
+        if _over_ground and not keeps_colour then
+            local ok, Wallpaper = pcall(require, "lib/bookshelf_wallpaper")
+            if ok then elastic_widget = Wallpaper.mask(true, elastic_widget, _ink()) end
+        end
+        if slack > 0 then
+            local hg_bar = HorizontalGroup:new{ align = "center" }
+            hg_bar[1] = elastic_widget
+            hg_bar[2] = HorizontalSpan:new{ width = slack }
+            elastic_widget = hg_bar
+        end
+    else  -- "spacer"
+        elastic_widget = HorizontalSpan:new{ width = elastic_w }
+    end
+
+    local hg = HorizontalGroup:new{ align = "center" }
+    if b_widget then
+        hg[#hg + 1] = b_widget
+        if before_gap > 0 then
+            hg[#hg + 1] = HorizontalSpan:new{ width = before_gap }
+        end
+    end
+    hg[#hg + 1] = elastic_widget
+    if a_widget then
+        if after_gap > 0 then
+            hg[#hg + 1] = HorizontalSpan:new{ width = after_gap }
+        end
+        hg[#hg + 1] = a_widget
+    end
+    return hg
+end
+
+-- _buildRightColumn(book, regions, state, dimen) — builds the OverlapGroup
+-- that lives to the right of the cover. Both _renderFull and the live
+-- preview path call this so renders stay structurally identical.
+-- _buildRightColumn(...) -> the column widget.
+function HeroCard:_buildRightColumn(book, regions, state, dimen)
+    -- Every text block built below picks its widget through textBoxClass().
+    _over_ground = self.has_wallpaper and true or false
+    local right_w = dimen.w
+    local cover_h = dimen.h
+
+    local right_top    = VerticalGroup:new{ align = "left" }
+    local right_bottom = VerticalGroup:new{ align = "left" }
+
+    -- Status (with hairline + small gap below if non-empty). Stash the
+    -- three widgets on self so getStatusStripDimen can compute the
+    -- combined screen rect after they've been painted once — used to
+    -- scope the e-ink refresh footprint on minute-tick / frontlight /
+    -- charging / wifi events to just this strip.
+    self._status_strip_widgets = nil
+    local job_row = HeroCard.buildJobRow(regions.status, right_w)
+    if job_row then
+        local hairline_widget = LineWidget:new{
+            dimen      = Geom:new{ w = right_w, h = Size.line.medium },
+            background = Blitbuffer.gray(0.4),
+        }
+        local gap_widget = VerticalSpan:new{ width = Space.padding.default }
+        right_top[#right_top + 1] = job_row
+        right_top[#right_top + 1] = hairline_widget
+        right_top[#right_top + 1] = gap_widget
+        self._status_strip_widgets = { job_row, hairline_widget, gap_widget }
+    elseif not regions.status.disabled then
+        local status_text = Tokens.expand(regions.status.template, book, state)
+        status_text = stripStyleTags(status_text)
+        if not Tokens.isEmpty(status_text) then
+            local status_widget = buildLine(status_text, regions.status, right_w, book, nil, true)
+            local hairline_widget = LineWidget:new{
+                dimen      = Geom:new{ w = right_w, h = Size.line.medium },
+                background = Blitbuffer.gray(0.4),
+            }
+            local gap_widget = VerticalSpan:new{ width = Space.padding.default }
+            right_top[#right_top + 1] = status_widget
+            right_top[#right_top + 1] = hairline_widget
+            right_top[#right_top + 1] = gap_widget
+            self._status_strip_widgets = { status_widget, hairline_widget, gap_widget }
+        end
+    end
+
+    -- Rating: a 5-star row, tappable to set / clear the book's rating.
+    -- Uses Unicode star glyphs (U+2605 filled / U+2606 outlined) rendered
+    -- as TextWidgets rather than mdlight IconWidgets. The SVG icons
+    -- collapse into a near-solid blob on Kindle e-ink at hero-region
+    -- font sizes, with filled stars rendering indistinguishably from
+    -- the white background. Font glyphs hint and render reliably at the
+    -- same small sizes the rest of the hero text uses.
+    -- Sits ABOVE title/author so the stars anchor to a fixed y position
+    -- regardless of how long the title is or whether the author line is
+    -- present -- predictable target for tap-to-rate.
+    -- The interactive local rating (tappable stars) is governed by the
+    -- Rating region's `disabled` flag. Hardcover community stars are
+    -- display-only and INDEPENDENT of that toggle (issue #264 regression:
+    -- pre-v3.8.8 they showed regardless; v3.8.8 wrongly folded both behind the
+    -- same gate). So enter the block for either purpose, and only fall back to
+    -- the tappable rating when the region is actually enabled.
+    -- Remote (OPDS catalog) books get no rating row at all: there is never a
+    -- community rating for them, and the tappable stars would set a rating the
+    -- user can't keep -- they don't own the book until they download it. Skip
+    -- the whole block so the freed height goes to the title / description.
+    if regions.rating and book and not book.is_remote then
+        local hardcover_mode = BookshelfSettings.isTrue("hardcover_hero_rating")
+        -- The Hardcover rating is display-only; showing it replaces the user's
+        -- own tappable stars. If the Hardcover plugin isn't live (uninstalled or
+        -- disabled), fall back to the interactive local rating for every book --
+        -- regardless of any still-cached Hardcover ratings -- so the user never
+        -- loses the ability to rate. The setting is left saved, so it resumes if
+        -- the plugin is reinstalled.
+        if hardcover_mode then
+            local ok_hc, HC = pcall(require, "lib/bookshelf_hardcover")
+            if not (ok_hc and HC and HC.isAvailable and HC.isAvailable()) then
+                hardcover_mode = false
+            end
+        end
+        local rating
+        if hardcover_mode then
+            rating = tonumber(book.hardcover_rating)
+        end
+        -- Plugin is live but this particular book has no cached Hardcover rating:
+        -- there's no community rating to display for it.
+        if hardcover_mode and rating == nil then
+            hardcover_mode = false
+        end
+        -- Tappable local rating only when the Rating region is enabled. When
+        -- it's disabled the user has opted out of hero stars entirely, so we
+        -- must NOT fall back to it -- only Hardcover community stars (above)
+        -- may still show.
+        local show_interactive = (not regions.rating.disabled) and self.on_rating_change ~= nil
+        if not hardcover_mode and show_interactive then
+            rating = tonumber(book.rating) or 0
+        end
+        if hardcover_mode or show_interactive then
+            local star_size = regions.rating.font_size or 16
+            local face      = fontFace(nil, hardcover_mode and star_size
+                or math.floor(star_size * 1.25 + 0.5))
+            local gap       = Space.px(4)
+            local row       = HorizontalGroup:new{ align = "center" }
+            local hero_self = self
+            for i = 1, 5 do
+                local glyph
+                if hardcover_mode then
+                    -- Hardcover ratings are fractional: full / half / empty
+                    -- using the Nerd Font glyph set.
+                    local whole = math.floor(rating)
+                    if i <= whole then
+                        glyph = HC_STAR
+                    elseif i == whole + 1 and rating - whole >= 0.5 then
+                        glyph = HC_HALF_STAR
+                    else
+                        glyph = HC_EMPTY_STAR
+                    end
+                else
+                    -- The user's own rating stays native integer with plain
+                    -- Unicode stars, kept separate from Hardcover's half-stars.
+                    glyph = (i <= rating) and "\xE2\x98\x85" or "\xE2\x98\x86"
+                end
+                local tw = TextWidget:new{
+                    text = glyph,
+                    face = face,
+                    bold = true,
+                    fgcolor = _ink(),
+                }
+                local sz = tw:getSize()
+                if hardcover_mode or not self.on_rating_change then
+                    row[#row + 1] = tw
+                else
+                    local Star = InputContainer:extend{}
+                    function Star:onTap()
+                        -- Tapping the current rating clears it (matches KOReader's
+                        -- BookStatusWidget toggle behaviour).
+                        local new_rating
+                        if i == rating then
+                            new_rating = nil
+                        else
+                            new_rating = i
+                        end
+                        hero_self.on_rating_change(hero_self.book, new_rating)
+                        return true
+                    end
+                    local star = Star:new{
+                        dimen = Geom:new{ w = sz.w, h = sz.h },
+                        tw,
+                    }
+                    star.ges_events = {
+                        Tap = { GestureRange:new{ ges = "tap", range = star.dimen } },
+                    }
+                    row[#row + 1] = star
+                end
+                if i < 5 then
+                    row[#row + 1] = HorizontalSpan:new{ width = gap }
+                end
+            end
+            if hardcover_mode then
+                local reviews_count = tonumber(book.hardcover_reviews_count)
+                if reviews_count and reviews_count > 0 then
+                    row[#row + 1] = HorizontalSpan:new{ width = gap * 2 }
+                    row[#row + 1] = TextWidget:new{
+                        text = string.format("%d reviews", reviews_count),
+                        face = fontFace(nil, math.max(10, math.floor(star_size * 0.65 + 0.5))),
+                        bold = true,
+                        fgcolor = _ink(),
+                    }
+                end
+                if self.on_hardcover_reviews_tap then
+                    local RatingTap = InputContainer:extend{}
+                    local hero = self
+                    function RatingTap:onTap()
+                        hero.on_hardcover_reviews_tap(hero.book)
+                        return true
+                    end
+                    local row_size = row:getSize()
+                    local tappable = RatingTap:new{
+                        dimen = Geom:new{
+                            w = right_w,
+                            h = row_size and row_size.h or star_size,
+                        },
+                        row,
+                    }
+                    tappable.ges_events = {
+                        Tap = { GestureRange:new{ ges = "tap", range = tappable.dimen } },
+                    }
+                    right_top[#right_top + 1] = tappable
+                else
+                    right_top[#right_top + 1] = row
+                end
+            else
+                right_top[#right_top + 1] = row
+            end
+        end
+    end
+
+    -- Title (rendered after rating so the stars sit at a fixed y above it).
+    -- Pre-balance the title text when it would wrap to 2-3 lines, so the
+    -- last line isn't a one- or two-word widow. Single-line titles and
+    -- titles long enough to span 4+ lines fall through to the natural
+    -- greedy wrap.
+    if not regions.title.disabled then
+        local title_text = Tokens.expand(regions.title.template, book, state)
+        title_text = stripStyleTags(title_text)
+        if not Tokens.isEmpty(title_text) then
+            local title_face = regionFace(regions.title)
+            -- Skip widow-balancing when a [font=...] tag is present: balanceLines
+            -- measures with the region face (not the tag's) and could split the
+            -- tag across lines, breaking buildText's whole-region [font] match.
+            -- The title just greedy-wraps in that case (issue #144).
+            if not title_text:find("%[font=") then
+                -- Balance the string that will actually RENDER: buildText
+                -- applies region.uppercase after this, and uppercased text
+                -- is wider - a balance measured in mixed case could re-wrap
+                -- once capitalised, defeating balanceLines' own render
+                -- verify (which only sees the text it was handed). upper()
+                -- is idempotent, so buildText re-applying it is harmless.
+                if regions.title.uppercase then
+                    title_text = TextSegments.upper(title_text)
+                end
+                title_text = balanceLines(title_text, title_face, right_w,
+                                          regions.title.bold or false)
+            end
+            -- Cap the title so the top block (status/rating already placed +
+            -- title + the author/metadata lines still to come) fits the hero.
+            -- A long title then truncates with an ellipsis instead of wrapping
+            -- unbounded and pushing author/metadata out of a short hero. Tall
+            -- heros leave a large cap so normal titles never truncate;
+            -- height_adjust keeps short titles tight. Always >= 1 title line.
+            local title_lh = (title_face.size or 16) * (1 + (regions.title.line_height or 0.3))
+            local top_used = 0  -- status + rating placed above the title so far
+            for i = 1, #right_top do
+                local g = right_top[i]:getSize()
+                top_used = top_used + (g and g.h or 0)
+            end
+            local function regionLineH(r)
+                if not r or r.disabled then return 0 end
+                local f = regionFace(r)
+                return (f.size or 14) * 1.35
+            end
+            local reserve = regionLineH(regions.author)
+                + regionLineH(regions.metadata) + Space.padding.default * 2
+            local max_title_h = math.max(math.floor(title_lh),
+                cover_h - top_used - reserve)
+            right_top[#right_top + 1] =
+                buildLine(title_text, regions.title, right_w, book, max_title_h)
+        end
+    end
+
+    -- Author
+    if not regions.author.disabled then
+        local author_text = Tokens.expand(regions.author.template, book, state)
+        author_text = stripStyleTags(author_text)
+        if not Tokens.isEmpty(author_text) then
+            right_top[#right_top + 1] = buildLine(author_text, regions.author, right_w, book)
+        end
+    end
+
+    -- Metadata (between author and description). Default template is
+    -- conditional on series, so books without a series collapse this line
+    -- entirely via the Tokens.isEmpty check rather than leaving a blank
+    -- vertical gap.
+    if regions.metadata and not regions.metadata.disabled then
+        local metadata_text = Tokens.expand(regions.metadata.template, book, state)
+        metadata_text = stripStyleTags(metadata_text)
+        if not Tokens.isEmpty(metadata_text) then
+            right_top[#right_top + 1] = buildLine(metadata_text, regions.metadata, right_w, book)
+        end
+    end
+
+    -- Tags pill strip (above progress, after description). A fresh
+    -- widget per rebuild — replaceRightColumn frees the previous right
+    -- column, which would tear down the pill widget too if we reused
+    -- one. Gap below so the pills don't run straight into the progress
+    -- text.
+    local tags_n = 0  -- right_bottom elements the tags block contributes (for progressive-hide)
+    if regions.tags and not regions.tags.disabled and self.tags_builder then
+        -- What the cover column gave up (a narrowed true-aspect cover, a
+        -- small patch placeholder) widens the pill row with the text.
+        local ok, widget = pcall(self.tags_builder, book, self._cover_shrink or 0)
+        if ok and widget then
+            local sz = widget:getSize()
+            if sz and sz.h and sz.h > 0 then
+                -- BottomContainer (the parent of right_bottom) centers
+                -- its content horizontally. Wrapping the pill widget in a
+                -- full-column-width container forces the right column's
+                -- effective width to match the column, so the
+                -- BottomContainer's own centering offset is zero and the
+                -- pills land where the user's alignment setting (#99) puts
+                -- them. Default "left" preserves the prior flush-left look.
+                local tags_align = (regions.tags and regions.tags.alignment) or "left"
+                local AlignContainer = (tags_align == "center" and CenterContainer)
+                    or (tags_align == "right" and RightContainer)
+                    or LeftContainer
+                right_bottom[#right_bottom + 1] = AlignContainer:new{
+                    dimen = Geom:new{ w = right_w, h = sz.h },
+                    widget,
+                }
+                -- A little extra breathing room than the usual default gap so
+                -- the pills don't crowd the progress line below them.
+                right_bottom[#right_bottom + 1] = VerticalSpan:new{
+                    width = Space.padding.default + Space.px(4),
+                }
+                tags_n = 2  -- the AlignContainer + the gap span above
+            end
+        end
+    end
+
+    -- Progress (bottom-anchored). If the book has never been opened
+    -- (book.book_pct nil — note that 0 is *truthy* in Lua so a
+    -- briefly-opened-but-unread book at 0% still keeps its %bar) the
+    -- bar would render at 0% fill, which reads as broken rather than
+    -- meaningful. Strip both elastic tokens (%bar AND %spacer) from the
+    -- expanded text in that case so the region either collapses
+    -- entirely (default template, leaves only whitespace) or reduces to
+    -- whatever surrounding text the user typed. Without the %spacer
+    -- strip, a template like "Reading%spacer%book_pct" on a never-
+    -- opened book renders as a floating "Reading" word with dead space
+    -- to its right instead of collapsing.
+    if not regions.progress.disabled then
+        local progress_text = Tokens.expand(regions.progress.template, book, state)
+        progress_text = stripStyleTags(progress_text)
+        if not (book and book.book_pct) then
+            -- THE MODIFIER COMES OFF WITH THE TOKEN. This stripped a bare
+            -- "%bar" and left "{rel}" standing as literal text in the hero --
+            -- reported against an OPDS preview, which is the reliable way to
+            -- reach it: a remote book has no reading position, so book_pct is
+            -- nil and this branch runs on a template the reader wrote for
+            -- local books.
+            --
+            -- Two gsubs and the braces first, the same order and the same
+            -- pattern buildText uses when it consumes the modifier properly
+            -- (see bar_rel above). One combined pattern cannot do it: the
+            -- braces are optional, and `{[%w_,]*}` matched against a bare
+            -- %bar leaves the token behind.
+            progress_text = progress_text
+                :gsub(BAR_TOKEN_PATTERN .. "{[%w_,]*}", "")
+                :gsub(BAR_TOKEN_PATTERN, "")
+                :gsub("%%spacer", "")
+        end
+        if not Tokens.isEmpty(progress_text) then
+            right_bottom[#right_bottom + 1] = buildLine(progress_text, regions.progress, right_w, book)
+        end
+    end
+
+    -- Progressive hide: when the hero is too short to fit the top block
+    -- (status/rating/title/author/metadata) AND the bottom block, trim the
+    -- bottom block — tags first (least essential), then the progress line —
+    -- until they fit cover_h. This is the same idea the description already
+    -- uses (it self-limits to leftover slack); extending it to tags/progress
+    -- keeps title/author readable when a small hero (e.g. after a pinch-zoom
+    -- to many columns + rows) would otherwise cram the regions on top of each
+    -- other. Title/author/metadata are kept; the description, added next,
+    -- budgets itself against whatever bottom block survives.
+    do
+        local breath = Space.padding.default
+        -- Sum child heights directly rather than calling the GROUP's getSize():
+        -- the group caches per-child paint offsets on getSize(), and the
+        -- description is appended to right_top AFTER this, so a premature group
+        -- getSize() here would leave the offset table one short at paint time
+        -- (nil-index crash). Per-child getSize() is safe — those children don't
+        -- change.
+        local function sumChildren(group)
+            local h = 0
+            for i = 1, #group do
+                local g = group[i].getSize and group[i]:getSize()
+                h = h + (g and g.h or 0)
+            end
+            return h
+        end
+        local function overflows()
+            return (sumChildren(right_top) + sumChildren(right_bottom) + breath) > cover_h
+        end
+        if overflows() and tags_n > 0 then
+            for _i = 1, tags_n do table.remove(right_bottom, 1) end
+            if right_bottom.resetLayout then right_bottom:resetLayout() end
+            tags_n = 0
+        end
+        if overflows() then
+            while #right_bottom > 0 do table.remove(right_bottom) end
+            if right_bottom.resetLayout then right_bottom:resetLayout() end
+        end
+    end
+
+    -- Description (fills the slack between right_top and right_bottom)
+    local desc_text = ""
+    if not regions.description.disabled then
+        desc_text = Tokens.expand(regions.description.template, book, state)
+        desc_text = stripStyleTags(desc_text)
+        -- Normalize line endings, then clamp any run of newlines mixed
+        -- with whitespace-only lines down to a clean \n\n paragraph break.
+        -- EPUB descriptions sometimes emit \n \n or \n\t\n (a "blank" line
+        -- that's actually whitespace), which our paragraph splitter would
+        -- otherwise miss — and the whitespace-only line then renders at
+        -- a full 1.3× line height inside a single TextBoxWidget,
+        -- defeating the per-paragraph spacing below. \n stays as a soft
+        -- line break; \n\n marks a paragraph (its own TextBoxWidget).
+        desc_text = desc_text:gsub("\r\n", "\n")
+        desc_text = desc_text:gsub("\n%s*\n", "\n\n")
+        desc_text = desc_text:match("^%s*(.-)%s*$") or desc_text
+    end
+    if not Tokens.isEmpty(desc_text) then
+        right_top[#right_top + 1] = VerticalSpan:new{ width = Space.padding.default }
+        local top_used = 0
+        for i = 1, #right_top do
+            local g = right_top[i]:getSize()
+            top_used = top_used + (g and g.h or 0)
+        end
+        local bottom_h = right_bottom:getSize().h
+        local breath   = Space.padding.default
+        local available = cover_h - top_used - bottom_h - breath
+        local desc_face  = regionFace(regions.description)
+        -- The gate is ONE LINE of the description's own face, not a fixed
+        -- 40dp (issue 349): on a 300dpi device 40dp is ~two lines, so a
+        -- two-line title squeezed the slack under the gate and the whole
+        -- description vanished - leaving visible blank space a one-line
+        -- ellipsised blurb would have filled. "Fills the remaining space"
+        -- should mean down to the last line that fits.
+        if available >= math.ceil(desc_face.size * 1.3) then
+            local desc_bold  = regions.description.bold or false
+            local desc_align = regions.description.alignment or "left"
+            -- ~40% of body font size — enough to mark a paragraph onset
+            -- without eating a full empty line (which would be 1.3× the
+            -- font size and cost too much of the limited slot).
+            local para_gap = math.floor(desc_face.size * 0.4)
+
+            -- Split on \n\n (paragraph breaks). \n inside a paragraph
+            -- stays as a soft line break inside that paragraph's TextBox.
+            local paragraphs = {}
+            for para in (desc_text .. "\n\n"):gmatch("(.-)\n\n") do
+                if para ~= "" then paragraphs[#paragraphs + 1] = para end
+            end
+
+            local desc_group = VerticalGroup:new{ align = "left" }
+            local total_h = 0
+            for i, ptext in ipairs(paragraphs) do
+                local gap = (i > 1) and para_gap or 0
+                if total_h + gap >= available then break end
+                local rem = available - total_h - gap
+                if rem < desc_face.size then break end
+                if gap > 0 then
+                    desc_group[#desc_group + 1] =
+                        VerticalSpan:new{ width = gap }
+                    total_h = total_h + gap
+                end
+                local pwid = textBoxClass():new{
+                    text                          = ptext,
+                    face                          = desc_face,
+                    bold                          = desc_bold,
+                    fgcolor                       = _ink(),
+                    width                         = right_w,
+                    height                        = rem,
+                    alignment                     = desc_align,
+                    height_overflow_show_ellipsis = true,
+                    -- height_adjust shrinks the widget to the natural
+                    -- text_height when the content is shorter than the
+                    -- height cap, so subsequent paragraphs aren't pushed
+                    -- below an empty reservation.
+                    height_adjust                 = true,
+                    -- 1.3× line height. line_height_px = (1+line_height)
+                    -- * face.size; pinned here so it can't drift if the
+                    -- TextBoxWidget default ever shifts.
+                    line_height                   = 0.3,
+                }
+                desc_group[#desc_group + 1] = pwid
+                total_h = total_h + pwid:getSize().h
+            end
+            if #desc_group > 0 then
+                -- Tappable wrapper: tapping the description opens the
+                -- full text in a scrollable viewer. Useful when the
+                -- hero's height budget truncated the blurb (ellipsis at
+                -- the end). The wrapper consumes the tap so the
+                -- parent's "tap hero -> open book" doesn't fire here.
+                if self.on_description_tap then
+                    local DescTap = InputContainer:extend{}
+                    local hero    = self
+                    function DescTap:onTap()
+                        hero.on_description_tap(hero.book)
+                        return true
+                    end
+                    local desc_size = desc_group:getSize()
+                    local tap_w     = right_w
+                    local tap_h     = desc_size and desc_size.h or 0
+                    if tap_h > 0 then
+                        local tappable = DescTap:new{
+                            dimen = Geom:new{ w = tap_w, h = tap_h },
+                            desc_group,
+                        }
+                        tappable.ges_events = {
+                            -- Key MUST be "Tap" so InputContainer:onGesture's
+                            -- eventname (= key) dispatches Event("Tap"), which
+                            -- routes to DescTap:onTap. With any other key the
+                            -- match emits an event no handler listens for, the
+                            -- tap isn't consumed, and HeroCard's outer dispatch
+                            -- can fire the cover SpineWidget's onTap as a side
+                            -- effect (opening the book instead of the viewer).
+                            Tap = {
+                                GestureRange:new{
+                                    ges = "tap",
+                                    range = tappable.dimen,
+                                },
+                            },
+                        }
+                        right_top[#right_top + 1] = tappable
+                    else
+                        right_top[#right_top + 1] = desc_group
+                    end
+                else
+                    right_top[#right_top + 1] = desc_group
+                end
+            end
+        end
+    end
+
+    local rd = Geom:new{ w = right_w, h = cover_h }
+    -- No background fill: lets parent (and any theme plugin's themed bg) show
+    -- through. The earlier paper-white wipe was intended to prevent ghosting
+    -- when a region's text re-wraps between renders, but ghosting hasn't been
+    -- observed in practice and the white wipe clashes with applied themes.
+    local column = FrameContainer:new{
+        bordersize = 0,
+        padding    = 0,
+        width      = rd.w,
+        height     = rd.h,
+        OverlapGroup:new{
+            dimen = rd,
+            TopContainer:new{    dimen = rd, right_top },
+            BottomContainer:new{ dimen = rd, right_bottom },
+        },
+    }
+    return column
+end
+
+function HeroCard:_renderFull()
+    local cover_h = self.cover_h or self.height
+
+    -- SpineWidget's BorderOverlay (drawn when is_selected) paints at
+    -- (-SHADOW_OFFSET, -SHADOW_OFFSET) relative to its own origin -- it
+    -- extends OUTSIDE the spine widget on the top and left edges,
+    -- relying on the parent context having that much outer breathing
+    -- room available. Shelf rows accommodate this naturally; the hero
+    -- cover sits flush against the hero card's top-left with nothing
+    -- outside, so the top and left edges of the selection border got
+    -- clipped (reporter on the test branch).
+    --
+    -- Reserve the SHADOW_OFFSET on ALL FOUR sides by wrapping the
+    -- SpineWidget in a FrameContainer that pushes the cover down-right
+    -- by SHADOW_OFFSET and shrinking it by TWICE that in each dimension.
+    -- The outer cover footprint stays unchanged either way (the hero layout
+    -- was sized for cover_w x cover_h).
+    --
+    -- It reserved top and left ONLY, which fixed the two edges that were
+    -- reported and left the other two clipped: shrinking by one offset while
+    -- pushing by one puts the spine's right and bottom edges exactly on the
+    -- wrapper's, so the ring's outward paint had nowhere to land. The border
+    -- ran round the top, left and part of the sides, and stopped at the bottom
+    -- edge. Costs the cover another SHADOW_OFFSET in each dimension, which is
+    -- the price of a ring that closes.
+    -- Space: a drop shadow should not grow with a DPI override. Mirrors
+    -- bookshelf_spine_widget's SHADOW_OFFSET.
+    local SHADOW_OFFSET = Space.px(4)
+
+    -- True-aspect: render the hero cover at the book's OWN aspect, TOP-anchored
+    -- within the fixed-height region, WITHOUT shrinking ordinary covers.
+    --   * A cover that fits the region at full width keeps full width; if it's
+    --     shorter than the region it top-anchors with headroom below (the right
+    --     column holds the region height, so the chip bar never moves).
+    --   * A genuinely tall (>1.5) cover would overflow the region at full width,
+    --     so it (and only it) is narrowed just enough to fit the height,
+    --     undistorted. Ordinary 2:3 covers stay full-size, matching the shelf.
+    -- Off = the historical full-height 2:3 box.
+    local sw_w = self.cover_w - 2 * SHADOW_OFFSET
+    local sw_h = cover_h - 2 * SHADOW_OFFSET
+    -- Register the hero region's height with the hero tier, so shelf tiles
+    -- know what height to stash pre-decoded copies at (first-preview warm).
+    -- The pre-true-aspect region height, deliberately: it's layout-stable,
+    -- while the true-aspect box varies per book.
+    pcall(function()
+        require("lib/bookshelf_hero_tier").target_h = sw_h
+    end)
+    if BookshelfSettings.isTrue("true_cover_aspect") then
+        local fit_h = SpineWidget.trueAspectBoxHeight(sw_w, self.book)
+        if fit_h <= sw_h then
+            sw_h = fit_h                                            -- fits: keep width, top-anchor
+        else
+            sw_w = SpineWidget.trueAspectBoxWidth(sw_h, self.book)  -- too tall: narrow to fit height
+        end
+    end
+    -- Cover footprint width (SpineWidget + the SHADOW_OFFSET reserved on BOTH
+    -- sides by its wrapper). When true-aspect narrows a tall cover this
+    -- shrinks, so recompute the right column from it rather than the full
+    -- reserved cover_w -- the text gains the freed width instead of a gap (and
+    -- right_w only ever grows, so the #87 max_width<=0 guard is never at risk).
+
+    local _perf_cover_t0 = _gettime()
+    local function buildCover()
+        return SpineWidget:new{
+            book        = self.book,
+            width       = sw_w,
+            height      = sw_h,
+            on_tap      = self.on_tap,
+            on_hold     = self.on_hold,
+            on_double_tap = self.on_double_tap,
+            is_selected      = self.is_selected,
+            is_bulk_selected = self.is_bulk_selected,
+            suppress_favorite_badge = true,
+            -- Tells a patch's placeholder it is in the top panel (ctx.panel).
+            panel_placeholder = true,
+            -- Cache the scaled hero cover in ScaledCoverCache (issue #103).
+            -- Previously skipped to avoid pinning one oversized entry, but the
+            -- cost of NOT caching is far worse: the hero is rebuilt on every
+            -- show / chip-switch / book-close, and each rebuild re-acquires the
+            -- source cover via a BIM getBookInfo read. On Kobo the bookinfo_cache
+            -- is non-WAL, so that SELECT blocks on any concurrent cover-extraction
+            -- writer (coverbrowser, our own kickoff, the stale-sweep) for up to
+            -- BIM's 5s busy_timeout -- producing the multi-second hero stalls in
+            -- the report. Caching lets repeat renders paint from the in-memory
+            -- scaled bb (paired with _buildHero's record memo, which skips the
+            -- read entirely). One hero-sized entry is bounded by the cache's byte
+            -- budget and evicted LRU like any other, so the displacement worry
+            -- is negligible against eliminating the per-cycle blocking read.
+        }
+    end
+    local cover = buildCover()
+    -- A patch's unframed placeholder (lib/bookshelf_placeholders.lua) smaller
+    -- than the slot: the slot shrinks to it, top-anchored like a true-aspect
+    -- cover, and the text column takes the width it leaves (PR 515: a small
+    -- symbols panel sat alone in a full cover column).
+    local ps, offer = cover._placeholder_size, cover._placeholder_offer
+    if cover._unframed_placeholder and ps and offer
+            and (ps.w < offer.w or ps.h < offer.h) then
+        sw_w = math.max(1, sw_w - math.max(0, offer.w - ps.w))
+        sw_h = math.max(1, sw_h - math.max(0, offer.h - ps.h))
+        pcall(function() cover:free() end)
+        cover = buildCover()
+    end
+    self._cover_shrink = math.max(0, (self.cover_w - 2 * SHADOW_OFFSET) - sw_w)
+    -- Kept for the spine shelf's opening feedback: a book opened from a
+    -- bare spine flexes the HERO cover (the legible copy of the artwork)
+    -- when the hero is showing it -- see _paintSpineOpeningEffect.
+    self._cover_spine = cover
+    local cover_widget = FrameContainer:new{
+        bordersize   = 0,
+        padding      = 0,
+        padding_top  = SHADOW_OFFSET,
+        padding_left = SHADOW_OFFSET,
+        cover,
+    }
+    local _perf_cover_ms = (_gettime() - _perf_cover_t0) * 1000
+
+    local text_padding = self.pad or Space.padding.fullscreen
+    -- #87 belt-and-braces: floor at 1 so a too-wide cover (from any caller)
+    -- can never hand the right-column TextWidgets a max_width <= 0, which
+    -- aborts makeLine natively. The real fix caps cover_w upstream in
+    -- bookshelf_widget._rebuild; this just guarantees the abort is impossible.
+    --
+    -- The cover frame below is sw_w plus ONE shadow offset (it pads left and
+    -- top; the shadow on the right sits in text_padding). Sizing the column
+    -- as if it were two offsets wide left it one offset short of the
+    -- content edge, where the chip bar, the expanded strip and the
+    -- full-screen status line all end (maintainer, 2026-10-04).
+    local right_w = math.max(1, self.width - (sw_w + SHADOW_OFFSET) - text_padding)
+
+    local regions = Regions.read()
+    local _perf_right_t0 = _gettime()
+    local right = self:_buildRightColumn(
+        self.book, regions, self.device_state,
+        Geom:new{ w = right_w, h = cover_h })
+    -- The hero dominates every in-session interaction (70-256ms on the fast
+    -- tap path against 12-46ms of shelf repaint), and the caller's `card=`
+    -- phase lumped these two together. They have completely different causes:
+    -- the cover is scaling (a Lua nearest-neighbour upscale when the cached
+    -- bitmap is smaller than the hero slot), the right column is text shaping.
+    logger.dbg(string.format(
+        "[bookshelf perf] HeroCard: cover=%.0fms right=%.0fms w=%d",
+        _perf_cover_ms, (_gettime() - _perf_right_t0) * 1000, right_w))
+
+    -- Stash the outer HorizontalGroup + right slot index so the live
+    -- preview path can swap [3] without rebuilding the cover.
+    local hg = HorizontalGroup:new{
+        align = "top",
+        cover_widget,
+        HorizontalSpan:new{ width = text_padding },
+        right,
+    }
+    self._right_holder    = hg
+    self._right_slot      = 3
+    self._right_dimen     = Geom:new{ w = right_w, h = cover_h }
+    return hg
+end
+
+-- getStatusStripDimen() — returns the combined screen rect of the status
+-- text + hairline + gap (the top strip of the right column), or nil if
+-- status is empty/disabled or the strip hasn't been painted yet. Used by
+-- the BookshelfWidget's status-tick + state-event refreshes to scope the
+-- e-ink panel update to the strip rather than the whole right column.
+function HeroCard:getStatusStripDimen()
+    -- Measured, not read from a paint: the strip's rows need not record a
+    -- dimen, and a column swapped in without a paint (a tick held under
+    -- another window, issue 549) has none. The strip is the column's first
+    -- rows, under a TopContainer at the column's origin.
+    local s, o = self._status_strip_widgets, self._right_origin
+    if not s or not s[1] or not o or not self._right_dimen then return nil end
+    local h = 0
+    for i = 1, 3 do
+        local wdg = s[i]
+        if wdg and wdg.getSize then
+            local ok, sz = pcall(wdg.getSize, wdg)
+            if ok and sz and sz.h then h = h + sz.h end
+        end
+    end
+    if h <= 0 then return nil end
+    return Geom:new{ x = o.x, y = o.y, w = self._right_dimen.w, h = h }
+end
+
+-- replaceRightColumn(regions, book, state, region_hint)
+--   Swaps the right OverlapGroup with a fresh build from the supplied
+--   regions table. Returns (ok, refresh_rect):
+--     ok  — true on success, false when the holder hasn't been built yet
+--           (empty-state hero).
+--     refresh_rect — Geom in screen coordinates of the area that actually
+--           needs panel refresh. Caller passes this to setDirty so the
+--           e-ink update is bounded:
+--             * region_hint == "status"  → just the status strip rect;
+--             * any other hint / nil      → the whole right column rect;
+--             * may itself be nil on the very first swap (before any
+--               paint has populated dimens) — caller falls back to a
+--               full-widget setDirty in that case.
+--   region_hint must be captured BEFORE the swap because afterwards
+--   self._status_strip_widgets points at the new (un-painted) widgets
+--   whose dimens aren't set yet.
+function HeroCard:replaceRightColumn(regions, book, state, region_hint)
+    if not self._right_holder or not self._right_dimen then return false end
+    -- The column's screen origin, from its last paint. A slot replaced in a
+    -- HorizontalGroup does not move, so it stands for the new column too,
+    -- which may not be painted before the next swap.
+    local painted = self._right_holder[self._right_slot]
+    if painted and painted.dimen and painted.dimen.x then
+        self._right_origin = { x = painted.dimen.x, y = painted.dimen.y }
+    end
+    local refresh_rect
+    if region_hint == "status" then
+        refresh_rect = self:getStatusStripDimen()
+    end
+    local fresh = self:_buildRightColumn(book or self.book, regions,
+        state or self.device_state, self._right_dimen)
+    local old = self._right_holder[self._right_slot]
+    self._right_holder[self._right_slot] = fresh
+    if self._right_holder.resetLayout then self._right_holder:resetLayout() end
+    -- Fallback when the status-strip rect wasn't applicable: refresh
+    -- the FULL right column. We take the column's remembered origin
+    -- (HorizontalGroup's layout doesn't shift on slot replacement, so
+    -- the new column paints there too) and the full right-column bound
+    -- (self._right_dimen) for w/h
+    -- to avoid tearing when the new column is taller than the old one
+    -- — e.g. font-size edits that grow widget heights would otherwise
+    -- leave the bottom strip un-refreshed.
+    if not refresh_rect and self._right_origin then
+        refresh_rect = Geom:new{
+            x = self._right_origin.x,
+            y = self._right_origin.y,
+            w = self._right_dimen.w,
+            h = self._right_dimen.h,
+        }
+    elseif not refresh_rect then
+        refresh_rect = old and old.dimen
+    end
+    if old and old.free then
+        local UIManager = require("ui/uimanager")
+        UIManager:nextTick(function() pcall(function() old:free() end) end)
+    end
+    return true, refresh_rect
+end
+
+function HeroCard:onTap(_, ges)
+    -- Open-book is wired only on the SpineWidget (cover) so the description,
+    -- star rating, and other interactive regions own their tap zones without
+    -- conflict. Taps elsewhere on the hero are absorbed (return true) — only
+    -- the top strip falls through so the FM touch-zone walk in
+    -- BookshelfWidget:handleEvent can reach KOReader's top-menu zone.
+    if ges and ges.pos and ges.pos.y < Screen:scaleBySize(60) then
+        return false
+    end
+    return true
+end
+function HeroCard:onHold() if self.on_hold then self.on_hold(self.book) end; return true end
+
+return HeroCard

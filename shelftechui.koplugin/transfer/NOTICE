@@ -1,0 +1,10 @@
+transfer/filebrowser is the File Browser web server (https://filebrowser.org,
+https://github.com/filebrowser/filebrowser), built for 32-bit ARM e-readers.
+File Browser is Copyright the File Browser Contributors and is licensed under
+the Apache License, Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0).
+The binary is unmodified; it is the one shipped in FilebrowserPlus 1.3.0.
+
+ShelfTechUI's Transfer (bos_transfer.lua) takes over from the FilebrowserPlus
+plugin by Neeraj Patel, which derives from KOReader's filebrowser.koplugin
+(GNU AGPL v3). bos_transfer.lua is under the AGPL v3 like the rest of
+ShelfTechUI.

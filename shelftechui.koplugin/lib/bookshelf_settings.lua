@@ -1,0 +1,4926 @@
+-- bookshelf_settings.lua
+-- Gear-menu settings modal for Bookshelf: hero-card line editor, font scale,
+-- progress-bar toggle, latest-walk depth, titlebar-meta toggle, About.
+--
+-- Public API: Settings:show()
+-- All persisted keys use the bookshelf_* prefix.
+
+local Menu         = require("ui/widget/menu")
+local Notification = require("ui/widget/notification")
+local SpinWidget   = require("ui/widget/spinwidget")
+local UIManager    = require("ui/uimanager")
+local T            = require("ffi/util").template
+local _            = require("lib/bookshelf_i18n").gettext
+local Focus        = require("lib/bookshelf_focus")
+
+local BookshelfSettings = require("lib/bookshelf_settings_store")
+local BFont        = require("lib/bookshelf_fonts")
+local Space        = require("lib/bookshelf_space")
+-- Up here, not beside ICON_RESET: the Theme menu's rows above that use it
+-- too, and a local declared below a function reads nil in it.
+local MenuIcons    = require("lib/bookshelf_menu_icons")
+
+-- ─── Settings singleton ───────────────────────────────────────────────────────
+
+local Settings = {}
+
+-- Re-setup the in-reader launcher buttons after a setting that affects them
+-- (start-menu position, micro placement, the launcher toggle) so they update
+-- live instead of only on the next book open. The bookshelf plugin instance is
+-- a registered module on ReaderUI; no-op outside the reader.
+local function refreshReaderLauncher()
+    local rd = package.loaded["apps/reader/readerui"]
+    rd = rd and rd.instance
+    if not rd then return end
+    for _i, m in ipairs(rd) do
+        if type(m) == "table" and type(m._setupReaderButtons) == "function" then
+            pcall(function() m:_setupReaderButtons() end)
+            -- Re-registering rebuilds the view module + touch zones but nothing
+            -- dirties the reader, so the glyph would only move on the next page
+            -- turn. Dirty it here so the launcher settings give live feedback
+            -- while their nudge dialog is open (#279). setDirty needs a real
+            -- widget -- a nil first arg only queues a flush.
+            pcall(function() UIManager:setDirty(rd, "ui") end)
+            return
+        end
+    end
+end
+
+-- Re-setup the in-reader status line after its switch is flipped, so it
+-- appears or disappears immediately rather than on the next book open. Same
+-- module lookup as refreshReaderLauncher above; no-op outside the reader.
+local function refreshReaderStatusLine()
+    local rd = package.loaded["apps/reader/readerui"]
+    rd = rd and rd.instance
+    if not rd then return end
+    for _i, m in ipairs(rd) do
+        if type(m) == "table" and type(m._setupReaderStatusLine) == "function" then
+            pcall(function() m:_setupReaderStatusLine() end)
+            -- Registering a view module does not dirty the reader, so without
+            -- this the strip would only appear on the next page turn.
+            pcall(function() UIManager:setDirty(rd, "ui") end)
+            return
+        end
+    end
+end
+
+-- ─── Toggle helpers ───────────────────────────────────────────────────────────
+
+local function isTrue(key)
+    return BookshelfSettings.isTrue(key)
+end
+
+local function checkmark(key)
+    -- Return nil (not "") for the off state so Menu omits the mandatory
+    -- TextWidget rather than allocating an empty one (which would take
+    -- space and misalign rows).
+    if isTrue(key) then return "\xe2\x9c\x93" end
+    return nil
+end
+
+-- ─── Sub-actions ──────────────────────────────────────────────────────────────
+
+-- Token picker: opens a popout Menu listing the bookshelf-scoped token
+-- catalogue (defined in tokens.lua). Each row inserts its token at the
+-- cursor of the open `dialog` and dismisses the picker; the parent dialog
+-- stays open so the user can continue editing.
+-- Public entry point. Uses OUR OWN LibraryModal, not bookends's.
+--
+-- This used to `require("menu.library_modal")` -- bookends's copy -- because
+-- back then bookshelf had no shell of its own. It does now
+-- (lib/bookshelf_library_modal.lua, ported from that same file), and every
+-- other picker in the plugin already uses it: the icons library, the folder
+-- picker, the module picker, the chip editor.
+--
+-- Leaving this one call site pointed at bookends meant the token picker got a
+-- DIFFERENT shell depending on whether bookends happened to be installed --
+-- and the two have since diverged. Our port gained swipe-to-page and grid
+-- dpad navigation; bookends's has neither. So swipe paging worked in the icon
+-- picker and silently did nothing in the token picker, on exactly the machines
+-- that have both plugins. Same shell for everyone removes the whole class.
+--
+-- The Menu fallback below is now only reachable if the bundled module fails to
+-- load at all, i.e. a broken install; it is kept as a safety net rather than
+-- as a supported path.
+--
+-- `filter` (optional): function(catalogue_entry) -> false to leave a token
+-- out, for a surface that can only ignore some of them (the cover label has
+-- no use for style tags or %bar). Both pickers honour it, and a category
+-- chip left with nothing to show goes with it.
+function Settings:_pickToken(dialog, filter)
+    local ok, LibraryModal = pcall(require, "lib/bookshelf_library_modal")
+    if ok and LibraryModal then
+        return self:_pickTokenViaLibraryModal(LibraryModal, dialog, filter)
+    end
+    return self:_pickTokenFallback(dialog, filter)
+end
+
+-- The catalogue a picker shows: all of it, or what `filter` keeps.
+local function _pickerCatalogue(filter)
+    local Tokens = require("lib/bookshelf_tokens")
+    if type(filter) ~= "function" then return Tokens.CATALOGUE end
+    local out = {}
+    for _i, t in ipairs(Tokens.CATALOGUE) do
+        if filter(t) ~= false then out[#out + 1] = t end
+    end
+    return out
+end
+
+-- Renders the catalogue into the shared LibraryModal shell (chip strip,
+-- search, paginated list, footer actions), feeding it OUR bookshelf-scoped
+-- catalogue and rows with a live preview from our own Tokens.expand.
+-- Bookends's TokensLibrary can't be reused directly even when that plugin IS
+-- installed: its row renderer calls bookends's Tokens engine (different
+-- signature), and its catalogue includes Reader-context tokens we
+-- deliberately exclude. Takes the shell as an argument so the fallback path
+-- and the tests can hand it a different one.
+function Settings:_pickTokenViaLibraryModal(LibraryModal, dialog, filter)
+    local Tokens          = require("lib/bookshelf_tokens")
+    local Font            = require("ui/font")
+    local TextWidget      = require("lib/bookshelf_colour_text")
+    local VerticalGroup   = require("ui/widget/verticalgroup")
+    local VerticalSpan    = require("ui/widget/verticalspan")
+    local LeftContainer   = require("ui/widget/container/leftcontainer")
+    local InputContainer  = require("ui/widget/container/inputcontainer")
+    local FrameContainer  = require("ui/widget/container/framecontainer")
+    local GestureRange    = require("ui/gesturerange")
+    local Geom            = require("ui/geometry")
+    local Size            = require("ui/size")
+    local Blitbuffer      = require("ffi/blitbuffer")
+    local Screen          = require("device").screen
+
+    local CHIPS = {
+        { key = "all",      label = _("All") },
+        { key = "Book",     label = _("Book") },
+        { key = "Authors",  label = _("Authors") },
+        { key = "Progress", label = _("Progress") },
+        { key = "Time",     label = _("Time") },
+        { key = "Device",   label = _("Device") },
+        { key = "Logic",    label = _("Logic") },
+        { key = "Style",    label = _("Style") },
+    }
+    local catalogue = _pickerCatalogue(filter)
+    -- Tokens a patch or plugin registered sit under its id (Tokens.register).
+    do
+        local known = {}
+        for _i, c in ipairs(CHIPS) do known[c.key] = true end
+        for _i, t in ipairs(catalogue) do
+            if t.owner and not known[t.category] then
+                known[t.category] = true
+                CHIPS[#CHIPS + 1] = { key = t.category, label = t.category }
+            end
+        end
+    end
+    if catalogue ~= Tokens.CATALOGUE then
+        local present = {}
+        for _i, t in ipairs(catalogue) do present[t.category] = true end
+        local kept = {}
+        for _i, c in ipairs(CHIPS) do
+            if c.key == "all" or present[c.key] then kept[#kept + 1] = c end
+        end
+        CHIPS = kept
+    end
+    local active_chip = "all"
+    local search_query
+
+    local function items()
+        local out = {}
+        for _i, t in ipairs(catalogue) do
+            if active_chip == "all" or t.category == active_chip then
+                if not search_query or #search_query < 2 then
+                    out[#out + 1] = t
+                else
+                    local hay = ((t.description or "") .. " " .. (t.token or "")):lower()
+                    local match = true
+                    for term in search_query:lower():gmatch("%S+") do
+                        if not hay:find(term, 1, true) then match = false; break end
+                    end
+                    if match then out[#out + 1] = t end
+                end
+            end
+        end
+        return out
+    end
+
+    -- Live-preview context: current hero book + device state from the
+    -- BookshelfWidget instance the long-press handler stashed on us.
+    -- enrichStats fills in book_time_left, book_read_time, book_pages_read,
+    -- days_reading_book, pages_per_day, speed_pph — without it the stats
+    -- tokens render empty even when readerstatistics is available.
+    local preview_book, preview_state
+    if self._bw then
+        preview_book = self._bw._preview_book
+        local ok_repo, Repo = pcall(require, "lib/bookshelf_book_repository")
+        if not preview_book and ok_repo and Repo and Repo.getCurrent then
+            preview_book = Repo.getCurrent()
+        end
+        if preview_book and ok_repo and Repo and Repo.enrichStats then
+            pcall(Repo.enrichStats, preview_book)
+        end
+        if self._bw._buildDeviceState then
+            local ok_ds, ds = pcall(function() return self._bw:_buildDeviceState() end)
+            if ok_ds then preview_state = ds end
+        end
+    end
+
+    local modal
+    modal = LibraryModal:new{
+        config = {
+            title = _("Insert token"),
+            help_title = _("Bookshelf tokens"),
+            help_text = _([==[Tokens are placeholders that get replaced with live data when the top panel or status line renders.
+
+  %title — %book_pct
+  → Dune — 36%
+
+Wrap content in [if:foo]…[/if] to show it only when the token has a value. Add [else]…[/if] for a fallback.
+
+  [if:series]Book %series_num of %series_name[/if]
+  [if:batt<20]LOW %batt[/if]]==]),
+            chip_strip = function()
+                local out = {}
+                for _i, c in ipairs(CHIPS) do
+                    out[#out + 1] = { key = c.key, label = c.label, is_active = (c.key == active_chip) }
+                end
+                return out
+            end,
+            on_chip_tap = function(key)
+                active_chip = key
+                if search_query then
+                    search_query = nil
+                    if modal and modal._search_input then modal._search_input:setText("") end
+                end
+            end,
+            search_placeholder = function() return _("Search tokens…") end,
+            on_search_submit = function(query)
+                search_query = query
+                if query then active_chip = "all" end
+            end,
+            rows_per_page = function()
+                local Screen = require("device").screen
+                return Screen:getWidth() > Screen:getHeight() and 4 or 5
+            end,
+            item_count = function() return #items() end,
+            item_at    = function(idx) return items()[idx] end,
+            row_renderer = function(item, dimen)
+                local inner_pad = Space.px(12)
+                local content_w = dimen.w - 2 * inner_pad - 2 * Size.border.thin
+                local preview = ""
+                if preview_book and item.token and not item.token:match("^%[") then
+                    local ok2, val = pcall(Tokens.expand, item.token, preview_book, preview_state)
+                    if ok2 and val and val ~= "" and val ~= item.token then
+                        if #val > 28 then val = val:sub(1, 27) .. "…" end
+                        preview = "    \xe2\x86\x92 " .. val
+                    end
+                end
+                local desc_face, desc_bold = BFont:getFace("cfont", 16, { bold = true })
+                local desc_w = TextWidget:new{
+                    text = item.description or "",
+                    face = desc_face,
+                    bold = desc_bold,
+                    max_width = content_w,
+                }
+                local tok_face, tok_bold = BFont:getFace("cfont", 13)
+                local tok_w = TextWidget:new{
+                    text = (item.token or "") .. preview,
+                    face = tok_face,
+                    bold = tok_bold,
+                    fgcolor = Blitbuffer.gray(0.4),
+                    max_width = content_w,
+                }
+                local stack = VerticalGroup:new{
+                    align = "left",
+                    desc_w,
+                    VerticalSpan:new{ width = Space.px(4) },
+                    tok_w,
+                }
+                -- Card-style frame: thin border, rounded corners, white bg.
+                -- Mirrors bookends's TokensLibrary._renderRow so the look
+                -- matches when bookends is installed.
+                local card_frame = FrameContainer:new{
+                    bordersize     = Size.border.thin,
+                    radius         = Space.radius.default,
+                    padding        = 0,
+                    padding_left   = inner_pad,
+                    padding_right  = inner_pad,
+                    padding_top    = 0,
+                    padding_bottom = 0,
+                    margin         = 0,
+                    background     = Blitbuffer.COLOR_WHITE,
+                    LeftContainer:new{
+                        dimen = Geom:new{ w = content_w, h = dimen.h - 2 * Size.border.thin },
+                        stack,
+                    },
+                }
+                local row = InputContainer:new{
+                    dimen = Geom:new{ w = dimen.w, h = dimen.h },
+                    card_frame,
+                }
+                row.ges_events = {
+                    TapSelect = { GestureRange:new{ ges = "tap", range = row.dimen } },
+                }
+                row.onTapSelect = function()
+                    if modal then UIManager:close(modal); modal = nil end
+                    if dialog and dialog.addTextToInput then
+                        pcall(function() dialog:addTextToInput(item.token or "") end)
+                    end
+                    return true
+                end
+                return row
+            end,
+            header_actions = {
+                { key = "help", label = _("Help"), on_tap = function()
+                    if modal then modal:_showHelp() end
+                end },
+            },
+            footer_actions = {
+                { key = "close", label = _("Close"), on_tap = function()
+                    if modal then UIManager:close(modal); modal = nil end
+                end },
+            },
+        },
+    }
+    UIManager:show(modal)
+end
+
+-- Fallback picker: simple Menu when bookends isn't installed. Centred via
+-- UIManager:show offset so Menu's own onCloseAllMenus (which does
+-- UIManager:close(self)) finds the Menu in the window stack and tap-outside
+-- dismissal works.
+function Settings:_pickTokenFallback(dialog, filter)
+    local Menu   = require("ui/widget/menu")
+    local Screen = require("device").screen
+    local Tokens = require("lib/bookshelf_tokens")
+
+    local menu
+    local function pickAndClose(tok)
+        if menu then UIManager:close(menu) end
+        if dialog and dialog.addTextToInput then
+            pcall(function() dialog:addTextToInput(tok) end)
+        end
+    end
+
+    local items = {}
+    local current_cat
+    for _i, t in ipairs(_pickerCatalogue(filter)) do
+        if t.category ~= current_cat then
+            current_cat = t.category
+            items[#items + 1] = {
+                text           = "── " .. Tokens.categoryLabel(t.category) .. " ──",
+                bold           = true,
+                select_enabled = false,
+            }
+        end
+        local tok = t.token
+        items[#items + 1] = {
+            text     = tok .. "    " .. t.description,
+            callback = function() pickAndClose(tok) end,
+        }
+    end
+
+    local menu_w = math.floor(Screen:getWidth()  * 0.85)
+    local menu_h = math.floor(Screen:getHeight() * 0.7)
+    menu = Menu:new{
+        title      = _("Insert token"),
+        item_table = items,
+        is_popout  = true,
+        width      = menu_w,
+        height     = menu_h,
+    }
+    -- Position the popout centred. Passing x/y to UIManager:show centres the
+    -- menu in the window stack directly — Menu's own onCloseAllMenus calls
+    -- UIManager:close(self), so the menu MUST be the registered widget for
+    -- tap-outside dismissal to find it.
+    local x = math.floor((Screen:getWidth()  - menu_w) / 2)
+    local y = math.floor((Screen:getHeight() - menu_h) / 2)
+    UIManager:show(menu, nil, nil, x, y)
+end
+
+-- Resolve the live preview book + device state used to render the row
+-- previews in the chooser menu. Same fallback chain the token picker uses.
+function Settings:_previewContext()
+    local book, state
+    if self._bw then
+        book = self._bw._preview_book
+        local ok_repo, Repo = pcall(require, "lib/bookshelf_book_repository")
+        if not book and ok_repo and Repo and Repo.getCurrent then
+            book = Repo.getCurrent()
+        end
+        if book and ok_repo and Repo and Repo.enrichStats then
+            pcall(Repo.enrichStats, book)
+        end
+        if self._bw._buildDeviceState then
+            local ok_ds, ds = pcall(function() return self._bw:_buildDeviceState() end)
+            if ok_ds then state = ds end
+        end
+    end
+    return book, state
+end
+
+-- _heroSubItems() — sub_item_table_func payload for "Edit hero card".
+-- Returns one entry per region with a checkbox showing enabled state and
+-- a preview snippet showing how the region's template currently resolves.
+-- Tap = open the line editor (chooser is hidden while editor is open).
+-- Long-press = toggle enabled.
+-- keys: optional list of region keys to build rows for; defaults to every
+-- region EXCEPT the status line, which since 4.0 surfaces as its own row in
+-- Settings (self:_heroSubItems({"status"})[1]) - it describes the device/
+-- reading status strip, not the book's detail lines, so it splits away from
+-- the "Edit book detail view" editor.
+function Settings:_heroSubItems(keys)
+    local Regions = require("lib/bookshelf_hero_regions")
+    local Tokens  = require("lib/bookshelf_tokens")
+    if not keys then
+        keys = {}
+        for _i, key in ipairs(Regions.ORDER) do
+            if key ~= "status" then keys[#keys + 1] = key end
+        end
+    end
+    -- Hero font scale moved to Settings -> Text size (#60). Keeping a
+    -- single place to dial every font scale beats sprinkling the same
+    -- knob across each context-specific submenu.
+    local items = {}
+    -- Translation extraction markers: Regions.LABELS values reach the
+    -- runtime via the _(Regions.LABELS[key]) dynamic lookup below (and the
+    -- same lookup in bookshelf_hero_line_editor), which xgettext cannot
+    -- follow. List EVERY region label here -- not just the ones unique to
+    -- this surface -- so none can silently drop from the .pot on regen.
+    -- Relying on "it also appears in a direct _() elsewhere" already failed
+    -- once: "Status line" and "Metadata" were never extracted and so were
+    -- untranslatable in every locale (surfaced via the zh_CN PR #109). Keep
+    -- this list in sync with Regions.LABELS. Dead code at runtime; it
+    -- exists only so xgettext emits the msgids.
+    if false then
+        local _ignore = {
+            _("Status line"),
+            _("Title"),
+            _("Author"),
+            _("Rating (interactive)"),
+            _("Metadata"),
+            _("Description"),
+            _("Tags (interactive)"),
+            _("Progress"),
+        }
+    end
+    for _i, key in ipairs(keys) do
+        local item = {
+            keep_menu_open = true,
+            text_func = function()
+                local label    = _(Regions.LABELS[key] or key)
+                local resolved = Regions.read()[key]
+                local book, state = self:_previewContext()
+                -- Shared with the list's line rows; see Tokens.menuPreview for
+                -- why %bar has to become a glyph rather than vanish, and why
+                -- the brace modifiers are stripped before expansion.
+                local preview = Tokens.menuPreview(resolved.template, book, state)
+                if preview == "" then return label end
+                if #preview > 36 then preview = preview:sub(1, 35) .. "\xE2\x80\xA6" end
+                return label .. ": " .. preview
+            end,
+            checked_func = function()
+                -- Read RESOLVED state, not raw snapshot: rating's default is
+                -- disabled=true, so an absent snapshot still means disabled.
+                return not Regions.read()[key].disabled
+            end,
+            callback = function(touchmenu_instance)
+                -- Rating is an interactive widget, not a text-templated
+                -- region — a line editor for it is meaningless. Tap toggles
+                -- enabled, same as hold elsewhere.
+                if key == "rating" then
+                    self:_toggleRegionEnabled(key, touchmenu_instance)
+                    return
+                end
+                self:_editHeroRegion(key, touchmenu_instance)
+            end,
+            hold_callback = function(touchmenu_instance)
+                self:_toggleRegionEnabled(key, touchmenu_instance)
+            end,
+        }
+        if key == "tags" then
+            -- Tags is interactive AND configurable (#99): the row opens a
+            -- submenu (enable + per-category visibility + font size +
+            -- alignment) instead of a plain enable toggle. Drop the toggle
+            -- callbacks and the checkbox; the submenu carries the enable
+            -- switch itself.
+            item.checked_func   = nil
+            item.callback       = nil
+            item.hold_callback  = nil
+            item.sub_item_table_func = function()
+                return self:_tagsRegionSubItems()
+            end
+        end
+        items[#items + 1] = item
+    end
+    return items
+end
+
+-- _tagsRegionSubItems() — the "Tags (interactive)" configuration submenu
+-- (#99). Enable switch, per-category visibility checkboxes, font size, and
+-- alignment. Each control writes one merged field on the tags region and
+-- live-refreshes the hero (which re-reads the config on its next pill
+-- build) so the change is visible behind the open menu.
+function Settings:_tagsRegionSubItems()
+    local Regions = require("lib/bookshelf_hero_regions")
+    -- Merge one field into the tags region and refresh. _swapHeroInPlace
+    -- rebuilds the hero card (recreating the tags pill builder), so the
+    -- new categories / font / alignment show immediately.
+    local function setTagsField(field, value, touchmenu_instance)
+        local snap = Regions.snapshot("tags") or {}
+        snap[field] = value
+        Regions.write("tags", snap)
+        if self._bw and self._bw._swapHeroInPlace then
+            self._bw:_swapHeroInPlace()
+        end
+        if touchmenu_instance and touchmenu_instance.updateItems then
+            touchmenu_instance:updateItems()
+        end
+    end
+    -- A category visibility checkbox row. show_<cat> defaults true (every
+    -- category shown == pre-#99 behaviour), so nil reads as on.
+    local function categoryRow(field, label, separator)
+        return {
+            text = label,
+            checked_func = function() return Regions.read().tags[field] ~= false end,
+            keep_menu_open = true,
+            separator = separator,
+            callback = function(touchmenu_instance)
+                setTagsField(field, Regions.read().tags[field] == false,
+                             touchmenu_instance)
+            end,
+        }
+    end
+    local function alignmentRow(value, label)
+        return {
+            text = label,
+            radio = true,
+            checked_func = function()
+                return (Regions.read().tags.alignment or "left") == value
+            end,
+            keep_menu_open = true,
+            callback = function(touchmenu_instance)
+                setTagsField("alignment", value, touchmenu_instance)
+            end,
+        }
+    end
+    return {
+        {
+            text = _("Show tags line"),
+            checked_func = function() return not Regions.read().tags.disabled end,
+            keep_menu_open = true,
+            separator = true,
+            callback = function(touchmenu_instance)
+                setTagsField("disabled", not Regions.read().tags.disabled,
+                             touchmenu_instance)
+            end,
+        },
+        categoryRow("show_author",      _("Author")),
+        categoryRow("show_series",      _("Series")),
+        categoryRow("show_collections", _("Collections")),
+        categoryRow("show_genres",      _("Genres")),
+        categoryRow("show_folder",      _("Folder"), true),
+        {
+            text_func = function()
+                return _("Font size") .. ": "
+                    .. tostring(Regions.read().tags.font_size or 14)
+            end,
+            keep_menu_open = true,
+            callback = function(touchmenu_instance)
+                -- Same bookends-style nudge dialog the hero line editor uses
+                -- for text-region sizes. Hide the settings menu first so the
+                -- live hero is visible while nudging; restoreMenu reopens THIS
+                -- submenu (and refreshes its rows) when the nudge closes.
+                local LineEditor  = require("lib/bookshelf_hero_line_editor")
+                local restoreMenu = LineEditor.hideParentMenu(touchmenu_instance)
+                local cur     = Regions.read().tags.font_size or 14
+                local default = Regions.DEFAULTS.tags.font_size or 14
+                LineEditor.showSizeNudge(
+                    cur, default,
+                    -- on_change: persist + live-refresh the hero each nudge.
+                    -- No touchmenu_instance (it's hidden), so no menu update.
+                    function(val) setTagsField("font_size", val) end,
+                    -- on_close: reopen the settings submenu.
+                    function() restoreMenu() end,
+                    { title = _("Tags font size") })
+            end,
+        },
+        {
+            text_func = function()
+                local a = Regions.read().tags.alignment or "left"
+                local labels = { left = _("Left"), center = _("Center"), right = _("Right") }
+                return _("Alignment") .. ": " .. (labels[a] or labels.left)
+            end,
+            keep_menu_open = true,
+            sub_item_table = {
+                alignmentRow("left",   _("Left")),
+                alignmentRow("center", _("Center")),
+                alignmentRow("right",  _("Right")),
+            },
+        },
+        {
+            -- Caps how many rows of pills the hero shows; the overflow folds
+            -- into the tappable "+N" button (which opens the full tags sheet).
+            -- 1 row reads cleanest now that nothing is lost to the cap; more
+            -- rows suit a hero with the spare height (e.g. description off).
+            text_func = function()
+                return _("Maximum tag rows") .. ": "
+                    .. tostring(Regions.read().tags.max_rows or 2)
+            end,
+            keep_menu_open = true,
+            callback = function(touchmenu_instance)
+                local SpinWidget = require("ui/widget/spinwidget")
+                local UIManager_ = require("ui/uimanager")
+                local cur = tonumber(Regions.read().tags.max_rows) or 2
+                UIManager_:show(SpinWidget:new{
+                    title_text = _("Maximum tag rows"),
+                    info_text  = _("How many rows of tag pills the top panel shows before the rest collapse into a tappable +N button."),
+                    value      = cur,
+                    value_min  = 1,
+                    value_max  = 5,
+                    value_step = 1,
+                    ok_text    = _("Set"),
+                    callback   = function(spin)
+                        setTagsField("max_rows", spin.value, touchmenu_instance)
+                    end,
+                })
+            end,
+        },
+    }
+end
+
+-- _editHeroRegion(key, touchmenu_instance) — open the line editor for a
+-- single region. Passes the FM TouchMenu through so the editor can hide
+-- it while open and re-show it on Save/Cancel.
+function Settings:_editHeroRegion(key, touchmenu_instance)
+    local LineEditor = require("lib/bookshelf_hero_line_editor")
+    LineEditor.show(key, self._bw, self, touchmenu_instance)
+end
+
+-- Flip a region's enabled flag, writing the EXPLICIT new value rather
+-- than relying on absence-equals-default. Critical for rating, whose
+-- default is disabled=true: without an explicit false override, the
+-- resolved value stays true regardless of how many times the user taps.
+function Settings:_toggleRegionEnabled(key, touchmenu_instance)
+    local Regions = require("lib/bookshelf_hero_regions")
+    local now_disabled = Regions.read()[key].disabled == true
+    local snap = Regions.snapshot(key) or {}
+    snap.disabled = not now_disabled  -- explicit true / false
+    Regions.write(key, snap)
+    if self._bw and self._bw._swapHeroRightColumnInPlace then
+        self._bw:_swapHeroRightColumnInPlace(Regions.read())
+    end
+    if touchmenu_instance and touchmenu_instance.updateItems then
+        touchmenu_instance:updateItems()
+    end
+end
+
+-- ---------------------------------------------------------------------------
+-- Progress indicators menu
+-- ---------------------------------------------------------------------------
+
+-- Page count on covers. The count's source is a separate question from the
+-- Extract page counts dialog's (which sources a scan COLLECTS): a book can
+-- have both a printed count and one at the reader's own layout, and this says
+-- which a badge shows. Worded as that dialog words its sources.
+--   progress_page_count_enabled  true = shown (off by default)
+--   progress_page_count_bare     true = "220", not "220 p" (issue 499)
+--   progress_page_count_source   nil = reading settings, "printed" = printed first
+--   progress_page_count_percent  nil = pages, "only" = percent read, "both"
+local function _pageBadgeMode()
+    if BookshelfSettings.read("progress_page_count_enabled") ~= true then return "off" end
+    local p = BookshelfSettings.read("progress_page_count_percent")
+    if p == "only" or p == "both" then return p end
+    return "pages"
+end
+
+function Settings._pageCountSummary()
+    local mode = _pageBadgeMode()
+    if mode == "off" then return _("Off") end
+    if mode == "only" then return _("Percent read") end
+    if mode == "both" then return _("Percent read and pages") end
+    return _("Pages")
+end
+
+function Settings:_pageCountSubItems(markDirty)
+    -- The pages part is shown: Number only and the Count rows apply.
+    local function pagesShown() local m = _pageBadgeMode(); return m == "pages" or m == "both" end
+    local function show(mode, label, help)
+        return {
+            text = label, help_text = help, radio = true, keep_menu_open = true,
+            checked_func = function() return _pageBadgeMode() == mode end,
+            callback = function(touchmenu_instance)
+                BookshelfSettings.save("progress_page_count_enabled", mode ~= "off")
+                if mode ~= "off" then
+                    BookshelfSettings.save("progress_page_count_percent",
+                        (mode == "only" or mode == "both") and mode or nil)
+                end
+                markDirty()
+                if touchmenu_instance and touchmenu_instance.updateItems then
+                    touchmenu_instance:updateItems()
+                end
+            end,
+        }
+    end
+    local function flip(key)
+        return function(touchmenu_instance)
+            BookshelfSettings.save(key, not (BookshelfSettings.read(key) == true))
+            markDirty()
+            if touchmenu_instance and touchmenu_instance.updateItems then
+                touchmenu_instance:updateItems()
+            end
+        end
+    end
+    local function source(value)
+        return {
+            text = value == "printed" and _("Count: printed pages first")
+                or _("Count: your reading settings"),
+            help_text = value == "printed"
+                and _("Publisher page numbers, Hardcover editions, the Calibre page column or a count in the file name, where a book has one. Otherwise the count at your reading settings.")
+                or _("The pages you turn at your font and margins: KOReader's count once a book has been opened, and before that whatever Extract page counts found."),
+            radio = true,
+            enabled_func = pagesShown,
+            keep_menu_open = true,
+            checked_func = function()
+                local v = BookshelfSettings.read("progress_page_count_source")
+                return (v == "printed") == (value == "printed")
+            end,
+            callback = function(touchmenu_instance)
+                BookshelfSettings.save("progress_page_count_source", value)
+                markDirty()
+                if touchmenu_instance and touchmenu_instance.updateItems then
+                    touchmenu_instance:updateItems()
+                end
+            end,
+        }
+    end
+    local plugin = self._plugin
+    return {
+        show("off", _("Off")),
+        show("pages", _("Pages")),
+        show("only", _("Percent read"),
+            _("How far through you are, for books you are reading or have on hold. Other books show no badge.")),
+        (function()
+            local row = show("both", _("Percent read and pages"),
+                _("Both, for books you are reading or have on hold; the pages alone for the rest."))
+            row.separator = true
+            return row
+        end)(),
+        {
+            text = _("Number only"),
+            help_text = _("Show \"220\" rather than \"220 p\"."),
+            checked_func = function() return BookshelfSettings.read("progress_page_count_bare") == true end,
+            enabled_func = pagesShown,
+            keep_menu_open = true,
+            callback = flip("progress_page_count_bare"),
+            separator = true,
+        },
+        source(nil),
+        source("printed"),
+        {
+            text = _("Extract page counts\xE2\x80\xA6"),
+            help_text = _("Find page counts for books that do not have one yet."),
+            separator = true,
+            callback = function(touchmenu_instance)
+                if touchmenu_instance then UIManager:close(touchmenu_instance) end
+                UIManager:nextTick(function()
+                    require("lib/bookshelf_page_count_dialog").show(
+                        function(opts) plugin:scanPageCounts(opts) end,
+                        function() markDirty() end)
+                end)
+            end,
+        },
+    }
+end
+
+function Settings:_coverDisplaySubItems()
+    local function markDirty()
+        if self._bw and self._bw._rebuild then
+            self._bw:_rebuild()
+            UIManager:setDirty(self._bw, "ui")
+        end
+    end
+
+    -- Three independent toggles (defaults all ON when unset). Inline the
+    -- builder so each row reads/writes its own setting key without
+    -- repetition.
+    -- default_off: when true, treats nil as false. Used for opt-in
+    -- toggles like Show page count where defaulting ON would be
+    -- intrusive for users upgrading from a prior version.
+    local function toggleRow(setting_key, label, separator, default_off)
+        local default_value = not default_off  -- true unless explicitly off
+        return {
+            text = label,
+            checked_func = function()
+                local v = BookshelfSettings.read(setting_key)
+                if v == nil then return default_value end
+                return v == true
+            end,
+            callback = function()
+                local v = BookshelfSettings.read(setting_key)
+                if v == nil then v = default_value end
+                BookshelfSettings.save(setting_key, not v)
+                markDirty()
+            end,
+            separator = separator,
+        }
+    end
+    -- Unified label mode: one setting drives the strip under covers on EVERY
+    -- shelf surface (regular grid and expanded shelf). Replaces the 3.x pair
+    -- of an expanded-only mode plus a grid on/off checkbox; the stored key
+    -- keeps its historical name so existing choices carry over. Default is
+    -- Title (a 4.0 default change - both surfaces were bare when unset).
+    local label_labels = {
+        title  = _("Title"),
+        author = _("Author"),
+        series = _("Series"),
+        custom = _("Custom"),
+        none   = _("None"),
+    }
+    local function readLabelMode()
+        local v = BookshelfSettings.read("expanded_shelf_label")
+        if v == "author" or v == "series" or v == "custom" or v == "none" then return v end
+        return "title"
+    end
+    -- Custom: the reader's own token template (lib/bookshelf_cover_label.lua).
+    -- A row of the same radio group, but choosing it opens the editor rather
+    -- than saving: Save in the editor is what makes Custom the mode, Cancel
+    -- leaves the previous choice alone. Once it IS the mode the row shows what
+    -- the template says for the preview book, like the hero and list line
+    -- rows, and tapping it again reopens the editor.
+    local function customLabelRow()
+        return {
+            text_func = function()
+                if readLabelMode() ~= "custom" then return _("Custom\xE2\x80\xA6") end
+                local CoverLabel = require("lib/bookshelf_cover_label")
+                local book = self:_previewContext()
+                local ok, preview = pcall(CoverLabel.render, CoverLabel.line(),
+                    book and require("lib/bookshelf_token_record").wrap(book) or nil)
+                if not ok or type(preview) ~= "string" or preview == "" then
+                    return label_labels.custom
+                end
+                if #preview > 36 then
+                    preview = CoverLabel.utf8Cut(preview, 35) .. "\xE2\x80\xA6"
+                end
+                return label_labels.custom .. ": " .. preview
+            end,
+            checked_func   = function() return readLabelMode() == "custom" end,
+            radio          = true,
+            keep_menu_open = true,
+            callback       = function(touchmenu_instance)
+                require("lib/bookshelf_cover_label_editor").show(
+                    self._bw, self, touchmenu_instance)
+            end,
+        }
+    end
+    local function labelModeRow(mode)
+        return {
+            text           = label_labels[mode],
+            checked_func   = function() return readLabelMode() == mode end,
+            radio          = true,
+            keep_menu_open = true,
+            callback       = function(touchmenu_instance)
+                BookshelfSettings.save("expanded_shelf_label", mode)
+                markDirty()
+                if touchmenu_instance and touchmenu_instance.updateItems then
+                    touchmenu_instance:updateItems()
+                end
+            end,
+        }
+    end
+    return {
+        -- ── layout: what a cover row is made of ──
+        {
+            text_func = function()
+                return _("Cover captions") .. ": " .. label_labels[readLabelMode()]
+            end,
+            help_text = _("A line of text under each cover, on the regular"
+                .. " shelf and full screen shelves alike. Choose what it shows,"
+                .. " or None to let covers use the full row. A shelf can choose"
+                .. " its own: long-press it, then View mode. Text size follows the Cover"
+                .. " captions setting under Text size."),
+            sub_item_table_func = function()
+                return {
+                    labelModeRow("title"),
+                    labelModeRow("author"),
+                    labelModeRow("series"),
+                    customLabelRow(),
+                    labelModeRow("none"),
+                }
+            end,
+        },
+        -- Author below series (issue 486): a series stack's author on the
+        -- line below its tile, apart from the books' text ("title under
+        -- covers and author under series groups"). Off by default, which is
+        -- every shelf before it. A switch, not 5.4's None / Author / Custom:
+        -- a series stack is the only group with anything to print there
+        -- (lib/bookshelf_cover_label, maintainer 2026-10-10).
+        {
+            text = _("Show author below series"),
+            help_text = _("The author's name under each series stack. Folder"
+                .. " title styles that print the series name below the tile keep"
+                .. " that line for the name."),
+            checked_func = function()
+                return require("lib/bookshelf_cover_label").groupMode() == "author"
+            end,
+            keep_menu_open = true,
+            callback = function(touchmenu_instance)
+                local CL = require("lib/bookshelf_cover_label")
+                CL.saveGroupMode(CL.groupMode() ~= "author")
+                markDirty()
+                if touchmenu_instance and touchmenu_instance.updateItems then
+                    touchmenu_instance:updateItems()
+                end
+            end,
+        },
+        {
+            text = _("True cover aspect ratio"),
+            help_text = _("Show each cover at its real shape instead of a "
+                .. "uniform book rectangle. Covers keep the same width but "
+                .. "vary in height: on the shelf they sit along the bottom "
+                .. "shelf line, and in the top panel they align to the top. "
+                .. "Wide or square covers stop being cropped or stretched. "
+                .. "Off by default (uniform grid)."),
+            checked_func = function()
+                return BookshelfSettings.isTrue("true_cover_aspect")
+            end,
+            keep_menu_open = true,
+            callback = function()
+                BookshelfSettings.save("true_cover_aspect",
+                    not BookshelfSettings.isTrue("true_cover_aspect"))
+                BookshelfSettings.flush()
+                markDirty()
+            end,
+        },
+        -- Issue #330: how tall a cover may get before it is trimmed. Presets
+        -- rather than a free number, which is what the reporter asked for -- the
+        -- useful range is narrow and the arithmetic behind it (how many rows
+        -- still fit) is not something to hand a reader a spinner for.
+        --
+        -- Enabled only alongside True cover aspect ratio: with uniform covers
+        -- every one is 1.5 by definition and a cap has nothing to act on.
+        (function()
+            local CAPS = { 1.4, 1.5, 1.55, 1.65, 1.8 }
+            local function capRow(v)
+                return {
+                    text_func = function()
+                        local label = string.format("%.2f", v):gsub("0$", "")
+                        if v == 1.55 then label = label .. " " .. _("(default)") end
+                        return label
+                    end,
+                    checked_func = function()
+                        local SpineWidget = require("lib/bookshelf_spine_widget")
+                        return math.abs(SpineWidget.coverAspectCap() - v) < 0.001
+                    end,
+                    radio = true,
+                    keep_menu_open = true,
+                    callback = function()
+                        BookshelfSettings.save("cover_aspect_cap", v)
+                        BookshelfSettings.flush()
+                        markDirty()
+                    end,
+                }
+            end
+            local rows = {}
+            for _i = 1, #CAPS do rows[#rows + 1] = capRow(CAPS[_i]) end
+            return {
+                text_func = function()
+                    local SpineWidget = require("lib/bookshelf_spine_widget")
+                    return _("Tallest cover shape") .. ": "
+                        .. (string.format("%.2f", SpineWidget.coverAspectCap()):gsub("0$", ""))
+                end,
+                help_text = _("How tall a cover may be, relative to its width,"
+                    .. " before the extra height is trimmed. Taller values show"
+                    .. " more of an unusually tall cover; they also make every"
+                    .. " row taller, so fewer rows fit on the shelf. Only"
+                    .. " applies with True cover aspect ratio on."),
+                enabled_func = function()
+                    return BookshelfSettings.isTrue("true_cover_aspect")
+                end,
+                keep_menu_open = true,
+                sub_item_table = rows,
+            }
+        end)(),
+        {
+            text = _("Square cover corners"),
+            help_text = _("Draw covers with square corners instead of the "
+                .. "rounded card shape. Independent of the drop shadow, so a "
+                .. "flatter look can keep the shadow or drop it separately. "
+                .. "Off by default (rounded)."),
+            checked_func = function()
+                return BookshelfSettings.isTrue("cover_square_corners")
+            end,
+            keep_menu_open = true,
+            callback = function()
+                BookshelfSettings.save("cover_square_corners",
+                    not BookshelfSettings.isTrue("cover_square_corners"))
+                BookshelfSettings.flush()
+                markDirty()
+            end,
+        },
+        {
+            text = _("No cover drop shadow"),
+            help_text = _("Draw covers flat against the page instead of "
+                .. "raised off it. The pixels the shadow reserved go back to "
+                .. "the cover, so covers get slightly larger. Off by default "
+                .. "(shadow shown)."),
+            checked_func = function()
+                return BookshelfSettings.isTrue("cover_no_shadow")
+            end,
+            keep_menu_open = true,
+            callback = function()
+                BookshelfSettings.save("cover_no_shadow",
+                    not BookshelfSettings.isTrue("cover_no_shadow"))
+                BookshelfSettings.flush()
+                markDirty()
+            end,
+        },
+        -- ── group tiles ──
+        -- ONE row, the library-wide default, where there used to be one per
+        -- group kind. The per-kind rows said the same thing a chip already
+        -- says -- a chip IS a kind of shelf -- and could not express two
+        -- chips on one kind wanting different tiles, nor an OPDS catalog
+        -- wanting to look unlike the filesystem's folders. That choice now
+        -- lives on the chip (long-press a chip > Folder style); this is what
+        -- a chip falls back to, and what search results use.
+        --
+        -- Sits with the label mode and true-aspect rows, not down with the
+        -- badges: these three are what decide the SHAPE of the grid, and this
+        -- one changes it as much as either.
+        {
+            text_func = function()
+                local SD = require("lib/bookshelf_stack_display")
+                return _("Default folder style: ") .. SD.labelFor(SD.defaultMode())
+            end,
+            help_text = _("How folders and stacks are drawn on any shelf that "
+                .. "has not chosen its own. Long-press a shelf to override "
+                .. "it there."),
+            sub_item_table_func = function()
+                return Settings:_groupDisplaySubItems()
+            end,
+            separator = true,
+        },
+        -- ── reading progress on covers ──
+        toggleRow("progress_bar_enabled",
+                  _("Show progress bars"), false),
+        toggleRow("progress_bookmark_enabled",
+                  _("Show reading bookmarks"), false),
+        -- Page count on covers: one row opening its own menu (it was two
+        -- rows, which the long menu split across its pages).
+        {
+            text_func = function()
+                return _("Page badge") .. ": " .. Settings._pageCountSummary()
+            end,
+            sub_item_table_func = function()
+                return self:_pageCountSubItems(markDirty)
+            end,
+        },
+        -- ── reading-status treatments ──
+        -- Completed book badge: three-state. "bookmark" (default;
+        -- pre-v2.1 dangling outlined check), "tickbox" (v2.1 square
+        -- pill), "none". Legacy boolean progress_badge_enabled still
+        -- honoured as a fallback when progress_badge_style is unset:
+        -- true / nil -> bookmark, false -> none. cover_progress.decide()
+        -- runs the same migration so the rendering side and the menu
+        -- agree.
+        (function()
+            local function readMode()
+                local v = BookshelfSettings.read("progress_badge_style")
+                if v == "tickbox" or v == "bookmark" or v == "none" then
+                    return v
+                end
+                local legacy = BookshelfSettings.read("progress_badge_enabled")
+                if legacy == false then return "none" end
+                return "bookmark"
+            end
+            local function setMode(mode, touchmenu_instance)
+                BookshelfSettings.save("progress_badge_style", mode)
+                markDirty()
+                if touchmenu_instance and touchmenu_instance.updateItems then
+                    touchmenu_instance:updateItems()
+                end
+            end
+            local labels = {
+                none     = _("None"),
+                bookmark = _("Bookmark style"),
+                tickbox  = _("Small tick box"),
+            }
+            local function optionRow(mode, label)
+                return {
+                    text           = label,
+                    checked_func   = function() return readMode() == mode end,
+                    radio          = true,
+                    keep_menu_open = true,
+                    callback       = function(touchmenu_instance)
+                        setMode(mode, touchmenu_instance)
+                    end,
+                }
+            end
+            return {
+                text_func = function()
+                    return _("Completed book badge") .. ": " .. labels[readMode()]
+                end,
+                sub_item_table_func = function()
+                    return {
+                        optionRow("none",     labels.none),
+                        optionRow("bookmark", labels.bookmark),
+                        optionRow("tickbox",  labels.tickbox),
+                    }
+                end,
+            }
+        end)(),
+        -- Fade finished books like the on-hold faded cover (#138). Opt-in
+        -- (default off) and independent of the badge style above, mirroring
+        -- the #121 split of badge vs fade for on-hold books.
+        toggleRow("finished_fade_enabled", _("Fade finished books"), false, true),
+        -- On-hold display: four-state. "both" (default; pause badge +
+        -- faded cover), "pause" (badge only), "fade" (faded cover only),
+        -- "none". Replaces the old Show on-hold badge boolean, which
+        -- gated both cues together; issue #121 asked for them split (one
+        -- reporter fades DNF books and wants no badge, another keeps the
+        -- badge but wants no fade). Legacy on_hold_badge_enabled still
+        -- honoured when on_hold_display is unset: false -> "none",
+        -- true / nil -> "both". cover_progress.decide() runs the same
+        -- migration so the rendering side and the menu agree.
+        (function()
+            local function readMode()
+                local v = BookshelfSettings.read("on_hold_display")
+                if v == "none" or v == "pause" or v == "fade" or v == "both" then
+                    return v
+                end
+                local legacy = BookshelfSettings.read("on_hold_badge_enabled")
+                if legacy == false then return "none" end
+                return "both"
+            end
+            local function setMode(mode, touchmenu_instance)
+                BookshelfSettings.save("on_hold_display", mode)
+                markDirty()
+                if touchmenu_instance and touchmenu_instance.updateItems then
+                    touchmenu_instance:updateItems()
+                end
+            end
+            local labels = {
+                none  = _("None"),
+                pause = _("Pause badge"),
+                fade  = _("Faded cover"),
+                both  = _("Both"),
+            }
+            -- The parent row spells "both" out: "On-hold display: Both"
+            -- reads as nonsense without the sub-menu options around it.
+            local parent_labels = setmetatable(
+                { both = _("Pause badge + faded cover") },
+                { __index = labels })
+            local function optionRow(mode, label)
+                return {
+                    text           = label,
+                    checked_func   = function() return readMode() == mode end,
+                    radio          = true,
+                    keep_menu_open = true,
+                    callback       = function(touchmenu_instance)
+                        setMode(mode, touchmenu_instance)
+                    end,
+                }
+            end
+            return {
+                text_func = function()
+                    return _("On-hold display") .. ": " .. parent_labels[readMode()]
+                end,
+                sub_item_table_func = function()
+                    return {
+                        optionRow("none",  labels.none),
+                        optionRow("pause", labels.pause),
+                        optionRow("fade",  labels.fade),
+                        optionRow("both",  labels.both),
+                    }
+                end,
+                separator = true,  -- end the reading-status band
+            }
+        end)(),
+        -- ── decorations ──
+        -- Show series #: three-state. "always" (unset; fresh installs get "in_series"), "in_series"
+        -- (only inside a single-series view), or "never". Legacy boolean
+        -- values are still honoured: true reads as "always", false as
+        -- "never", so existing user settings keep working without a
+        -- migration. The sub-menu re-renders both itself and the live
+        -- shelf on every selection so the change is immediately visible.
+        (function()
+            local function readMode()
+                local v = BookshelfSettings.read("show_series_num")
+                if v == nil or v == true or v == "always" then return "always" end
+                if v == "in_series"                       then return "in_series" end
+                return "never"
+            end
+            local function setMode(mode, touchmenu_instance)
+                BookshelfSettings.save("show_series_num", mode)
+                markDirty()
+                if touchmenu_instance and touchmenu_instance.updateItems then
+                    touchmenu_instance:updateItems()
+                end
+            end
+            local labels = {
+                always    = _("Always"),
+                in_series = _("Within series folder"),
+                never     = _("Never"),
+            }
+            local function optionRow(mode, label)
+                return {
+                    text           = label,
+                    checked_func   = function() return readMode() == mode end,
+                    radio          = true,
+                    keep_menu_open = true,
+                    callback       = function(touchmenu_instance)
+                        setMode(mode, touchmenu_instance)
+                    end,
+                }
+            end
+            return {
+                text_func = function()
+                    return _("Show series #") .. ": " .. labels[readMode()]
+                end,
+                separator = true,
+                sub_item_table_func = function()
+                    return {
+                        optionRow("always",    labels.always),
+                        optionRow("in_series", labels.in_series),
+                        optionRow("never",     labels.never),
+                    }
+                end,
+            }
+        end)(),
+        -- Cover-badge font scale moved to Settings -> Text size (#60).
+        -- Favourites icon at top-left of covers for books in the favourites
+        -- collection. Defaults ON: favouriting a book should mark it without
+        -- a second opt-in (render gate uses nilOrTrue to match). Users who
+        -- explicitly turn it off keep it off.
+        toggleRow("show_fav_badge",
+                  _("Show favorites icon"), false, false),
+        -- The cover's corner badge: a favourite's heart (default; reads
+        -- distinctly from the rating stars) or star, or the book's star
+        -- rating on every rated book (issue 538). The choice also selects
+        -- which colour the Colors -> Favourite entry edits.
+        (function()
+            local function readIcon()
+                return require("lib/bookshelf_cover_progress").badgeMode()
+            end
+            local function setIcon(icon, touchmenu_instance)
+                BookshelfSettings.save("fav_icon", icon)
+                markDirty()
+                if touchmenu_instance and touchmenu_instance.updateItems then
+                    touchmenu_instance:updateItems()
+                end
+            end
+            local labels = { heart = _("Heart (favorite)"), star = _("Star (favorite)"),
+                             rating = _("Stars (rating)") }
+            local function optionRow(icon, label)
+                return {
+                    text           = label,
+                    checked_func   = function() return readIcon() == icon end,
+                    radio          = true,
+                    keep_menu_open = true,
+                    callback       = function(touchmenu_instance)
+                        setIcon(icon, touchmenu_instance)
+                    end,
+                }
+            end
+            return {
+                text_func = function()
+                    return T(_("Favorite icon or star rating: %1"), labels[readIcon()])
+                end,
+                sub_item_table_func = function()
+                    return {
+                        optionRow("heart",  labels.heart),
+                        optionRow("star",   labels.star),
+                        optionRow("rating", labels.rating),
+                    }
+                end,
+                separator = true,  -- end the decorations band
+            }
+        end)(),
+        -- ── stack covers (series / folders / authors...) ──
+        -- Stack count badge mode: four-state. Decides whether the
+        -- "×N" / "K/N" count badge renders on (a) filesystem folder
+        -- cards, (b) group stacks (series/author/genre/tag/format/
+        -- rating), (c) both, or (d) neither. Default "groups"
+        -- preserves the pre-v2.2.2 behaviour where only group stacks
+        -- carried the badge. Folder badges added in v2.2.2 are an
+        -- opt-in for users who want at-a-glance counts on file
+        -- folders too.
+        (function()
+            local function readMode()
+                local v = BookshelfSettings.read("stack_count_badge_mode")
+                if v == "off" or v == "folders" or v == "groups" or v == "all" then
+                    return v
+                end
+                return "groups"
+            end
+            local function setMode(mode, touchmenu_instance)
+                BookshelfSettings.save("stack_count_badge_mode", mode)
+                markDirty()
+                if touchmenu_instance and touchmenu_instance.updateItems then
+                    touchmenu_instance:updateItems()
+                end
+            end
+            local labels = {
+                off     = _("Off"),
+                folders = _("Folders only"),
+                groups  = _("Groups only"),
+                all     = _("All stacks"),
+            }
+            local function optionRow(mode, label)
+                return {
+                    text           = label,
+                    checked_func   = function() return readMode() == mode end,
+                    radio          = true,
+                    keep_menu_open = true,
+                    callback       = function(touchmenu_instance)
+                        setMode(mode, touchmenu_instance)
+                    end,
+                }
+            end
+            return {
+                text_func = function()
+                    return _("Stack count badge") .. ": " .. labels[readMode()]
+                end,
+                sub_item_table_func = function()
+                    return {
+                        optionRow("off",     labels.off),
+                        optionRow("folders", labels.folders),
+                        optionRow("groups",  labels.groups),
+                        optionRow("all",     labels.all),
+                    }
+                end,
+            }
+        end)(),
+        -- Stack count format: when the badge is shown, choose what the
+        -- numerator counts outside of selection mode. "total" (default)
+        -- → "×N"; "finished_total" → "F/N" where F is the count of
+        -- books in the stack marked finished. In selection mode the
+        -- partial-overlap "K/N" still wins regardless of this setting.
+        (function()
+            local function readMode()
+                local v = BookshelfSettings.read("stack_count_badge_format")
+                if v == "total" or v == "finished_total" then return v end
+                return "total"
+            end
+            local function setMode(mode, touchmenu_instance)
+                BookshelfSettings.save("stack_count_badge_format", mode)
+                markDirty()
+                if touchmenu_instance and touchmenu_instance.updateItems then
+                    touchmenu_instance:updateItems()
+                end
+            end
+            local labels = {
+                total          = _("Total"),
+                finished_total = _("Finished / Total"),
+            }
+            local function optionRow(mode, label)
+                return {
+                    text           = label,
+                    checked_func   = function() return readMode() == mode end,
+                    radio          = true,
+                    keep_menu_open = true,
+                    callback       = function(touchmenu_instance)
+                        setMode(mode, touchmenu_instance)
+                    end,
+                }
+            end
+            return {
+                text_func = function()
+                    return _("Stack count format") .. ": " .. labels[readMode()]
+                end,
+                sub_item_table_func = function()
+                    return {
+                        optionRow("total",          labels.total),
+                        optionRow("finished_total", labels.finished_total),
+                    }
+                end,
+                separator = true,  -- end the stacks band
+            }
+        end)(),
+        -- ── opening ──
+        -- Moved here from Advanced (4.0): it is a property of covers, so it
+        -- belongs with the rest of the cover rows.
+        {
+            text = _("Cover opening effect"),
+            help_text = _("When you open a book, briefly flex its cover open "
+                .. "before the page appears. Purely cosmetic; turn it off for "
+                .. "an instant, plain open. On by default."),
+            checked_func = function()
+                return BookshelfSettings.nilOrTrue("open_cover_effect")
+            end,
+            keep_menu_open = true,
+            callback = function()
+                local on = BookshelfSettings.nilOrTrue("open_cover_effect")
+                BookshelfSettings.save("open_cover_effect", not on)
+                BookshelfSettings.flush()
+            end,
+        },
+    }
+end
+
+-- ---------------------------------------------------------------------------
+-- List view menu
+-- ---------------------------------------------------------------------------
+
+-- _listViewSubItems() -- the rows the list/table view needs:
+--
+--     (rows, columns and view are set per shelf: long-press a chip)
+--     Line 1: The Hobbit
+--     Line 2: Tolkien   12% of 310 pages
+--     Add a line
+--
+-- The mode toggles that closed this menu ("Show as list when shelf is
+-- expanded / collapsed / inside folders") are GONE, replaced by the per-chip
+-- Show as pick over one fixed Auto policy -- lib/bookshelf_view_mode.lua has
+-- the ruling.
+--
+-- The column pickers that used to sit here are GONE, with the column model
+-- itself (lib/bookshelf_list_lines.lua's header has the account). A row is an
+-- ordered set of token templates now, and each one is edited through the SAME
+-- line editor the hero card uses -- the maintainer's ruling: "I think it will
+-- be best for the long run to use the bookends style row editors, allowing far
+-- more choice over content, formatting, size."
+--
+-- The line rows are the maintainer's requested shape too: "I meant for each
+-- row to be edited from a link in the main menu", i.e. one flat row per line,
+-- not a flyout per line. Tap opens the editor. HOLD opens move-up / move-down
+-- / delete, which is where the ordering controls went -- putting three more
+-- buttons on every line row would have tripled the width of a menu whose whole
+-- job is to be scannable.
+--
+-- A separate submenu rather than rows inside Cover display: list view is not a
+-- cover setting, and burying it there would make it undiscoverable.
+--
+-- The two "show as list" checkboxes are the WHOLE view-mode model -- one
+-- persisted boolean per shelf state, independent of each other
+-- (lib/bookshelf_view_mode.lua). The long-press on the pagination page label
+-- writes whichever of the two matches the state the shelf is in, so this
+-- screen is an exact mirror of what is on screen rather than something a
+-- gesture can outrank. There used to be a session override that could, and its
+-- help text had to describe it; both are gone.
+--
+-- Text size is NOT here: it is list_font_scale, which lives under Text size
+-- with every other font-scale knob. Nor are rows and columns any more -- those
+-- are per chip, in the chip's own shelf-style menu.
+function Settings:_listViewSubItems()
+    local ViewMode = require("lib/bookshelf_view_mode")
+    local Lines    = require("lib/bookshelf_list_lines")
+    -- Every change in this menu moves what a row CONTAINS -- lines added,
+    -- deleted, reordered, a preset applied, a toggle flipped -- but no longer
+    -- what a row is TALL. That comes from the row count now, so there is
+    -- nothing to settle afterwards: a rebuild is the whole of it. The second
+    -- rebuild and the scale settle that used to sit here went with the
+    -- density model.
+    local function markDirty()
+        if self._bw and self._bw._rebuild then
+            self._bw:_rebuild()
+            UIManager:setDirty(self._bw, "ui")
+        end
+    end
+
+    -- No 'Show cover in lists' toggle any more. It was reported broken --
+    -- "sometimes works but for some reason not when a chip has its list style
+    -- overridden" -- and the ruling was to remove it rather than mend it:
+    -- a list row always has its cover cell now, and the denser text-only
+    -- table went with the toggle. One less setting, one less way for a chip
+    -- override and a global to disagree.
+    local items = {
+        -- Discovery, now that the density and mode controls live per chip:
+        -- this menu is the only place a reader who has not found the chip
+        -- long-press will look. Disabled rows rather than help_text on some
+        -- other item, so it reads without a tap.
+        {
+            text = _("Rows, columns and view are set per shelf:"),
+            enabled = false,
+        },
+        {
+            text = _("long-press a shelf, then open View mode."),
+            enabled = false,
+            separator = true,
+        },
+    }
+
+    -- Columns and rows are NOT here any more. They MOVED to the chip's own
+    -- shelf-style dialog, on the maintainer's ruling: "move row and column
+    -- settings from the main menu, and put them into the per chip shelf style
+    -- menu". Two reasons it belongs there and not here -- a catalogue chip and
+    -- a library chip want different densities, and the same dialog already
+    -- owns the mode those numbers depend on, so it can show the list's
+    -- numbers or the grid's rather than both.
+    --
+    -- What is left in this menu is what a row SAYS: its lines, and the
+    -- toggles for where list mode applies.
+
+    for i = 1, #Lines.layout().lines do
+        items[#items + 1] = self:_listLineRow(i, markDirty)
+    end
+
+    items[#items + 1] = {
+        -- Two whole strings rather than a label with a bracketed suffix glued
+        -- on: a translator needs the finished sentence, and concatenating
+        -- fragments is how you get word order that only works in English.
+        text_func = function()
+            if #Lines.layout().lines >= Lines.MAX_LINES then
+                return _("Add a line (maximum reached)")
+            end
+            return _("Add a line")
+        end,
+        enabled_func = function()
+            return #Lines.layout().lines < Lines.MAX_LINES
+        end,
+        keep_menu_open = true,
+        separator = true,
+        callback = function(touchmenu_instance)
+            Lines.addLine()
+            markDirty()
+            -- The submenu is built from the line COUNT, so a new line needs
+            -- the whole table rebuilt, not just its rows refreshed.
+            self:_reopenListViewMenu(touchmenu_instance)
+        end,
+    }
+
+    return items
+end
+
+-- _reopenSubMenu(tmi, build) -- rebuild an open submenu in place.
+--
+-- Generalised from _reopenListViewMenu, which does the same for the List view
+-- screen: adding or deleting a preset changes the SET of rows, and
+-- TouchMenu:updateItems only re-renders the rows it already has. The live
+-- table's identity has to be preserved -- TouchMenu holds the reference, so
+-- replacing it leaves the menu rendering the old array. A MenuHost (the
+-- start menu's route) has no item_table: its shim hands over the open
+-- level's rows (liveItems), mapped again on updateItems.
+function Settings:_reopenSubMenu(touchmenu_instance, build)
+    if not touchmenu_instance then return end
+    local live = touchmenu_instance.item_table
+        or (touchmenu_instance.liveItems and touchmenu_instance.liveItems())
+    if live then
+        for i = #live, 1, -1 do live[i] = nil end
+        for i, row in ipairs(build()) do live[i] = row end
+    end
+    if touchmenu_instance.updateItems then
+        touchmenu_instance:updateItems()
+    end
+end
+
+-- _listLineRow(index, markDirty) -- one "Line N: <preview>" row.
+--
+-- The preview is the template expanded against the same book the hero editor
+-- previews with, so the row shows what the line will actually say rather than
+-- the raw template. Falling back to the bare label when it expands to nothing
+-- matters more than it looks: a line whose tokens are all empty for the
+-- preview book would otherwise render as "Line 2: " with a dangling colon.
+function Settings:_listLineRow(index, markDirty)
+    local Lines          = require("lib/bookshelf_list_lines")
+    local ListLineEditor = require("lib/bookshelf_list_line_editor")
+    local Tokens         = require("lib/bookshelf_tokens")
+    return {
+        keep_menu_open = true,
+        text_func = function()
+            local label = ListLineEditor.label(index)
+            local line  = Lines.layout().lines[index]
+            if not line then return label end
+            local book, state = self:_previewContext()
+            -- Tokens.menuPreview, not a local gsub chain: %bar becomes a little
+            -- bar of blocks, %spacer and the brace modifiers come out entirely,
+            -- and the hero's region rows get the identical treatment from the
+            -- identical code.
+            local preview = Tokens.menuPreview(line.template, book, state)
+            if preview == "" then return label end
+            if #preview > 36 then preview = preview:sub(1, 35) .. "\xE2\x80\xA6" end
+            return label .. ": " .. preview
+        end,
+        callback = function(touchmenu_instance)
+            ListLineEditor.show(index, self._bw, self, touchmenu_instance)
+        end,
+        hold_callback = function(touchmenu_instance)
+            self:_listLineActions(index, markDirty, touchmenu_instance)
+        end,
+    }
+end
+
+-- _listLineActions -- the hold menu on a line row: reorder and delete.
+--
+-- Both refuse at their edges rather than wrapping or emptying the row; the
+-- rules live in bookshelf_list_lines.lua (Lines.moveLine / Lines.removeLine)
+-- and this only greys out the buttons to match, so the menu cannot promise
+-- something the model will decline.
+function Settings:_listLineActions(index, markDirty, touchmenu_instance)
+    local Lines          = require("lib/bookshelf_list_lines")
+    local ListLineEditor = require("lib/bookshelf_list_line_editor")
+    local ButtonDialog   = require("ui/widget/buttondialog")
+    local count = #Lines.layout().lines
+    local dialog
+    local function act(fn)
+        return function()
+            UIManager:close(dialog)
+            fn()
+            markDirty()
+            self:_reopenListViewMenu(touchmenu_instance)
+        end
+    end
+    dialog = ButtonDialog:new{
+        title = ListLineEditor.label(index),
+        buttons = {
+            {
+                { text = _("Move up"),
+                  enabled = index > 1,
+                  callback = act(function() Lines.moveLine(index, -1) end) },
+                { text = _("Move down"),
+                  enabled = index < count,
+                  callback = act(function() Lines.moveLine(index, 1) end) },
+            },
+            {
+                { text = _("Delete"),
+                  -- One line is the floor: with none, layout() hands back the
+                  -- shipped defaults, so "delete the last line" would silently
+                  -- restore two lines the user never asked for.
+                  enabled = count > 1,
+                  callback = act(function() Lines.removeLine(index) end) },
+            },
+            {
+                { text = _("Cancel"), is_enter_default = true,
+                  callback = function() UIManager:close(dialog) end },
+            },
+        },
+    }
+    require("lib/bookshelf_gesture_zones").passSwipesOn(dialog)
+    UIManager:show(dialog)
+end
+
+-- _reopenListViewMenu -- rebuild the List view submenu in place.
+--
+-- Adding, deleting or reordering a line changes the SET of rows, not just
+-- their labels, and TouchMenu:updateItems only re-renders the rows it already
+-- has. One line over _reopenSubMenu, which is the same operation for any
+-- submenu and carries the account of why the table's identity has to survive.
+function Settings:_reopenListViewMenu(touchmenu_instance)
+    self:_reopenSubMenu(touchmenu_instance,
+        function() return self:_listViewSubItems() end)
+end
+
+-- The library-wide group-tile style: one radio list, and the fallback for
+-- every chip that has not set its own (bookshelf_stack_display's header
+-- explains why the per-kind rows this replaced were the wrong shape).
+function Settings:_groupDisplaySubItems()
+    local StackDisplay = require("lib/bookshelf_stack_display")
+    -- Local, not the one in _coverDisplaySubItems: that one is a local INSIDE
+    -- that function, so referring to it from here would compile fine and be a
+    -- nil global call the first time anyone changed a mode.
+    local function markDirty()
+        if self._bw and self._bw._rebuild then
+            self._bw:_rebuild()
+            UIManager:setDirty(self._bw, "ui")
+        end
+    end
+    local rows = {}
+    for _i, opt in ipairs(StackDisplay.OPTIONS) do
+        local value = opt.value
+        rows[#rows + 1] = {
+            text = opt.label_func(),
+            radio = true,
+            checked_func = function()
+                return StackDisplay.defaultMode() == value
+            end,
+            keep_menu_open = true,
+            callback = function()
+                BookshelfSettings.save(StackDisplay.DEFAULT_KEY, value)
+                BookshelfSettings.flush()
+                -- Tiles are rebuilt from scratch on the next render, so the
+                -- shelf only needs marking dirty -- no cache to invalidate,
+                -- since nothing about WHICH books are in a group has changed.
+                markDirty()
+            end,
+        }
+    end
+    return rows
+end
+
+-- _imageContrastRow(which) -> a row of Settings > Image contrast: "boost",
+-- "wp_contrast" or "wp_brightness", each a slider page (-100..100 for the
+-- wallpaper's, 0..100 for the boost: it never reduces).
+function Settings:_imageContrastRow(which)
+    local IC = require("lib/bookshelf_image_contrast")
+    local spec = ({
+        boost = { _("Covers contrast boost"), IC.BOOST_KEY, 0, IC.flushForeground },
+    })[which]
+    local label, key, lo, preview = spec[1], spec[2], spec[3], spec[4]
+    return {
+        text_func = function()
+            return T(_("%1: %2%"), label, BookshelfSettings.read(key, 0))
+        end,
+        keep_menu_open = true,
+        callback = function(touchmenu_instance)
+            self:_nudgePage(touchmenu_instance, {
+                key = key, default = 0, min = lo, max = 100,
+                fine = 5, big = 20, unit = "%", title = label,
+                preview = preview,
+            })
+        end,
+    }
+end
+
+
+-- The shading levels, coarse on purpose. A percentage nudger would be a
+-- pixel-peeping control for something the reader judges by looking at it, and
+-- five stops span the useful range: off, through frosted, to fully hidden.
+--
+-- Transparent is the same choice as the old "Transparent buttons" toggle, not
+-- merely equivalent to it: picking it sets that flag, so the hero's tag pills
+-- go see-through with the strips rather than drifting out of step.
+--
+-- name: what a theme.json's "panel_shading" calls the level (the English
+-- label in lower case; bookshelf_theme_pack.SHADING_LEVELS, kept the same by
+-- a test).
+Settings.SCRIM_LEVELS = {
+    { name = "transparent", value = 0,    label = function() return _("Transparent") end },
+    { name = "low",         value = 0.35, label = function() return _("Low") end },
+    { name = "moderate",    value = 0.6,  label = function() return _("Moderate") end },
+    { name = "heavy",       value = 0.85, label = function() return _("Heavy") end },
+    { name = "solid",       value = 1,    label = function() return _("Solid") end },
+}
+
+-- Light or dark, the reader's own (shelf_theme). A theme may set it in its
+-- theme.json; the reader's own look and Plain follow this.
+Settings.LIGHT_DARK = {
+    { value = "auto",  label = function() return _("Auto (follow night mode)") end },
+    { value = "light", label = function() return _("Light") end },
+    { value = "dark",  label = function() return _("Dark") end },
+}
+
+
+-- ── The colour picker, shared ──────────────────────────────────────────────
+--
+-- Lifted out of _colorsSubItems when the Wallpaper menu needed the same row.
+-- It was a closure over that builder's locals, so the alternative was a second
+-- copy that would drift.
+--
+-- "% black" semantics: ALWAYS describe what the reader SEES ON SCREEN,
+-- whatever the mode. In day mode the painted byte is what hits the panel
+-- (0xFF = white = 0% black). In night mode KOReader inverts the framebuffer
+-- at refresh, so a painted 0x00 ends up WHITE -- the picker flips the % so
+-- "100%" stays "dark on screen" either way.
+-- The reset glyph, from the shared table: see lib/bookshelf_menu_icons.lua
+-- for why it is Private-Use-Area only and why the glyph rides outside the
+-- translatable string.
+local ICON_RESET = MenuIcons.RESET .. "  "
+
+-- _isNight() -> true when the NIGHT slot is the one being edited: the slot
+-- the menu edits (CoverProgress.editSuffix: the one the shelf on screen
+-- paints from, unless Colors for: switched it), not whether KOReader is
+-- inverting. The night slot is stored
+-- pre-inverted for a frame that flips it, the day slot as it displays, and
+-- the palette corrects for the frame at paint time (resolvedColors' flip).
+-- So what the reader SEES converts to what is stored by the slot alone.
+-- Asking the frame instead got both pinned themes wrong: pinned Dark with
+-- KOReader in day mode, and pinned Light with KOReader in night mode, showed
+-- a picked pink as its opposite, green (issue 426 had matched the SLOT to the
+-- palette; this matches the conversion to it too).
+local function _isNight()
+    local CP = require("lib/bookshelf_cover_progress")
+    return CP.editSuffix() ~= ""
+end
+local function _byteToScreenPct(byte)
+    if _isNight() then
+        return math.floor(byte * 100 / 0xFF + 0.5)
+    end
+    return math.floor((0xFF - byte) * 100 / 0xFF + 0.5)
+end
+-- _rawToScreenPct(raw) -> the stored colour as "% black on screen", or nil.
+--
+-- The row label and the picker it opens both need this number, and they used
+-- to work it out separately: the label converted a stored hex through Rec.601
+-- luminance, the picker understood only a stored `grey` and fell back to the
+-- row's hardcoded default for anything else. So a hex-stored colour showed one
+-- number in the menu and a different one in the dialog -- the shelf plank read
+-- 46% then 45%, a point apart, which reads as a rounding bug rather than as
+-- the missing branch it was.
+local function _rawToScreenPct(raw)
+    if type(raw) ~= "table" then return nil end
+    if raw.grey then return _byteToScreenPct(raw.grey) end
+    if raw.hex then
+        local hex = raw.hex
+        local r = tonumber(hex:sub(2, 3), 16) or 0
+        local g = tonumber(hex:sub(4, 5), 16) or 0
+        local b = tonumber(hex:sub(6, 7), 16) or 0
+        -- Rec.601 luminance: the grey a colour panel's value would read as.
+        return _byteToScreenPct(math.floor(0.299 * r + 0.587 * g + 0.114 * b + 0.5))
+    end
+    return nil
+end
+
+-- _colorScreen() -> the screen shows colour: the ONE check that picks the
+-- palette's colours over its greys and the form a row prints its value in
+-- (a hex, or a grey's name), so the two cannot disagree.
+local function _colorScreen()
+    local Screen = require("device").screen
+    return (Screen.isColorEnabled and Screen:isColorEnabled()) and true or false
+end
+
+-- _shownHex(raw, raw_key) -> the stored colour as the "#RRGGBB" the reader
+-- sees, as the palette shows it: the night slot is stored pre-inverted
+-- (except the plank's, stored as it displays), and a grey is a hex too.
+local function _shownHex(raw, raw_key)
+    if type(raw) ~= "table" then return nil end
+    local shown = raw
+    if _isNight() and raw_key ~= "spine_plank_color" then
+        shown = require("lib/bookshelf_color").invertValue(raw)
+    end
+    if type(shown) ~= "table" then return nil end
+    if shown.hex then return shown.hex:upper() end
+    if shown.grey then
+        local g = string.format("%02X", shown.grey)
+        return "#" .. g .. g .. g
+    end
+    return nil
+end
+
+-- _shadeName(pct) -> a grey said in a word, from "% black on screen": what
+-- a greyscale screen's rows show now its picker is chips of grey, not a "%
+-- black" number that read the wrong way round in night mode.
+local function _shadeName(pct)
+    if pct <= 4 then return _("White") end
+    if pct <= 29 then return _("Light gray") end
+    if pct <= 69 then return _("Gray") end
+    if pct <= 94 then return _("Dark gray") end
+    return _("Black")
+end
+Settings._shadeName = _shadeName   -- for tests
+
+-- _valueText(raw, raw_key) -> a colour row's value, in the form the picker it
+-- opens speaks: "#RRGGBB" on a colour screen (the palette, with its hex
+-- field), the grey's name elsewhere (_shadeName: the picker's chips of grey),
+-- whether it was stored as a grey or a hex.
+local function _valueText(raw, raw_key)
+    if type(raw) ~= "table" then return _("Default") end
+    if _colorScreen() then
+        local hex = _shownHex(raw, raw_key)
+        if hex then return hex end
+    end
+    local p = _rawToScreenPct(raw)
+    return p and _shadeName(p) or _("Default")
+end
+
+-- The row label for a stored colour ("default", "#RRGGBB", "40%"), for the
+-- colour rows outside this menu (a micro-module's own card colours).
+Settings.valueText = _valueText
+
+local function _screenPctToByte(pct)
+    if _isNight() then
+        return math.floor(pct * 0xFF / 100 + 0.5)
+    end
+    return 0xFF - math.floor(pct * 0xFF / 100 + 0.5)
+end
+
+-- Repaint the shelf after a setting changes. Each sub-item builder used to
+-- define its own; this is the one they delegate to.
+function Settings:_markDirty()
+    if self._bw and self._bw._rebuild then
+        self._bw:_rebuild()
+        UIManager:setDirty(self._bw, "ui")
+    end
+end
+
+-- _shelfSlot(): the colour slot back to the one the shelf on screen paints
+-- from. "Colors for: Light | Dark" switches it for the Colors menu only; the
+-- menu resets it each time it opens, and every colour row outside it (Color
+-- behind wallpaper, the plank colour) resets it too, so a switch made in
+-- Colors never carries over to them.
+function Settings:_shelfSlot()
+    pcall(function() require("lib/bookshelf_cover_progress").setEditSlot(nil) end)
+end
+
+-- _hidePickerMenu(touchmenu_instance) -> restore: KOReader's menu out of the
+-- way while a picker whose choices show on the shelf is open, and a closure
+-- that brings it back, once, with its rows refreshed. Through the plugin's
+-- hideMenu, which only hides a real menu container: a duck-typed shim (a menu
+-- shortcut from the start menu, bookshelf_menu_host) is refreshed instead of
+-- being pushed onto the window stack, where it would crash the next paint.
+function Settings:_hidePickerMenu(touchmenu_instance)
+    local plugin = self._plugin
+    local restore
+    if plugin and plugin.hideMenu then
+        restore = plugin:hideMenu(touchmenu_instance)
+    else
+        restore = function()
+            if touchmenu_instance and touchmenu_instance.updateItems then touchmenu_instance:updateItems() end
+        end
+    end
+    local done = false
+    return function()
+        if done then return end
+        done = true
+        restore()
+    end
+end
+
+-- wood.store (optional): { partRead, partSnapshot, partSave, partDelete,
+-- partRestore } in place of the theme's, for a colour kept elsewhere.
+-- wood.on_done (optional): runs once when the dialog closes, however, and the
+-- menu is then left alone (the caller keeps it hidden): the palette is handed
+-- a stand-in menu whose refresh is on_done.
+-- wood (optional, the plank only): { on_colour = fn, revert = fn } -- picking
+-- a colour makes the plank the colour (on_colour), Revert restores the plank
+-- that was there. special_tile (a palette tile: Transparent) is passed
+-- through when given, on colour and greyscale screens alike; on_default runs
+-- when Default is chosen (Shelf menu background: Default is the bar again).
+-- _paintedRaw(field) -> what the shelf paints for a colour left unset, in the
+-- stored shape ({ grey } / { hex }), or nil. rawColors() has it for most;
+-- Panel text left unset with a panel colour is Auto, black or white, whichever
+-- reads on the panel (CoverProgress.panelInk), which rawColors() leaves nil.
+-- The picker opened on 100% black over a mid grey panel whose text was white.
+local function _paintedRaw(field)
+    local CoverProgress = require("lib/bookshelf_cover_progress")
+    local raw = CoverProgress.rawColors()[field]
+    if type(raw) ~= "nil" or field ~= "panel_ink" or not CoverProgress.panelInk then return raw end
+    local ok, c = pcall(CoverProgress.panelInk)
+    if not ok or type(c) == "nil" then return nil end
+    local Blitbuffer = require("ffi/blitbuffer")
+    if Blitbuffer.isColor8 and Blitbuffer.isColor8(c) then return { grey = c:getColor8().a } end
+    local ok_rgb, rgb = pcall(function() return c:getColorRGB32() end)
+    if not ok_rgb then return nil end
+    return { hex = string.format("#%02X%02X%02X", rgb:getR(), rgb:getG(), rgb:getB()) }
+end
+
+function Settings:_pickColor(raw_key, field, default_pct, title,
+                             touchmenu_instance, refresh, anchor, wood)
+    local CoverProgress = require("lib/bookshelf_cover_progress")
+    local Color         = require("lib/bookshelf_color")
+        refresh = refresh or function() self:_markDirty() end
+        -- Each swatch tap is shown by the picker at once; what it costs
+        -- behind is kept for the taps to pause: the settings held in memory
+        -- while the picker is open (one write as it closes, not ~130 ms a
+        -- tap on a PW5) and the shelf rebuilt once, 0.35 s after the last
+        -- tap, not per tap (perf review 2026-10-31). Not when something
+        -- else is holding the writes already (the Theme library).
+        local ok_o, Orn = pcall(require, "lib/bookshelf_ornaments")
+        local own_defer = ok_o and Orn and Orn.beginDeferred and not Orn._defer
+        if own_defer then Orn.beginDeferred() end
+        local now_refresh, pending = refresh, false
+        local function fire()
+            pending = false
+            now_refresh()
+        end
+        refresh = function()
+            pending = true
+            UIManager:unschedule(fire)
+            UIManager:scheduleIn(0.35, fire)
+        end
+        local function onClosed()
+            UIManager:unschedule(fire)
+            if pending then fire() end
+            if own_defer then Orn.endDeferred() end
+        end
+        -- title: the picker's title.
+        -- wood.on_done: once, when the dialog closes; the caller's menu is
+        -- not touched (see above).
+        local on_done, menu_for_dialog = nil, touchmenu_instance
+        if wood and wood.on_done then
+            local fired = false
+            on_done = function()
+                if fired then return end
+                fired = true
+                wood.on_done()
+            end
+            menu_for_dialog = { updateItems = on_done }
+        end
+        -- Suffix routes day vs night-mode storage to separate keys so
+        -- editing in night mode doesn't clobber the user's day colors
+        -- and vice versa. Mirrors CoverProgress.resolvedColors().
+        local suffix = CoverProgress.editSuffix()
+        local key      = raw_key .. suffix
+        -- Read and written through the one seam: Custom theme's key, or the
+        -- edits to the theme on screen (bookshelf_theme_pack.partSave).
+        -- wood.store (optional): somewhere else to keep it, with the same
+        -- five calls -- a micro-module's own card colours live on the module
+        -- (bookshelf_module_card_menu).
+        local TP       = (wood and wood.store) or require("lib/bookshelf_theme_pack")
+        local raw      = TP.partRead(key)
+        local before   = TP.partSnapshot(key)
+
+        local colour = _colorScreen()
+        if colour then
+            -- The night slot is stored PRE-INVERTED, for a frame that flips it
+            -- (a grey goes through _screenPctToByte the same way). The picker speaks in what the reader SEES,
+            -- so it inverts on the way in and out; without that a colour
+            -- picked in night mode displayed as its opposite -- red as cyan.
+            -- The plank is the exception: stored as it DISPLAYS in both
+            -- slots, and pre-inverted by the spine shelf itself against the
+            -- screen (see resolvedColors' plank note).
+            local night = _isNight() and raw_key ~= "spine_plank_color"
+            local current_hex = _shownHex(raw, raw_key)
+            -- With the wood on, no colour swatch is the current choice.
+            local wood_on = wood and wood.special_tile and wood.special_tile.selected
+            if wood_on then current_hex = nil end
+            -- Nothing stored: the hex field still opens on the colour the row
+            -- shows (its default), not empty. The wood has no hex to show.
+            local hex_text
+            if not current_hex and not wood_on then
+                hex_text = _shownHex(_paintedRaw(field), raw_key)
+            end
+            self._plugin:showColorPicker(
+                title, current_hex, Color.defaultHexFor(field),
+                function(new_hex)
+                    local stored = Color.toStorageShape(new_hex)
+                    if night then stored = Color.invertValue(stored) end
+                    TP.partSave(key, stored)
+                    if wood and wood.on_colour then wood.on_colour() end
+                    refresh()
+                end,
+                function()
+                    TP.partDelete(key)
+                    if wood and wood.on_default then wood.on_default() end
+                    refresh()
+                end,
+                function()
+                    TP.partRestore(key, before)
+                    if wood and wood.revert then wood.revert() end
+                    refresh()
+                end,
+                menu_for_dialog, nil, nil, wood and wood.special_tile or nil, hex_text,
+            { anchor = anchor, on_closed = onClosed })
+            return
+        end
+
+        -- A greyscale screen: the same palette, its chips the greys from
+        -- white to black as they LOOK on screen (the palette's greys mode),
+        -- in place of the "% black" dialog, whose number was hard to read the
+        -- right way round in night mode (darkness, or brightness?). It hands
+        -- back the grey as seen; _screenPctToByte stores what paints it,
+        -- night slot included, as the dialog did.
+        --
+        -- Nothing stored: the chip marked is what the shelf PAINTS (as the
+        -- palette's hex field does), not the caller's default_pct, which had
+        -- drifted from the painted defaults; default_pct stays for the
+        -- colours rawColors() leaves nil on purpose and keys it lacks.
+        local shown_default = _rawToScreenPct(_paintedRaw(field)) or default_pct
+        local current = _rawToScreenPct(raw) or shown_default
+        local function seenHex(pct)
+            local v = math.floor(0xFF * (100 - pct) / 100 + 0.5)
+            return string.format("#%02X%02X%02X", v, v, v)
+        end
+        local wood_on = wood and wood.special_tile and wood.special_tile.selected
+        self._plugin:showColorPicker(
+            title, (not wood_on) and seenHex(current) or nil, nil,
+            function(seen_hex)
+                local v = tonumber(seen_hex:sub(2, 3), 16) or 0
+                local pct = math.floor((0xFF - v) * 100 / 0xFF + 0.5)
+                TP.partSave(key, { grey = _screenPctToByte(pct) })
+                if wood and wood.on_colour then wood.on_colour() end
+                refresh()
+            end,
+            function()
+                TP.partDelete(key)
+                if wood and wood.on_default then wood.on_default() end
+                refresh()
+            end,
+            function()
+                TP.partRestore(key, before)
+                if wood and wood.revert then wood.revert() end
+                refresh()
+            end,
+            menu_for_dialog, nil, nil, wood and wood.special_tile or nil, nil,
+            { greys = true, anchor = anchor, on_closed = onClosed })
+    end
+
+-- _nudgePage(touchmenu_instance, spec) -- a size nudge, as a slim page low on
+-- the screen (STYLE.md): a slider (tap or drag the track, - and + step by
+-- spec.fine, -10 and +10 either side, Default ticked under it), Cancel |
+-- Default | Done. Every change saves and previews behind the page; Cancel,
+-- the X and Back put back the value it opened with.
+--
+--   spec.key, spec.default, spec.min, spec.max, spec.fine, spec.big
+--   spec.unit     "%" (a scale: "120% of the normal size") or " dp"
+--   spec.title    the page's title
+--   spec.anchor   where to open it (the chip bar's nudge opens below the bar
+--                 it resizes); centred when nil
+--   spec.preview  called after each change, to show it (a rebuild of the
+--                 shelf unless spec.no_shelf)
+--   spec.on_done  called on every way out, after the menu is back (closing
+--                 a preview it opened)
+--
+-- The TouchMenu behind is hidden while the page is up so the live preview is
+-- not covered (restored on every way out, so the next tap lands on the menu
+-- the reader came from; see Bookshelf:hideMenu in main.lua, #60). A tap
+-- outside is Done (on_tap_outside); the X and Back put the value back.
+function Settings:_nudgePage(touchmenu_instance, spec)
+    local key, default = spec.key, spec.default or 100
+    local original = BookshelfSettings.read(key, default)
+    local restoreMenu = self._plugin:hideMenu(touchmenu_instance)
+    local function getValue() return BookshelfSettings.read(key, default) end
+    local dialog
+    -- The preview behind waits for the taps to pause and is drawn once: one
+    -- rebuild per tap queued rapid taps behind it (maintainer, PW5). The
+    -- page shows the new value at once.
+    local pending = false
+    local function apply()
+        pending = false
+        if spec.preview then spec.preview() end
+        if not spec.no_shelf and self._bw and self._bw._rebuild then
+            self._bw:_rebuild()
+            UIManager:setDirty(self._bw, "ui")
+        end
+        if touchmenu_instance and touchmenu_instance.updateItems then
+            touchmenu_instance:updateItems()
+        end
+    end
+    local function flush()
+        if pending then
+            UIManager:unschedule(apply)
+            apply()
+        end
+    end
+    -- Each step in memory (saveDeferred); written once as the page closes
+    -- (keep): save() rewrites the whole settings file, ~130 ms a step on a
+    -- PW5.
+    local function setValue(v)
+        v = math.max(spec.min or 50, math.min(spec.max or 200, v))
+        if v == getValue() then return end
+        BookshelfSettings.saveDeferred(key, v)
+        pending = true
+        UIManager:unschedule(apply)
+        UIManager:scheduleIn(0.35, apply)
+        if dialog then dialog:refresh() end
+    end
+    local function show(v) return tostring(v) .. (spec.unit or "%") end
+    -- Written only when it moved: Cancel, or Done on the value it opened
+    -- on, has nothing to write (a whole-file write, ~130 ms on a PW5).
+    local function keep()
+        if getValue() ~= original then BookshelfSettings.save(key, getValue()) end
+    end
+    local function done(revert)
+        if revert then setValue(original) end
+        keep()
+        flush()
+        UIManager:close(dialog)
+        restoreMenu()
+        if spec.on_done then spec.on_done() end
+    end
+    local function page()
+        return { blocks = {
+            { type = "slider", value = getValue(), min = spec.min or 50,
+              max = spec.max or 200, step = spec.fine or 5, default = default,
+              big = spec.big or 10, format = show, on_change = setValue,
+              -- In the title instead, for a tighter panel (maintainer).
+              no_value = true },
+        } }
+    end
+    -- A slim panel low on the screen (the chip bar's opens under the bar),
+    -- so the preview behind stays in sight (maintainer: a slider).
+    dialog = require("lib/bookshelf_page_dialog").show{
+        title = function() return spec.title .. ": " .. show(getValue()) end,
+        page = page,
+        anchor = spec.anchor,
+        at_bottom = true,
+        -- A tap outside is Done: the shelf can be paged behind the page to
+        -- judge the change, and the value stays (maintainer). The rapid
+        -- steps that fell through and closed it were the stock dialog's.
+        on_tap_outside = function() done(false) end,
+        footer = {
+            { text = _("Cancel"), callback = function() done(true) end },
+            -- Default stays in the footer (maintainer), greyed at the default.
+            { text = _("Default"), enabled_func = function() return getValue() ~= default end,
+              callback = function() setValue(default) end },
+            { text = _("Done"), primary = true, callback = function() done(false) end },
+        },
+        -- The X and Back: closed already; put the value back.
+        on_close = function()
+            setValue(original)
+            keep()
+            flush()
+            restoreMenu()
+            if spec.on_done then spec.on_done() end
+        end,
+    }
+end
+
+-- _showScaleNudge(touchmenu_instance, spec) -- a percentage scale's nudge:
+-- spec.key (default 100, 50..spec.max), spec.fine, spec.title, spec.anchor,
+-- spec.preview, through _nudgePage.
+function Settings:_showScaleNudge(touchmenu_instance, spec)
+    self:_nudgePage(touchmenu_instance, {
+        key = spec.key, default = 100, min = 50, max = spec.max or 200,
+        fine = spec.fine or 5, unit = "%",
+        title = spec.title, anchor = spec.anchor, preview = spec.preview,
+    })
+end
+
+-- The cover-badge font scale's size page (series #, stack count, page
+-- count, completed-tick), through _showScaleNudge; +5/+10 steps so the small
+-- badge changes by a noticeable amount per tap without overshooting.
+function Settings:_pickCoverBadgeFontScale(touchmenu_instance)
+    self:_showScaleNudge(touchmenu_instance, {
+        key = "cover_badge_font_scale", title = _("Cover badge size"), max = 200, fine = 5,
+    })
+end
+
+-- ---------------------------------------------------------------------------
+-- Settings (parent) menu
+-- ---------------------------------------------------------------------------
+
+-- Cover-progress + Advanced settings live behind a single "Settings" entry
+-- in the main bookshelf menu. Keeps the top level uncluttered while still
+-- giving each surface its own sub-screen.
+function Settings:_settingsSubItems()
+    local items = {}
+
+    -- ── live editors band ──
+    -- ("Edit shelf size" was promoted to the top-level Bookshelf menu in 4.0
+    -- - it's the layout knob users reach for most.)
+    -- The status line, split from the detail-view editor (4.0): it shows
+    -- device/reading status rather than the book's own details, and it also
+    -- appears as the strip in expanded mode - a different thing to configure.
+    -- Listed ABOVE the detail editor to mirror the screen (the strip sits at
+    -- the top of the hero). Same row contract as inside the editor: tap
+    -- edits, hold toggles.
+    items[#items + 1] = self:_heroSubItems({ "status" })[1]
+    items[#items].enabled_func = function() return self._bw ~= nil end
+    items[#items + 1] = {
+        text                = _("Edit top panel content"),
+        help_text = _("The lines of book information shown in the top panel:"
+            .. " title, author, rating, metadata, description, tags and"
+            .. " progress. Tap a line to edit its template; hold to toggle"
+            .. " it. The status line at the top has its own entry."),
+        enabled_func        = function() return self._bw ~= nil end,
+        sub_item_table_func = function()
+            return self:_heroSubItems()
+        end,
+    }
+    -- ("Show text below covers" lives in the Cover display submenu since 4.0:
+    -- one label mode drives the regular grid and the expanded shelf alike,
+    -- replacing the old per-surface checkbox + expanded-only mode pair.)
+    -- ("True cover aspect ratio" lives in the Cover display submenu.)
+    items[#items].separator = true  -- end the editors band
+
+    -- ── appearance band ──
+    items[#items + 1] = {
+        text                = _("Cover display"),
+        sub_item_table_func = function()
+            return self:_coverDisplaySubItems()
+        end,
+    }
+    items[#items + 1] = {
+        text                = _("List view"),
+        sub_item_table_func = function()
+            return self:_listViewSubItems()
+        end,
+    }
+    items[#items + 1] = {
+        text                = _("Text size"),
+        sub_item_table_func = function()
+            return self:_textSizeSubItems()
+        end,
+    }
+    -- Colors and Wallpaper both left this menu for the top-level Theme menu
+    -- (bookshelf_theme_menu.items): the theme, the background and the
+    -- accents are only ever set together, and being three levels apart made
+    -- them read as unrelated.
+    -- Bookshelf UI font: promoted here from Advanced to sit with the other
+    -- appearance settings.
+    items[#items + 1] = {
+        text_func = function()
+            local Fonts = require("lib/bookshelf_fonts")
+            local f = Fonts.getUIFontFace()
+            local label = _("Follow KOReader")
+            if f then label = Fonts.displayName(f) end
+            return T(_("Bookshelf UI font: %1"), label)
+        end,
+        help_text = _("The font Bookshelf uses for its own UI text (shelf names, "
+            .. "labels, metadata). Pick any installed font (same picker as the "
+            .. "top panel); '(Default)' follows your KOReader UI font. The "
+            .. "title and author have their own fonts in the book detail editor."),
+        keep_menu_open = true,
+        callback = function(touchmenu_instance) self:_pickBookshelfUIFont(touchmenu_instance) end,
+    }
+    -- Image contrast: a boost for the covers, spines and ornaments, and the
+    -- wallpaper's own contrast and brightness. Each is applied once to a
+    -- picture already decoded and kept, never per paint
+    -- (lib/bookshelf_image_contrast).
+    items[#items + 1] = {
+        text = _("Image contrast"),
+        help_text = _("Deepens the shadows and mid-tones of covers and spines, which can help on a screen with few greys. Applied once to each picture, never per paint."),
+        sub_item_table_func = function()
+            return { self:_imageContrastRow("boost") }
+        end,
+    }
+    -- The extra wallpaper folder went to Theme > Wallpaper (2026-10-16): as a
+    -- twelfth row here it pushed Library & search onto a second page of
+    -- KOReader's 10-row menu.
+    items[#items].separator = true  -- end appearance band
+
+    -- ── surfaces band: micro-module placement + the start menu ──
+    -- Micro-module placement: four INDEPENDENT surfaces (start menu / hero /
+    -- full-screen button / on the shelf), each a checkbox, so any combination
+    -- can run at once. Turning all four off is the kill switch
+    -- (microAnyEnabled() false).
+    -- ("Hero area starts with" - which the hero checkbox governs - lives in
+    -- Behavior since 4.0.)
+    items[#items + 1] = {
+        text_func = function()
+            if not BookshelfSettings.microAnyEnabled() then
+                return _("Modules") .. ": " .. _("Off")
+            end
+            return _("Modules")
+        end,
+        help_text = _("Where modules appear, each on its own."
+            .. " In the start menu: cards in the start menu."
+            .. " In the top panel: a shelf menu entry that swaps the book for modules."
+            .. " Full-screen button: a footer button that opens a full screen of modules."
+            .. " On the shelf: modules among a shelf's books (off, the books take their space back)."
+            .. " Turn all four off to hide modules everywhere."),
+        sub_item_table_func = function()
+            -- Flip one surface. Snapshot the current (possibly still
+            -- legacy-derived) state of all three and persist them explicitly, so
+            -- after the first toggle we no longer depend on the old
+            -- micro_modules_placement key.
+            local function toggle(which, touchmenu_instance)
+                local sm   = BookshelfSettings.microInStartMenu()
+                local hero = BookshelfSettings.microInHero()
+                local fs   = BookshelfSettings.microFullscreenButton()
+                if     which == "start_menu" then sm   = not sm
+                elseif which == "hero"       then hero = not hero
+                elseif which == "fullscreen" then fs   = not fs end
+                BookshelfSettings.save("micro_in_start_menu", sm)
+                BookshelfSettings.save("micro_in_hero", hero)
+                BookshelfSettings.save("micro_fullscreen_button", fs)
+                BookshelfSettings.delete("micro_modules_placement")  -- fully migrated
+                BookshelfSettings.delete("micro_modules_disabled")   -- legacy
+                refreshReaderLauncher()
+                BookshelfSettings.flush()
+                if self._bw then
+                    if hero and BookshelfSettings.read("hero_area_mode") == "micro_modules" then
+                        self._bw._hero_mode = "micro"
+                        self._bw._expanded = false
+                    elseif (not hero) and self._bw._hero_mode == "micro" then
+                        -- Hero surface off: the chip that switches back is gone,
+                        -- so drop to the book hero.
+                        self._bw._hero_mode = "current"
+                    end
+                    if self._bw._rebuild then
+                        self._bw:_rebuild()
+                        UIManager:setDirty(self._bw, "ui")
+                    end
+                end
+                if touchmenu_instance and touchmenu_instance.updateItems then
+                    touchmenu_instance:updateItems()
+                end
+            end
+            local function row(which, label, accessor)
+                return {
+                    text           = label,
+                    checked_func   = accessor,
+                    keep_menu_open = true,
+                    callback       = function(tmi) toggle(which, tmi) end,
+                }
+            end
+            return {
+                row("start_menu", _("In the start menu"), BookshelfSettings.microInStartMenu),
+                row("hero",       _("In the top panel"),       BookshelfSettings.microInHero),
+                row("fullscreen", _("Full-screen button"), BookshelfSettings.microFullscreenButton),
+                -- Its own key, not part of the three-way snapshot above: it
+                -- was never derived from the legacy placement.
+                {
+                    text           = _("On the shelf"),
+                    checked_func   = BookshelfSettings.microOnShelf,
+                    keep_menu_open = true,
+                    callback       = function(tmi)
+                        BookshelfSettings.save("micro_on_shelf", not BookshelfSettings.microOnShelf())
+                        BookshelfSettings.flush()
+                        if self._bw and self._bw._rebuild then
+                            self._bw:_rebuild()
+                            UIManager:setDirty(self._bw, "ui")
+                        end
+                        if tmi and tmi.updateItems then tmi:updateItems() end
+                    end,
+                },
+            }
+        end,
+    }
+    items[#items + 1] = {
+        text                = _("Start menu"),
+        sub_item_table_func = function()
+            return self:_startMenuSubItems()
+        end,
+        separator           = true,
+    }
+
+    -- ("Hardcover enrichment" lives at the top level - see main.lua.)
+    items[#items + 1] = {
+        text                = _("Behavior"),
+        sub_item_table_func = function()
+            return self:_behaviourSubItems()
+        end,
+    }
+    items[#items + 1] = {
+        text                = _("Library & search"),
+        sub_item_table_func = function()
+            return self:_librarySubItems()
+        end,
+    }
+    items[#items + 1] = {
+        text                = _("Advanced"),
+        sub_item_table_func = function()
+            return self:_advancedSubItems()
+        end,
+    }
+    return items
+end
+
+local function _formatCacheTime(ts)
+    ts = tonumber(ts)
+    if not ts then return _("never") end
+    return os.date("%Y-%m-%d %H:%M", ts)
+end
+
+function Settings:_hardcoverSubItems()
+    local function markDirty(reason)
+        pcall(function()
+            local Repo = require("lib/bookshelf_book_repository")
+            Repo.invalidateBookCache(reason or "hardcover")
+            -- Also drop the light-meta cache: Hardcover changes (linking,
+            -- "Use Hardcover metadata", auto-link) rewrite the title/author/
+            -- series/genre fields the genre/author/series chips group from, so
+            -- the chips must rebuild from fresh records, not just the per-chip
+            -- result caches invalidateBookCache clears.
+            if Repo.invalidateLightMeta then Repo.invalidateLightMeta() end
+        end)
+        pcall(function()
+            require("lib/bookshelf_image_source").invalidateCache()
+        end)
+        if self._bw and self._bw._rebuild then
+            self._bw:_rebuild()
+            UIManager:setDirty(self._bw, "ui")
+        end
+    end
+
+    local function notify(text, timeout)
+        UIManager:show(Notification:new{
+            text    = text,
+            timeout = timeout or 3,
+        })
+    end
+
+    -- Bulk auto-link: scan the whole library and link any book that carries
+    -- an embedded ISBN / Hardcover id -- the single-book "Auto link" applied
+    -- across the library. Throttled to ~1 request/second to stay under
+    -- Hardcover's 60/min API limit; shows cancellable progress.
+    -- Shared driver for the long Hardcover scans (auto-link, refresh). Runs one
+    -- item per scheduler tick so the UI event loop keeps running between books:
+    -- the progress message stays tappable (cancel works) and nothing freezes,
+    -- unlike a blocking loop. Network items are paced by `rate` to respect
+    -- Hardcover's ~60/min limit; cheap items just yield a tick.
+    --   opts.items     array to walk
+    --   opts.rate      seconds between network ticks (default 1.2)
+    --   opts.step(item, st) -> did_network   (mutates st counters)
+    --   opts.progress(st, total) -> string   progress message text
+    --   opts.summary(st, total)  -> string   final message text
+    --   opts.on_finish(st)        optional, before the summary shows
+    local function runPacedScan(opts)
+        local InfoMessage = require("ui/widget/infomessage")
+        local items = opts.items
+        local total = #items
+        local rate  = opts.rate or 1.2
+        local st = { i = 0, cancelled = false }
+        -- Ignore taps briefly after start: the tap that launched the scan can
+        -- bleed onto the freshly-shown progress message and cancel it instantly.
+        local armed = false
+        UIManager:scheduleIn(0.6, function() armed = true end)
+        local info
+        -- InfoMessage:onCloseWidget fires dismiss_callback on ANY close, incl.
+        -- our own close when swapping in an updated message. Detach before a
+        -- programmatic close so only a genuine user dismissal counts as cancel.
+        local function closeInfo()
+            if info then
+                info.dismiss_callback = nil
+                UIManager:close(info)
+                info = nil
+            end
+        end
+        local function refresh()
+            closeInfo()
+            info = InfoMessage:new{
+                text = opts.progress(st, total),
+                dismiss_callback = function()
+                    if armed then st.cancelled = true end
+                end,
+            }
+            UIManager:show(info)
+        end
+        local function finish()
+            closeInfo()
+            if opts.on_finish then opts.on_finish(st) end
+            -- summary is optional: callers that present their own completion UI
+            -- (e.g. the auto-link HTML report) omit it.
+            if opts.summary then
+                UIManager:show(InfoMessage:new{ text = opts.summary(st, total) })
+            end
+        end
+        local step
+        step = function()
+            if st.cancelled or st.i >= total then return finish() end
+            st.i = st.i + 1
+            local did_network = opts.step(items[st.i], st)
+            if did_network or st.i % 10 == 0 or st.i == total then refresh() end
+            if did_network then
+                UIManager:scheduleIn(rate, step)
+            else
+                UIManager:nextTick(step)
+            end
+        end
+        refresh()
+        UIManager:nextTick(step)
+    end
+
+    local function autoLinkAll(touchmenu_instance)
+        local ok_hc, Hardcover = pcall(require, "lib/bookshelf_hardcover")
+        if not ok_hc or not Hardcover
+                or not (Hardcover.isAvailable and Hardcover.isAvailable()) then
+            notify(_("Hardcover plugin is not available"))
+            return
+        end
+        local Repo = require("lib/bookshelf_book_repository")
+        local filepaths = Repo.getAllFilepaths() or {}
+        -- Kindle library books are NOT on the filesystem walk (a .kfx is not in
+        -- SUPPORTED_EXT and they live outside home_dir), so a bulk auto-link
+        -- skipped every one of them -- even though linking a Kindle book
+        -- one at a time works fine. Deduped, since a converted file can land
+        -- inside home_dir and be walked as well as listed.
+        local seen = {}
+        for _i, fp in ipairs(filepaths) do seen[fp] = true end
+        for _i, fp in ipairs(Repo.librarySourceFilepaths() or {}) do
+            if not seen[fp] then
+                seen[fp] = true
+                filepaths[#filepaths + 1] = fp
+            end
+        end
+        -- Pre-filter: drop already-linked books (cheap -- reads the link cache,
+        -- no network), so only genuine candidates cost an API call.
+        local candidates = {}
+        for _i, fp in ipairs(filepaths) do
+            if not Hardcover.getLink(fp) then
+                candidates[#candidates + 1] = fp
+            end
+        end
+        local total = #candidates
+        if total == 0 then
+            notify(_("No unlinked books to auto-link."))
+            return
+        end
+
+        -- ~2 Hardcover calls per processed book (resolve/search, then fetch
+        -- details), so pace at ~2.5s/book to stay under the ~60/min API limit.
+        local RATE = 2.5
+        local est_min = math.max(1, math.ceil(total * RATE / 60))
+
+        -- Display name for the report: prefer the book's title, fall back to a
+        -- de-extensioned filename.
+        local function nameFor(fp, meta)
+            if meta and type(meta.title) == "string" and meta.title ~= "" then
+                return meta.title
+            end
+            return (fp:match("([^/]+)$") or fp):gsub("%.[^%.]+$", "")
+        end
+
+        local function showReport(st, best_guess)
+            local ok_tok, Tokens = pcall(require, "lib/bookshelf_tokens")
+            if not ok_tok or not Tokens or not Tokens.autoLinkReportHtml then return end
+            local Screen = require("device").screen
+            UIManager:show(require("lib/bookshelf_reviews_modal"):new{
+                title     = _("Auto-link report"),
+                html_body = Tokens.autoLinkReportHtml{
+                    best_guess = best_guess,
+                    cancelled  = st.cancelled,
+                    linked     = st.linked_list or {},
+                    nomatch    = st.nomatch_list or {},
+                    no_id      = st.no_id or 0,
+                    errors     = st.errors or 0,
+                },
+                width  = math.floor(Screen:getWidth() * 0.92),
+                height = math.floor(Screen:getHeight() * 0.86),
+            })
+        end
+
+        local function run(best_guess)
+            if touchmenu_instance then UIManager:close(touchmenu_instance) end
+            runPacedScan{
+                items = candidates,
+                rate  = RATE,
+                step = function(fp, st)
+                    st.linked_list  = st.linked_list  or {}
+                    st.nomatch_list = st.nomatch_list or {}
+                    if best_guess then
+                        -- Needs title/author, so build the record first, then
+                        -- search Hardcover and score the hits.
+                        local meta = (Repo.buildBookMeta and Repo.buildBookMeta(fp))
+                                     or { filepath = fp }
+                        local ok_call, linked_ok, details =
+                            pcall(Hardcover.bestGuessLink, meta)
+                        if ok_call and linked_ok then
+                            st.linked = (st.linked or 0) + 1
+                            pcall(Hardcover.refreshBook, meta, {})
+                            local d = type(details) == "table" and details or {}
+                            local score
+                            if tonumber(d.title_score) and tonumber(d.author_score) then
+                                score = math.floor((d.title_score + d.author_score) / 2 + 0.5)
+                            end
+                            st.linked_list[#st.linked_list + 1] = {
+                                name = nameFor(fp, meta), matched = d.title,
+                                author = d.author, score = score,
+                            }
+                        elseif not ok_call
+                                or (details ~= "no_match"
+                                    and details ~= "no_confident_match") then
+                            -- An exception, a failed search or a failed link
+                            -- write is an ERROR, not a verdict about the book
+                            -- -- counting it as no-match buried real failures
+                            -- in the report (issue 310's second finding), and
+                            -- exact mode already made the distinction.
+                            st.errors = (st.errors or 0) + 1
+                        else
+                            st.no_match = (st.no_match or 0) + 1
+                            st.nomatch_list[#st.nomatch_list + 1] = { name = nameFor(fp, meta) }
+                        end
+                        return true
+                    end
+                    -- Exact: embedded ISBN / Hardcover id only.
+                    local book = { filepath = fp }
+                    local ids = Hardcover.getEmbeddedIdentifiers
+                                and Hardcover.getEmbeddedIdentifiers(book)
+                    if not ids then
+                        st.no_id = (st.no_id or 0) + 1
+                        return false  -- no network, next tick immediately
+                    end
+                    local ok_call, linked_ok, hc =
+                        pcall(Hardcover.linkFromEmbeddedIdentifiers, book)
+                    if not ok_call then
+                        st.errors = (st.errors or 0) + 1
+                    elseif linked_ok then
+                        st.linked = (st.linked or 0) + 1
+                        -- Fetch details + apply the cover/description decision
+                        -- now, so the book is fully populated in one pass.
+                        local meta = (Repo.buildBookMeta and Repo.buildBookMeta(fp))
+                                     or book
+                        pcall(Hardcover.refreshBook, meta, {})
+                        st.linked_list[#st.linked_list + 1] = {
+                            name = nameFor(fp, meta),
+                            matched = type(hc) == "table" and hc.title or nil,
+                        }
+                    else
+                        st.no_match = (st.no_match or 0) + 1
+                        st.nomatch_list[#st.nomatch_list + 1] = { name = nameFor(fp, book) }
+                    end
+                    return true
+                end,
+                progress = function(st, n)
+                    return T(_("Auto-linking from Hardcover…\n\n%1 / %2 checked  ·  %3 linked\n\n(tap to cancel)"),
+                             tostring(st.i), tostring(n), tostring(st.linked or 0))
+                end,
+                on_finish = function(st)
+                    if (st.linked or 0) > 0 then markDirty("hardcover-auto-link-all") end
+                    showReport(st, best_guess)
+                end,
+            }
+        end
+
+        -- Mode picker: exact (embedded id, fast) vs best guess (title/author
+        -- full-text search + fuzzy match, slower but catches books with no id).
+        local ButtonDialog = require("ui/widget/buttondialog")
+        local dialog
+        dialog = ButtonDialog:new{
+            title = T(_("Auto-link %1 unlinked book(s)?\n\nContacts Hardcover (rate-limited), up to ~%2 min. Cancellable, with a report at the end."),
+                      tostring(total), tostring(est_min)),
+            title_align = "center",
+            buttons = {
+                {{
+                    text = _("Exact match (ISBN / Hardcover id)"),
+                    callback = function() UIManager:close(dialog); run(false) end,
+                }},
+                {{
+                    text = _("Best guess (title & author)"),
+                    callback = function() UIManager:close(dialog); run(true) end,
+                }},
+                {{
+                    text = _("Cancel"),
+                    callback = function() UIManager:close(dialog) end,
+                }},
+            },
+        }
+        require("lib/bookshelf_gesture_zones").passSwipesOn(dialog)
+        UIManager:show(dialog)
+    end
+
+    return {
+        {
+            text_func = function()
+                local ok_hc, Hardcover = pcall(require, "lib/bookshelf_hardcover")
+                if not ok_hc or not Hardcover or not Hardcover.getCacheStats then
+                    return _("Cached Hardcover ratings: unavailable")
+                end
+                local stats = Hardcover.getCacheStats()
+                return string.format(_("Cached Hardcover ratings: %d/%d · %s"),
+                    stats.rated or 0,
+                    stats.linked or 0,
+                    _formatCacheTime(stats.fetched_at))
+            end,
+            enabled_func = function() return false end,
+        },
+        {
+            -- Primary action: the first thing a new Hardcover user wants is to
+            -- link their library, so it sits at the top.
+            text = _("Auto-link all books"),
+            help_text = _("Scan the library and link books to Hardcover, fetching each match's details (description, cover, rating) in the same pass. Choose Exact match (uses an embedded ISBN / Hardcover id, fast) or Best guess (searches by title and author and picks the most confident match, slower but catches books with no embedded id). A report at the end lists exactly what was linked. Contacts Hardcover (rate-limited) with cancellable progress."),
+            enabled_func = function()
+                local ok_hc, HC = pcall(require, "lib/bookshelf_hardcover")
+                return (ok_hc and HC and HC.isAvailable and HC.isAvailable()) or false
+            end,
+            callback = function(touchmenu_instance)
+                autoLinkAll(touchmenu_instance)
+            end,
+        },
+        {
+            text = _("Show Hardcover ratings"),
+            help_text = _("When enabled, the rating row shows the cached public Hardcover rating instead of KOReader's local rating. Enabling this also turns on the rating row. Normal Bookshelf rendering only reads the local cache."),
+            checked_func = function()
+                return BookshelfSettings.isTrue("hardcover_hero_rating")
+            end,
+            keep_menu_open = true,
+            callback = function(touchmenu_instance)
+                local enabled = BookshelfSettings.isTrue("hardcover_hero_rating")
+                BookshelfSettings.save("hardcover_hero_rating", not enabled)
+                if not enabled then
+                    local Regions = require("lib/bookshelf_hero_regions")
+                    local regions = Regions.read()
+                    if regions.rating and regions.rating.disabled then
+                        regions.rating.disabled = false
+                        Regions.write("rating", regions.rating)
+                    end
+                end
+                if touchmenu_instance and touchmenu_instance.updateItems then
+                    touchmenu_instance:updateItems()
+                end
+                markDirty("hardcover-rating-toggle")
+            end,
+        },
+        {
+            -- One stand-in for every place a rating is used (issue 538): the
+            -- cover's star rating, the Rating sort and the Ratings shelf.
+            -- Never the book menu's own stars, which stay the reader's.
+            text = _("Use Hardcover rating if no user rating"),
+            help_text = _("Books you have not rated yourself use their Hardcover rating instead: in star ratings on covers, the Rating sort and the Ratings shelf. Only for books linked to Hardcover, from ratings already fetched."),
+            checked_func = function()
+                return BookshelfSettings.isTrue("hardcover_rating_fallback")
+            end,
+            keep_menu_open = true,
+            callback = function()
+                BookshelfSettings.save("hardcover_rating_fallback",
+                    not BookshelfSettings.isTrue("hardcover_rating_fallback"))
+                -- Sorts and the Ratings shelf cache what they read.
+                local Repo = require("lib/bookshelf_book_repository")
+                if Repo.invalidateWalkCache then Repo.invalidateWalkCache() end
+                markDirty("hardcover-rating-fallback")
+            end,
+        },
+        {
+            text = _("Use Hardcover metadata"),
+            help_text = _("For books linked to Hardcover, show Hardcover's title, author, series and genres in place of the book's own -- a clean switch, no merging. Covers and descriptions stay under their per-book toggles. This affects sorting, search and series grouping for linked books; non-linked books are unaffected. Metadata is always cached, so this only decides whether it's used."),
+            checked_func = function()
+                return BookshelfSettings.isTrue("hardcover_use_metadata")
+            end,
+            keep_menu_open = true,
+            callback = function(touchmenu_instance)
+                local enabled = BookshelfSettings.isTrue("hardcover_use_metadata")
+                BookshelfSettings.save("hardcover_use_metadata", not enabled)
+                if touchmenu_instance and touchmenu_instance.updateItems then
+                    touchmenu_instance:updateItems()
+                end
+                markDirty("hardcover-use-metadata")
+            end,
+        },
+        {
+            text = _("Download covers from Hardcover"),
+            help_text = _("When on, linking a book also downloads its Hardcover cover and stores it as the book's cover. Off by default: most books already have a cover, and downloaded covers use storage and get picked up by the library metadata scan. Descriptions, ratings and metadata are fetched either way; turn this on only if you want Hardcover covers too."),
+            checked_func = function()
+                return BookshelfSettings.isTrue("hardcover_download_covers")
+            end,
+            keep_menu_open = true,
+            callback = function(touchmenu_instance)
+                local enabled = BookshelfSettings.isTrue("hardcover_download_covers")
+                BookshelfSettings.save("hardcover_download_covers", not enabled)
+                if touchmenu_instance and touchmenu_instance.updateItems then
+                    touchmenu_instance:updateItems()
+                end
+            end,
+        },
+        {
+            text_func = function()
+                local n = tonumber(BookshelfSettings.read("hardcover_max_genres")) or 5
+                return T(_("Hardcover genres used: %1"), tostring(n))
+            end,
+            help_text = _("How many of a linked book's Hardcover genres to use -- for the tag pills and the genre shelves/stacks -- when Use Hardcover metadata is on. 0 uses none."),
+            enabled_func = function()
+                return BookshelfSettings.isTrue("hardcover_use_metadata")
+            end,
+            keep_menu_open = true,
+            callback = function(touchmenu_instance)
+                local SpinWidget = require("ui/widget/spinwidget")
+                local cur = tonumber(BookshelfSettings.read("hardcover_max_genres")) or 5
+                UIManager:show(SpinWidget:new{
+                    title_text     = _("Hardcover genres used"),
+                    info_text      = _("How many of a book's Hardcover genres to use for tag pills and the genre shelves/stacks."),
+                    value          = cur,
+                    value_min      = 0,
+                    value_max      = 20,
+                    value_step     = 1,
+                    value_hold_step = 5,
+                    ok_text        = _("Set"),
+                    callback = function(spin)
+                        BookshelfSettings.save("hardcover_max_genres", spin.value)
+                        if touchmenu_instance and touchmenu_instance.updateItems then
+                            touchmenu_instance:updateItems()
+                        end
+                        markDirty("hardcover-max-genres")
+                    end,
+                })
+            end,
+        },
+        {
+            -- Maintenance lives one level down: refreshing cached data and
+            -- clearing it are occasional housekeeping, not everyday settings.
+            text = _("Manage Hardcover data"),
+            sub_item_table = {
+                {
+                    -- Auto-link all books now fetches details as it links, so
+                    -- there's no separate "fetch missing data" step. This just
+                    -- keeps the public ratings current as they drift on
+                    -- Hardcover (one batched query, no per-book covers/text).
+                    text = _("Refresh ratings only"),
+                    help_text = _("Fetch up-to-date public ratings and review counts for every linked book in one quick batched request -- seconds, even for a large library. Ratings drift daily; for the rarely-changing details (author, genres, series, description, pages) use Refresh linked book details instead."),
+                    callback = function(touchmenu_instance)
+                        if touchmenu_instance then
+                            UIManager:close(touchmenu_instance)
+                        end
+                        UIManager:nextTick(function()
+                            local ok_hc, Hardcover = pcall(require, "lib/bookshelf_hardcover")
+                            if not ok_hc or not Hardcover or not Hardcover.refreshRatingsOnline then
+                                notify(_("Hardcover integration could not be loaded"))
+                                return
+                            end
+                            notify(_("Fetching Hardcover ratings..."), 1)
+                            Hardcover.refreshRatingsOnline(function(ok, stats)
+                                if not ok then
+                                    notify(tostring(stats or _("Hardcover ratings refresh failed")), 5)
+                                    return
+                                end
+                                markDirty("hardcover-ratings-refresh")
+                                stats = type(stats) == "table" and stats or {}
+                                notify(T(_("Hardcover ratings refreshed: %1 rated of %2 linked books"),
+                                         tostring(stats.rated or 0),
+                                         tostring(stats.linked or 0)), 4)
+                            end)
+                        end)
+                    end,
+                },
+                {
+                    -- Full details re-fetch for every linked book: the path
+                    -- that heals stale cached enrichment in place (e.g. the
+                    -- pre-v5 author strings that included narrators and
+                    -- translators). Links untouched; one query per book,
+                    -- paced under Hardcover's rate limit.
+                    text = _("Refresh linked book details"),
+                    help_text = _("Re-fetch the cached details (author, description, series, genres, page count, ratings) for every linked book, one rate-limited request per book -- minutes on a large library, cancellable. Use after an upgrade note asks for it, or when cached data looks stale; for just the ratings, Refresh ratings only is much faster."),
+                    callback = function(touchmenu_instance)
+                        if touchmenu_instance then
+                            UIManager:close(touchmenu_instance)
+                        end
+                        UIManager:nextTick(function()
+                            self._plugin:refreshHardcoverDetails()
+                        end)
+                    end,
+                },
+                {
+                    -- One clear for everything cached. Links are kept, so a
+                    -- refresh repopulates afterwards.
+                    text = _("Clear cache (keeps links)"),
+                    help_text = _("Remove Bookshelf's cached Hardcover descriptions, cover images, ratings, review counts and review text. Existing book links are kept, so you can refresh again later."),
+                    callback = function(touchmenu_instance)
+                        if touchmenu_instance then
+                            UIManager:close(touchmenu_instance)
+                        end
+                        UIManager:nextTick(function()
+                            local ok_hc, Hardcover = pcall(require, "lib/bookshelf_hardcover")
+                            if ok_hc and Hardcover then
+                                if Hardcover.clearEnrichmentCache then Hardcover.clearEnrichmentCache() end
+                                if Hardcover.clearRatingsCache then Hardcover.clearRatingsCache() end
+                                if Hardcover.clearReviewsCache then Hardcover.clearReviewsCache() end
+                            end
+                            markDirty("hardcover-clear-cache")
+                            notify(_("Hardcover cache cleared"))
+                        end)
+                    end,
+                },
+                {
+                    -- Cover-only cleanup (issue #111): reclaim the storage that
+                    -- downloaded covers use without unlinking or losing
+                    -- descriptions. Restores each book's original cover.
+                    text = _("Remove downloaded covers"),
+                    help_text = _("Delete every downloaded Hardcover cover and restore each book's original cover, keeping links, descriptions and ratings. Frees the storage the covers use and clears them out of the library metadata scan."),
+                    callback = function(touchmenu_instance)
+                        local ConfirmBox = require("ui/widget/confirmbox")
+                        UIManager:show(ConfirmBox:new{
+                            text = _("Remove all downloaded Hardcover covers?\n\nEach book's original cover is restored; links, descriptions and ratings are kept."),
+                            ok_text = _("Remove covers"),
+                            ok_callback = function()
+                                if touchmenu_instance then
+                                    UIManager:close(touchmenu_instance)
+                                end
+                                UIManager:nextTick(function()
+                                    local ok_hc, Hardcover = pcall(require, "lib/bookshelf_hardcover")
+                                    local n = 0
+                                    if ok_hc and Hardcover and Hardcover.removeDownloadedCovers then
+                                        local ok_run, res = pcall(Hardcover.removeDownloadedCovers)
+                                        if ok_run then n = res or 0 end
+                                    end
+                                    markDirty("hardcover-remove-covers")
+                                    notify(T(_("Removed downloaded covers (%1 book(s))."), tostring(n)))
+                                end)
+                            end,
+                        })
+                    end,
+                },
+                {
+                    -- Full reset: unlink everything and undo all changes. Guarded
+                    -- by a warning; only Hardcover-installed covers are removed
+                    -- and any displaced original cover is put back.
+                    text = _("Remove all Hardcover data"),
+                    help_text = _("Unlink every book and delete all cached Hardcover descriptions, covers, ratings and reviews, resetting the library to how it was before any Hardcover linking. Only covers Hardcover added are removed; a cover you had before is restored. Cannot be undone."),
+                    callback = function(touchmenu_instance)
+                        local ConfirmBox = require("ui/widget/confirmbox")
+                        UIManager:show(ConfirmBox:new{
+                            text = _("Remove ALL Hardcover data?\n\nThis unlinks every book and deletes all cached Hardcover covers, descriptions, ratings and reviews. Covers Hardcover saved into book folders are removed and any cover you had before is put back.\n\nThis cannot be undone."),
+                            ok_text = _("Remove all"),
+                            ok_callback = function()
+                                if touchmenu_instance then
+                                    UIManager:close(touchmenu_instance)
+                                end
+                                UIManager:nextTick(function()
+                                    local ok_hc, Hardcover = pcall(require, "lib/bookshelf_hardcover")
+                                    local n = 0
+                                    if ok_hc and Hardcover and Hardcover.removeAllData then
+                                        local ok_run, res = pcall(Hardcover.removeAllData)
+                                        if ok_run then n = res or 0 end
+                                    end
+                                    markDirty("hardcover-remove-all")
+                                    notify(T(_("All Hardcover data removed (%1 book(s) unlinked)."),
+                                             tostring(n)))
+                                end)
+                            end,
+                        })
+                    end,
+                },
+            },
+        },
+    }
+end
+
+-- (The Expanded shelf submenu was dissolved in 4.0: its label mode moved
+-- to Cover display as the unified "Cover captions", and "Tap a book in
+-- expanded shelf" lives in Settings > Behavior.)
+-- Nudge dialog for the cover captions' font scale (the key keeps its
+-- expanded-shelf name). Titled for its Text size row, as the others are; it
+-- said "Full screen shelves" long after it sized every shelf's captions.
+-- Same shape as _pickFontScale; live preview kicks the live widget's _rebuild.
+function Settings:_pickExpandedShelfFontScale(touchmenu_instance)
+    self:_showScaleNudge(touchmenu_instance, {
+        key = "expanded_shelf_font_scale", title = _("Cover captions font scale"), max = 300, fine = 5,
+    })
+end
+
+-- Factored out from main.lua so it can be referenced via the new Settings
+-- parent menu. Behaviour is identical to the previous inline definition.
+-- Performance levers, grouped under one "Performance tweaks" submenu so the
+-- Advanced menu stays scannable.
+function Settings:_performanceSubItems()
+    local Screen = require("device").screen
+    local items = {
+        {
+            -- The shelf's depth is a band per column per slot, and it now
+            -- paints on a plain background as well as over a picture, so a
+            -- device with a slow blitter meets it on shelves that used to be
+            -- exempt. Off means flat spines, which is what every plain shelf
+            -- looked like before.
+            text = _("Disable spine mode shadows"),
+            help_text = _("Spine shelves paint a recess behind the books and "
+                .. "a shadow either side of each spine, which is what makes "
+                .. "the shelf look deep. Turn this off if drawing it is slow "
+                .. "on your device; the books then sit flat on the shelf."),
+            checked_func = function()
+                return BookshelfSettings.read("spine_no_shadows", false) == true
+            end,
+            keep_menu_open = true,
+            callback = function(touchmenu_instance)
+                local off = BookshelfSettings.read("spine_no_shadows", false) == true
+                BookshelfSettings.save("spine_no_shadows", not off)
+                -- The depth is built into the shelf PLAN (the recess is a
+                -- row-level widget, not part of a book's cached render), so
+                -- the plan is what has to go. invalidateRender is no help
+                -- here: with no filepath it returns immediately.
+                pcall(function()
+                    local SpineShelf = require("lib/bookshelf_spine_shelf")
+                    if SpineShelf.dropPlanCache then SpineShelf.dropPlanCache() end
+                end)
+                -- And the shelf on screen has to be rebuilt from it, or the
+                -- flip shows nothing until something else rebuilds it.
+                if self._bw and self._bw._rebuild then self._bw:_rebuild() end
+                UIManager:setDirty("all", "ui")
+                if touchmenu_instance then touchmenu_instance:updateItems() end
+            end,
+        },
+        {
+            text = _("Instant book close (beta)"),
+            help_text = _("Show Bookshelf immediately when leaving a "
+                .. "book. The book finishes closing at the next quiet "
+                .. "moment - opening another book, half a minute of "
+                .. "inactivity, or leaving Bookshelf - so browsing "
+                .. "never has to wait for it. Until then, going "
+                .. "straight back into the same book is instant. Turn "
+                .. "this off to close books fully before Bookshelf "
+                .. "appears, as before."),
+            checked_func = function()
+                return BookshelfSettings.nilOrTrue("hot_park")
+            end,
+            keep_menu_open = true,
+            callback = function()
+                local enabled = BookshelfSettings.nilOrTrue("hot_park")
+                BookshelfSettings.save("hot_park", not enabled)
+            end,
+        },
+        {
+            -- Issue 529: shelf page turns refresh in "ui" mode, which KOReader
+            -- never promotes to a flash, so "Full refresh rate: Every page"
+            -- left the shelf ghosting. Off by default: a flash costs time.
+            text = _("Use E-ink refresh rate for shelf pages"),
+            help_text = _("Flash the shelf clean on page turns as often as "
+                .. "KOReader's own Full refresh rate (Screen > E-ink settings) "
+                .. "does for book pages, to clear ghosting. A page that "
+                .. "flashes skips its animation and takes a little longer. "
+                .. "E-ink only."),
+            checked_func = function()
+                return BookshelfSettings.isTrue("shelf_full_refresh")
+            end,
+            keep_menu_open = true,
+            callback = function()
+                BookshelfSettings.save("shelf_full_refresh",
+                    not BookshelfSettings.isTrue("shelf_full_refresh"))
+            end,
+        },
+        {
+            text = _("Pre-warm shelf cache"),
+            help_text = _("Warms each shelf's data in the background shortly"
+                .. " after launch so switching shelves is instant. On a large"
+                .. " library with many shelves this adds a few seconds of work"
+                .. " after startup; turn it off for a quicker, lighter launch"
+                .. " (shelves then load on first use)."),
+            checked_func = function()
+                return BookshelfSettings.nilOrTrue("prewarm_chip_cache")
+            end,
+            callback = function()
+                local on = BookshelfSettings.nilOrTrue("prewarm_chip_cache")
+                BookshelfSettings.save("prewarm_chip_cache", not on)
+                BookshelfSettings.flush()
+            end,
+        },
+        {
+            text     = _('"Latest" walk depth'),
+            callback = function() self:_pickLatestDepth() end,
+        },
+        {
+            text_func = function()
+                local SCC = require("lib/bookshelf_scaled_cover_cache")
+                return _("Cover cache") .. ": "
+                    .. tostring(BookshelfSettings.read("cover_cache_mb") or SCC.deviceDefaultBudgetMB())
+                    .. " MB"
+            end,
+            -- The default follows the device's memory (12 MB below 384 MB,
+            -- 24 below 1 GiB, 48 from 1 GiB up), so the help names the
+            -- figure for THIS device.
+            help_text = T(_("How much memory to use for ready-scaled book covers. "
+                .. "A bigger cache keeps more covers warm -- smoother paging and "
+                .. "preloading -- at the cost of RAM. Default %1 MB on this device. Lower it if "
+                .. "memory is tight; raise it on a device with plenty of RAM. "
+                .. "(How many covers that holds depends on their size: roughly "
+                .. "200-400 small grayscale covers, fewer large or color ones.)"),
+                require("lib/bookshelf_scaled_cover_cache").deviceDefaultBudgetMB()),
+            keep_menu_open = true,
+            callback = function(touchmenu_instance)
+                self:_pickCoverCacheBudget(touchmenu_instance)
+            end,
+        },
+        {
+            text = _("Clear cover cache"),
+            help_text = _("Drop all cached scaled covers, in memory and on disk. "
+                .. "Use this when a book's cover has been updated outside "
+                .. "KOReader (e.g. a metadata-enrichment tool rewrote the "
+                .. "EPUB) and the old cover is still showing on the shelf. "
+                .. "The next render fetches fresh covers from the EPUBs."),
+            keep_menu_open = true,
+            callback = function()
+                local ScaledCoverCache = require("lib/bookshelf_scaled_cover_cache")
+                ScaledCoverCache:clear()
+                -- Spine colours are sampled from the covers and saved, so a
+                -- fresh cover needs a fresh colour too (issue 537).
+                pcall(function() require("lib/bookshelf_spine_shelf").forgetLooks() end)
+                if self._bw and self._bw._rebuild then
+                    self._bw:_rebuild()
+                    UIManager:setDirty("all", "ui")
+                end
+                UIManager:show(Notification:new{
+                    text    = _("Cover cache cleared"),
+                    timeout = 2,
+                })
+            end,
+        },
+    }
+
+    -- Colour-panel only: on Kaleido / colour e-ink, covers only pick up the
+    -- panel's colour waveform when the refresh carries the dither hint (#289).
+    -- On by default; exposed so testers can compare with/without. No effect on
+    -- B&W panels, so the row is hidden there to avoid clutter.
+    if Screen.isColorEnabled and Screen:isColorEnabled() then
+        items[#items + 1] = {
+            text = _("Color panel dithering"),
+            help_text = _("Applies the color-dither waveform when redrawing "
+                .. "book covers so they keep their full saturation on color "
+                .. "e-ink panels. Turn it off to compare; with it off, covers "
+                .. "can look washed out until a full-screen refresh. Color "
+                .. "panels only."),
+            checked_func = function()
+                return BookshelfSettings.nilOrTrue("color_panel_dithering")
+            end,
+            keep_menu_open = true,
+            callback = function()
+                local on = BookshelfSettings.nilOrTrue("color_panel_dithering")
+                BookshelfSettings.save("color_panel_dithering", not on)
+                BookshelfSettings.flush()
+                -- Apply live so the comparison is immediate: recompute the flag,
+                -- rebuild, and repaint the shelf with an ordinary "ui" refresh
+                -- (which now carries the hint only when the tweak is on).
+                local bw = self._bw
+                if bw and bw._refreshDitherFlag then
+                    bw:_refreshDitherFlag()
+                    if bw._rebuild then bw:_rebuild() end
+                    UIManager:setDirty(bw, "ui")
+                end
+            end,
+        }
+    end
+
+    return items
+end
+
+-- Behavior: how the shelf responds to you - taps, animations, what the hero
+-- opens as, close feedback. Split out of the old 13-item Advanced menu (4.0)
+-- together with _librarySubItems below; Advanced keeps betas/perf/resets.
+function Settings:_behaviourSubItems()
+    -- Shared builder for the two animation-speed rows (#259): the page-turn
+    -- wipe (shelf pagination + chip-bar paging) and the start-menu reveal.
+    -- Same Off/Fast/Medium/Slow choices, separate keys; defaults come from
+    -- PageWipe.DEFAULTS (the menu repaints a taller region, so it defaults
+    -- snappier than the page wipe).
+    local function animRow(title, key, help)
+        local PageWipe = require("lib/bookshelf_page_wipe")
+        local MODE_LABELS = { off    = _("Off"),
+                              fast   = _("Fast"),
+                              medium = _("Normal"),
+                              slow   = _("Slow") }
+        local default = PageWipe.DEFAULTS[key]
+        local function cur()
+            return BookshelfSettings.read(key) or default
+        end
+        return {
+            text_func = function()
+                return title .. ": " .. (MODE_LABELS[cur()] or MODE_LABELS[default])
+            end,
+            help_text = help,
+            keep_menu_open = true,
+            sub_item_table_func = function()
+                local function row(label, value)
+                    return {
+                        text = label,
+                        radio = true,
+                        checked_func = function() return cur() == value end,
+                        callback = function()
+                            BookshelfSettings.save(key, value)
+                            BookshelfSettings.flush()
+                        end,
+                    }
+                end
+                return {
+                    row(_("Off"),    "off"),
+                    row(_("Fast"),   "fast"),
+                    row(_("Normal"), "medium"),
+                    row(_("Slow"),   "slow"),
+                }
+            end,
+        }
+    end
+    local items = {}
+    -- Hero-area-starts-with only matters when micro-modules are in the hero
+    -- area; hidden otherwise. Two-state radio: "currently_reading" (default)
+    -- shows the book hero; "micro_modules" shows the micro-module grid. Seeds
+    -- _hero_mode on each fresh widget; the chip-bar toggle owns the live
+    -- switch, and changing it here applies live too.
+    if BookshelfSettings.microInHero() then
+        items[#items + 1] = (function()
+            local function readMode()
+                local v = BookshelfSettings.read("hero_area_mode")
+                if v == "micro_modules" then return v end
+                return "currently_reading"
+            end
+            local labels = {
+                currently_reading = _("Currently reading"),
+                micro_modules     = _("Modules"),
+            }
+            local function setMode(mode, touchmenu_instance)
+                BookshelfSettings.save("hero_area_mode", mode)
+                if self._bw then
+                    self._bw._hero_mode =
+                        (mode == "micro_modules") and "micro" or "current"
+                    if mode == "micro_modules" then
+                        -- Leave the expanded strip state if we're entering
+                        -- micro mode, mirroring the chip handler.
+                        self._bw._expanded = false
+                    end
+                    if self._bw._rebuild then
+                        self._bw:_rebuild()
+                        UIManager:setDirty(self._bw, "ui")
+                    end
+                end
+                if touchmenu_instance and touchmenu_instance.updateItems then
+                    touchmenu_instance:updateItems()
+                end
+            end
+            local function optionRow(mode, label)
+                return {
+                    text           = label,
+                    checked_func   = function() return readMode() == mode end,
+                    radio          = true,
+                    keep_menu_open = true,
+                    callback       = function(touchmenu_instance)
+                        setMode(mode, touchmenu_instance)
+                    end,
+                }
+            end
+            return {
+                text_func = function()
+                    return _("Top panel starts with") .. ": " .. labels[readMode()]
+                end,
+                help_text = _("What the top panel above the shelf"
+                    .. " shows when it opens: the book you're currently"
+                    .. " reading, or a grid of modules (clock, quote,"
+                    .. " random book, reading goals…). You can also switch"
+                    .. " between them from the shelf menu."),
+                sub_item_table_func = function()
+                    return {
+                        optionRow("currently_reading", labels.currently_reading),
+                        optionRow("micro_modules",     labels.micro_modules),
+                    }
+                end,
+            }
+        end)()
+    end
+    -- What a tap on a book in the expanded shelf does. Defaults (via
+    -- expandedTapAction) honour the legacy tap_to_open_double toggle so
+    -- existing users keep their behaviour; that toggle still governs the
+    -- hero-card double-tap separately.
+    local tap_labels = {
+        show_detail = _("Show the book's details"),
+        open        = _("Open with a single tap"),
+        open_double = _("Open with a double tap"),
+    }
+    local function tapRow(action, label)
+        return {
+            text           = label,
+            checked_func   = function() return BookshelfSettings.expandedTapAction() == action end,
+            radio          = true,
+            keep_menu_open = true,
+            callback       = function(touchmenu_instance)
+                BookshelfSettings.save("expanded_tap_action", action)
+                BookshelfSettings.flush()
+                -- Clear any pending tap-selection so switching mid-session
+                -- doesn't leave a stale focus ring.
+                if self._bw then self._bw._tap_selected_fp = nil end
+                if touchmenu_instance and touchmenu_instance.updateItems then
+                    touchmenu_instance:updateItems()
+                end
+            end,
+        }
+    end
+    items[#items + 1] = {
+        text_func = function()
+            return _("Tap a book in full screen shelves") .. ": "
+                .. tap_labels[BookshelfSettings.expandedTapAction()]
+        end,
+        help_text = _("What tapping a book does in full screen shelves: show"
+            .. " that book's detail in the top panel, open it with a single"
+            .. " tap, or open it with a double tap (first tap selects). The"
+            .. " top panel's own double-tap-to-open is the next row."),
+        sub_item_table_func = function()
+            return {
+                tapRow("show_detail", tap_labels.show_detail),
+                tapRow("open",        tap_labels.open),
+                tapRow("open_double", tap_labels.open_double),
+            }
+        end,
+    }
+    -- Every one of Bookshelf's own gestures, each switchable: to find out
+    -- what there is, and to lock a device down (maintainer: "for kids").
+    -- Absorbs issue 366's "Swipe down leaves full screen shelves" row (same
+    -- setting). Tapping a book and swiping pages are not in it: without them
+    -- the shelf cannot be used.
+    items[#items + 1] = {
+        text = _("Bookshelf gestures"),
+        help_text = _("Switch off any of Bookshelf's own gestures. A gesture"
+            .. " switched off does nothing on the shelf. Tapping a book and"
+            .. " swiping between pages always work."),
+        sub_item_table_func = function()
+            return require("lib/bookshelf_gestures").menuItems()
+        end,
+    }
+    items[#items + 1] = {
+        text = _("Double tap to open books"),
+        help_text = _("When enabled, opening a book from the top panel "
+            .. "card or from a shelf cover in full screen shelves requires "
+            .. "two taps -- the first selects the cover (focus "
+            .. "ring), the second commits. Useful if you tend to "
+            .. "open books accidentally while browsing. Regular "
+            .. "shelf covers (with the top panel visible) already work "
+            .. "this way -- tap stages the book in the top "
+            .. "panel, tapping that opens it -- and are "
+            .. "unaffected by this setting."),
+        checked_func   = function()
+            return BookshelfSettings.isTrue("tap_to_open_double")
+        end,
+        keep_menu_open = true,
+        callback = function()
+            local enabled = BookshelfSettings.isTrue("tap_to_open_double")
+            BookshelfSettings.save("tap_to_open_double", not enabled)
+            BookshelfSettings.flush()
+            -- Clear any pending tap-selection on the live widget so
+            -- toggling the setting off mid-session doesn't leave a
+            -- stale focus ring on the hero / shelf cover.
+            if self._bw then self._bw._tap_selected_fp = nil end
+        end,
+        -- End the tap band.
+        separator = true,
+    }
+    -- The footer bar (maintainer): shown; hidden, the shelf taking its
+    -- space; or its buttons kept where they are but not drawn, shown while
+    -- the keys are in it. Both hidden modes show it while selecting books.
+    local footer_labels = { show = _("Show"), hide = _("Hide"), invisible = _("Invisible buttons") }
+    local function footerMode()
+        local v = BookshelfSettings.read("footer_bar", "show")
+        return footer_labels[v] and v or "show"
+    end
+    local function footerRow(value, help)
+        return {
+            text = footer_labels[value],
+            help_text = help,
+            radio = true,
+            checked_func = function() return footerMode() == value end,
+            callback = function()
+                BookshelfSettings.save("footer_bar", value)
+                -- The layout changes (Hide gives the shelf more room).
+                if self._bw and self._bw._rebuild then
+                    self._bw:_rebuild()
+                    UIManager:setDirty(self._bw, "ui")
+                end
+            end,
+        }
+    end
+    items[#items + 1] = {
+        text_func = function()
+            return _("Footer bar") .. ": " .. footer_labels[footerMode()]
+        end,
+        help_text = _("The bar along the bottom of the shelf, with the menu button and the page arrows."),
+        sub_item_table_func = function()
+            return {
+                footerRow("show", _("The bar with the menu button and the page arrows.")),
+                footerRow("hide", _("No bar: the shelf uses its space. Swipe to turn pages; open the menu from KOReader's menu or a gesture. The bar comes back while you select books.")),
+                footerRow("invisible", _("The bar is not drawn, but its buttons still work where they were: the menu in its corner and the arrows to turn pages. Moving into it with the keys shows it.")),
+            }
+        end,
+        separator = true,
+    }
+    items[#items + 1] = animRow(_("Page turn animation"), "shelf_page_animation",
+        _("Animate shelf page turns and shelf-menu paging with a wipe "
+        .. "effect. E-ink only (the effect relies on the panel's "
+        .. "refresh, so it does nothing on LCD screens). Fast / Medium "
+        .. "/ Slow trade snappiness for smoothness. Slow looks "
+        .. "smoothest but takes longer on older panels."))
+    items[#items + 1] = animRow(_("Start menu animation"), "start_menu_animation",
+        _("Animate the start menu opening and closing. Separate from "
+        .. "the page-turn wipe, so you can keep one and turn off the "
+        .. "other - the menu reveal repaints a taller area and can "
+        .. "look choppy on some screens, particularly while reading. "
+        .. "E-ink only."))
+    items[#items + 1] = {
+        text = _("Closing book notification"),
+        help_text = _("Show a 'Closing book…' message in the center "
+            .. "of the screen while a book is being closed back to "
+            .. "Bookshelf. The book-close work takes a moment, so "
+            .. "the message confirms your gesture landed during the "
+            .. "wait. Some users on color e-ink panels see a brief "
+            .. "flash from the message appearing. Turn it off here "
+            .. "if you prefer no message and no flash."),
+        checked_func   = function()
+            return BookshelfSettings.nilOrTrue("show_close_msg")
+        end,
+        keep_menu_open = true,
+        callback = function()
+            local enabled = BookshelfSettings.nilOrTrue("show_close_msg")
+            BookshelfSettings.save("show_close_msg", not enabled)
+        end,
+    }
+    return items
+end
+
+-- Library & search: the metadata/search half of the old Advanced menu, plus
+-- the collection manager (demoted from the top level in 4.0 - it stays
+-- reachable from its other routes, e.g. collection chips).
+-- _choiceRow(opts) -> a row that opens a short radio list of named values.
+--
+-- Same shape as the shelf theme picker: the current value rides in the row's
+-- own label so the menu answers "what is this set to" without being opened,
+-- and the pick applies immediately rather than on a Done.
+--   opts.key / opts.default   the setting, and what an untouched library has
+--   opts.options              { { value = ..., label = function() end }, ... }
+--   opts.on_change            called after the save, for anything that has to
+--                             be rebuilt or repainted
+function Settings:_choiceRow(opts)
+    local function current()
+        local v = BookshelfSettings.read(opts.key, opts.default)
+        for _i, o in ipairs(opts.options) do
+            if o.value == v then return v end
+        end
+        -- A value nothing offers (an older build, a hand-edited file) reads
+        -- as the default rather than showing the reader a word they cannot
+        -- find in the list below.
+        return opts.default
+    end
+    local function labelFor(v)
+        for _i, o in ipairs(opts.options) do
+            if o.value == v then return o.label() end
+        end
+        return tostring(v)
+    end
+    return {
+        text_func = function() return opts.label .. ": " .. labelFor(current()) end,
+        help_text = opts.help,
+        keep_menu_open = true,
+        sub_item_table_func = function()
+            local rows = {}
+            for _i, o in ipairs(opts.options) do
+                local value = o.value
+                rows[#rows + 1] = {
+                    text         = o.label(),
+                    radio        = true,
+                    checked_func = function() return current() == value end,
+                    keep_menu_open = true,
+                    callback = function(touchmenu_instance)
+                        BookshelfSettings.save(opts.key, value)
+                        BookshelfSettings.flush()
+                        if opts.on_change then opts.on_change() end
+                        if touchmenu_instance and touchmenu_instance.updateItems then
+                            touchmenu_instance:updateItems()
+                        end
+                    end,
+                }
+            end
+            return rows
+        end,
+    }
+end
+
+function Settings:_librarySubItems()
+    local plugin = self._plugin
+    local items = {
+        -- ── actions ──
+        -- ── library & metadata ──
+        {
+            text     = _("Scan all library metadata"),
+            callback = function(touchmenu_instance)
+                if touchmenu_instance then
+                    UIManager:close(touchmenu_instance)
+                end
+                UIManager:nextTick(function() plugin:scanAllMetadata() end)
+            end,
+        },
+        {
+            text      = _("Extract page counts\xE2\x80\xA6"),
+            help_text = _("Find page counts for your books, so spines, page"
+                .. " count badges and tokens reflect their length. Publisher page numbers and Hardcover editions"
+                .. " are used where a book has them; the rest are rendered in"
+                .. " the background at your reading settings, which can take a"
+                .. " while on a large library."),
+            callback  = function(touchmenu_instance)
+                if touchmenu_instance then
+                    UIManager:close(touchmenu_instance)
+                end
+                -- Choices first (sources, fill or recount, delete); the
+                -- dialog starts the scan.
+                UIManager:nextTick(function()
+                    require("lib/bookshelf_page_count_dialog").show(
+                        function(opts) plugin:scanPageCounts(opts) end,
+                        function()
+                            local bw = self._bw
+                            if bw and bw._rebuild then
+                                bw:_rebuild()
+                                UIManager:setDirty(bw, "ui")
+                            end
+                        end)
+                end)
+            end,
+        },
+    {
+        text     = _("Manage collections\xE2\x80\xA6"),
+        help_text = _("Create, rename, reorder and delete collections."
+            .. " Also reachable from collection shelves and stacks."),
+        callback = function()
+            local CollectionManager = require("lib/bookshelf_collection_manager")
+            CollectionManager.show{
+                bw = self._bw,
+                on_close = function()
+                    if self._bw and self._bw._rebuild then
+                        self._bw:_rebuild()
+                        UIManager:setDirty(self._bw, "ui")
+                    end
+                end,
+            }
+        end,
+    },
+    {
+        -- The 4.0 home for the old top-level "Selection mode" entry. The
+        -- shelf must be up for a selection to mean anything, so this shows
+        -- it first when needed; BW.live resolves the widget that show()
+        -- created (self._bw was captured before it existed).
+        text_func = function()
+            local ok_bw, BW = pcall(require, "lib/bookshelf_widget")
+            local bw = (ok_bw and BW.live) or self._bw
+            if bw and bw._selection and bw._selection:isActive() then
+                return _("Bulk selection mode") .. "  \xE2\x9C\x93"
+            end
+            return _("Bulk selection mode")
+        end,
+        help_text = _("Select several books at once to move or delete them or"
+            .. " add them to a collection. Also available from a book's Edit"
+            .. " tab (Select), the stack menus (Select N), or as a gesture."
+            .. " Not available in remote catalog views."),
+        callback = function(touchmenu_instance)
+            if touchmenu_instance then UIManager:close(touchmenu_instance) end
+            local plugin_ref = self._plugin
+            if plugin_ref and plugin_ref._isShowing and not plugin_ref:_isShowing()
+                    and plugin_ref.show then
+                plugin_ref:show()
+            end
+            local ok_bw, BW = pcall(require, "lib/bookshelf_widget")
+            local bw = (ok_bw and BW.live) or self._bw
+            if bw then bw:onBookshelfToggleSelectionMode() end
+        end,
+        separator = true,  -- end the actions band
+    },
+        -- ── metadata ──
+        {
+            text_func = function()
+                local v = BookshelfSettings.read("author_format") or "auto"
+                local label = ({ auto = _("Auto"),
+                                 first_last = _("First Last"),
+                                 last_first = _("Last, First") })[v]
+                                 or _("Auto")
+                return _("Author name formatting") .. ": " .. label
+            end,
+            help_text = _("How author names are displayed on the Authors"
+                .. " shelf. Auto keeps whichever form was first found"
+                .. " (\"Richard Osman\" or \"Osman, Richard\"). First Last"
+                .. " and Last, First force every author card into the same"
+                .. " shape regardless of how each book stored the name."),
+            keep_menu_open = true,
+            sub_item_table_func = function()
+                local function row(label, value)
+                    return {
+                        text = label,
+                        checked_func = function()
+                            local v = BookshelfSettings.read("author_format") or "auto"
+                            return v == value
+                        end,
+                        callback = function()
+                            BookshelfSettings.save("author_format", value)
+                            BookshelfSettings.flush()
+                            local Repo = require("lib/bookshelf_book_repository")
+                            if Repo.invalidateSeriesCache then
+                                Repo.invalidateSeriesCache()
+                            end
+                            if self._bw and self._bw._rebuild then
+                                self._bw:_rebuild()
+                                UIManager:setDirty(self._bw, "ui")
+                            end
+                        end,
+                    }
+                end
+                return {
+                    row(_("Auto"),         "auto"),
+                    row(_("First Last"),   "first_last"),
+                    row(_("Last, First"),  "last_first"),
+                }
+            end,
+        },
+        -- How a spine's title runs, and what the footer counts. Both are
+        -- library-wide display rules, so they sit with the other ones here
+        -- rather than in the shelf style dialog, which pins per shelf.
+        self:_choiceRow{
+            label   = _("Spine text direction"),
+            help    = _("Which way a title runs down a spine. British and "
+                .. "American books are printed to read downwards; Continental "
+                .. "European printing runs the other way. Spines only."),
+            key     = "spine_text_direction",
+            default = "top_down",
+            options = {
+                { value = "top_down",  label = function() return _("Top to bottom") end },
+                { value = "bottom_up", label = function() return _("Bottom to top") end },
+            },
+            on_change = function()
+                -- The direction is baked into each cached spine render, and
+                -- the key knows it, so a rebuild is all that is needed: the
+                -- old bitmaps stay cached under their own key and the new
+                -- ones are drawn beside them.
+                if self._bw and self._bw._rebuild then
+                    self._bw:_rebuild()
+                    UIManager:setDirty(self._bw, "ui")
+                end
+            end,
+        },
+        {
+            text = _("Hide single-book series and genres"),
+            help_text = _("When a series or genre contains only one book, hide"
+                .. " it from the Series and Genres tabs. Useful when a book"
+                .. " carries a one-off series name, or its own title as the"
+                .. " series. Off by default."),
+            checked_func = function()
+                return BookshelfSettings.isTrue("hide_single_book_stacks")
+            end,
+            keep_menu_open = true,
+            callback = function(touchmenu_instance)
+                local on = BookshelfSettings.isTrue("hide_single_book_stacks")
+                BookshelfSettings.save("hide_single_book_stacks", not on)
+                BookshelfSettings.flush()
+                -- Rebuild the series/genre group shapes from scratch. The
+                -- filter is read-time, but a warm cache can hold shapes built
+                -- by the background chip-preload before the library walk
+                -- finished -- a multi-book series caught mid-walk is cached as
+                -- a one-book shape, which the toggle would then wrongly hide.
+                -- Invalidating forces a complete, correct rebuild on toggle.
+                local Repo = require("lib/bookshelf_book_repository")
+                if Repo.invalidateSeriesCache then Repo.invalidateSeriesCache() end
+                if touchmenu_instance and touchmenu_instance.updateItems then
+                    touchmenu_instance:updateItems()
+                end
+                if self._bw and self._bw._rebuild then
+                    self._bw:_rebuild()
+                    UIManager:setDirty(self._bw, "ui")
+                end
+            end,
+        },
+        {
+            text_func = function()
+                local ImageSource = require("lib/bookshelf_image_source")
+                local p = ImageSource.getImageLibraryPath()
+                local short = p
+                if type(p) == "string" then
+                    -- Show just the last two segments so the row
+                    -- doesn't truncate; settings menus are narrow.
+                    short = p:match("([^/]+/[^/]+/?)$") or p
+                end
+                return _("Image library") .. ": " .. (short or _("(none)"))
+            end,
+            keep_menu_open = true,
+            help_text = _("Where Bookshelf looks for custom cover images. For stacks, place files like authors/author-name.jpg into the matching subfolder (authors, series, genres, collections). For folders, drop a cover.jpg into the folder itself. See the README for more matching options."),
+            callback = function(touchmenu_instance)
+                self:_pickImageLibraryPath(touchmenu_instance)
+            end,
+        },
+        {
+            text = _("Find author images online\xE2\x80\xA6"),
+            help_text = _("Looks up a photo of every author on your shelves that has no image yet, from Open Library, or Wikipedia when it has none, and saves it in the image library's authors folder. Images you already have are kept. To replace one author's image, long-press the author and choose Find author image online."),
+            -- The menu closes first, as for Extract page counts: the pass
+            -- reports in the shelf's status line, which the menu would cover.
+            callback = function(touchmenu_instance)
+                if touchmenu_instance then UIManager:close(touchmenu_instance) end
+                UIManager:nextTick(function()
+                    require("lib/bookshelf_author_images_flow").findAll(self._bw)
+                end)
+            end,
+            separator = true,  -- end the metadata band
+        },
+        -- ── search ──
+        {
+            text = _("Include folder names in search results"),
+            help_text = _("When searching, also match the names of folders in"
+                .. " your library and list them as folder results. Off by"
+                .. " default: most libraries file books into author, series or"
+                .. " genre folders, so a matching folder just duplicates the"
+                .. " author / series / genre result of the same name. Turn on"
+                .. " if you navigate by folder and want folders in search."),
+            checked_func   = function()
+                return BookshelfSettings.read("search_include_folders") == true
+            end,
+            keep_menu_open = true,
+            callback = function()
+                local enabled = BookshelfSettings.read("search_include_folders") == true
+                BookshelfSettings.save("search_include_folders", not enabled)
+                BookshelfSettings.flush()
+            end,
+        },
+        {
+            -- Issue 371. On by default, as it always was.
+            text = _("Include genres and tags in search results"),
+            help_text = _("When searching, also match books by their genres"
+                .. " and tags, and list matching genres as results. Turn off"
+                .. " if you search by title, author or series and the genre"
+                .. " matches get in the way."),
+            checked_func   = function()
+                return BookshelfSettings.read("search_include_genres") ~= false
+            end,
+            keep_menu_open = true,
+            callback = function()
+                local enabled = BookshelfSettings.read("search_include_genres") ~= false
+                BookshelfSettings.save("search_include_genres", not enabled)
+                BookshelfSettings.flush()
+            end,
+        },
+        {
+            -- Grouped shelves file a book with several authors, genres or
+            -- collections under each; this files it under one
+            -- (Repo.oneGroupPerBook).
+            text = _("Show each book in one group only"),
+            help_text = _("On Authors, Genres and Collections shelves, a book"
+                .. " with several authors, genres or collections appears under"
+                .. " its first one only: the first listed in the book, or the"
+                .. " collection highest in KOReader's collection list. Search"
+                .. " and filters still find it under all of them."),
+            checked_func = function()
+                return BookshelfSettings.read("group_first_only") == true
+            end,
+            keep_menu_open = true,
+            callback = function()
+                local on = BookshelfSettings.read("group_first_only") == true
+                BookshelfSettings.save("group_first_only", not on)
+                BookshelfSettings.flush()
+                if self._bw and self._bw._rebuild then
+                    self._bw:_rebuild()
+                    UIManager:setDirty(self._bw, "ui")
+                end
+            end,
+        },
+        {
+            -- Issue 428. On by default: calibre's title_sort, or a leading
+            -- The / A / An dropped, for titles and series names alike. Off
+            -- sorts both exactly as written.
+            text = _("Ignore The, A, An when sorting"),
+            help_text = _("Sorts titles and series names by the word after a "
+                .. "leading The, A or An, and uses Calibre's title sort where "
+                .. "a book has one. Turn off to sort them exactly as written."),
+            checked_func = function()
+                return BookshelfSettings.read("sort_ignore_articles") ~= false
+            end,
+            keep_menu_open = true,
+            callback = function()
+                local on = BookshelfSettings.read("sort_ignore_articles") ~= false
+                BookshelfSettings.save("sort_ignore_articles", not on)
+                -- Same as the pinyin row below: the save bumps the settings
+                -- generation, the sort engine re-reads the flag and drops its
+                -- per-record keys on the next sort, and this rebuild sorts.
+                if self._bw and self._bw._rebuild then
+                    self._bw:_rebuild()
+                    UIManager:setDirty(self._bw, "ui")
+                end
+            end,
+        },
+        {
+            text = _("Sort Chinese text by pinyin"),
+            help_text = _("Sorts Chinese characters by their Mandarin "
+                .. "pinyin reading, so Chinese titles and authors file "
+                .. "alphabetically alongside Latin names. When off, "
+                .. "Chinese text sorts in Unicode order (roughly by "
+                .. "radical and stroke count), after Latin names. "
+                .. "Japanese kanji are also affected, so leave this off "
+                .. "for Japanese-language libraries."),
+            checked_func   = function()
+                return BookshelfSettings.read("cjk_pinyin_sort") == true
+            end,
+            keep_menu_open = true,
+            callback = function()
+                local enabled = BookshelfSettings.read("cjk_pinyin_sort") == true
+                BookshelfSettings.save("cjk_pinyin_sort", not enabled)
+                -- No explicit cache invalidation needed: the save bumps the
+                -- settings generation, and the sort engine re-reads the flag
+                -- (and epoch-invalidates its per-record keys) on the next
+                -- sort. The rebuild below triggers that sort.
+                if self._bw and self._bw._rebuild then
+                    self._bw:_rebuild()
+                    UIManager:setDirty(self._bw, "ui")
+                end
+            end,
+        },
+    }
+    return items
+end
+-- Everything Bookshelf paints into the READER, gathered in one place under
+-- Advanced. These used to be scattered: the status-line switch sat beside the
+-- line it controls at the top of Settings, and the launcher buttons sat at the
+-- bottom of the Start menu behind a fake greyed heading. All of it is opt-in,
+-- none of it is visible from the library, and it is fiddly to make look right
+-- alongside another plugin drawing its own reader furniture - so it belongs
+-- together, and it belongs out of the way.
+--
+-- The submenu title carries the reader-only scope, which is what the greyed
+-- "While reading" heading row in the Start menu was faking. That row is gone.
+function Settings:_whileReadingSubItems()
+    local items = {}
+    -- Bookshelf's own status line, drawn across the top of the reader by
+    -- lib/bookshelf_reader_status through the same registerViewModule route as
+    -- the launcher buttons below - so it works with bookends absent or
+    -- disabled. Bookends' only involvement is moving its top row, and any
+    -- top-anchored progress bar, below the height we publish.
+    --
+    -- Not gated on self._bw, unlike the Status line editor row: that one needs
+    -- the shelf widget for its live preview, whereas this is a plain switch and
+    -- is at its most useful from inside a book. refreshReaderStatusLine makes
+    -- it take effect there and then, rather than on the next book open.
+    items[#items + 1] = {
+        text      = _("Show status line"),
+        help_text = _("Puts Bookshelf's status line across the top of the reader, drawn by the same code that draws it on the shelf, so it reads the same in both. Edit the line itself under Settings > Status line. If you also use Bookends, its top row and any top-anchored progress bar move down to make space."),
+        checked_func = function()
+            return require("lib/status_line").showInReader(BookshelfSettings.view())
+        end,
+        callback = function()
+            local StatusLine = require("lib/status_line")
+            local on = not StatusLine.showInReader(BookshelfSettings.view())
+            -- save() flushes: a switch the user just flipped should survive a
+            -- hard reset.
+            BookshelfSettings.save("status_in_reader", on)
+            refreshReaderStatusLine()
+        end,
+        separator = true,
+    }
+    -- In-reader launcher buttons (opt-in, off by default): small persistent
+    -- buttons in the reader's corners that open the start menu and the
+    -- micro-module grid. Registered at reader init, so they take effect the
+    -- next time a book is opened. Two independent buttons; each falls back to
+    -- the old shared reader_launcher_button until explicitly set, so existing
+    -- installs are unchanged.
+    local RB = require("lib/bookshelf_reader_buttons")
+    items[#items + 1] = {
+        text = _("Show menu button"),
+        help_text = _("Adds the Bookshelf menu button to the reader. Takes effect"
+            .. " the next time you open a book."),
+        checked_func = function() return RB.showMenu() end,
+        callback = function()
+            BookshelfSettings.save("reader_menu_button", not RB.showMenu())
+            refreshReaderLauncher()
+        end,
+    }
+    items[#items + 1] = {
+        text = _("Show modules button"),
+        help_text = _("Adds the modules button to the reader, in the corner"
+            .. " opposite the menu button. Takes effect the next time you open a"
+            .. " book."),
+        checked_func = function() return RB.showModules() end,
+        callback = function()
+            BookshelfSettings.save("reader_modules_button", not RB.showModules())
+            refreshReaderLauncher()
+        end,
+    }
+    items[#items + 1] = {
+        text = _("Launcher button position and size") .. "\xE2\x80\xA6",
+        help_text = _("Position, size, side and which edge the in-reader launcher"
+            .. " buttons sit on. Opens a blank screen showing just the buttons,"
+            .. " so you can see them move as you adjust."),
+        enabled_func = function()
+            -- Only meaningful when at least one launcher is actually painted.
+            return RB.showMenu() or RB.showModules()
+        end,
+        keep_menu_open = true,
+        callback = function(touchmenu_instance)
+            self:_pickLauncherButtons(touchmenu_instance)
+        end,
+    }
+    return items
+end
+
+function Settings:_advancedSubItems()
+    local items = {
+        {
+            text                = _("Performance tweaks"),
+            sub_item_table_func = function()
+                return self:_performanceSubItems()
+            end,
+        },
+        {
+            text                = _("While reading"),
+            sub_item_table_func = function()
+                return self:_whileReadingSubItems()
+            end,
+            -- End the band of submenus (before the resets).
+            separator = true,
+        },
+        {
+            text = ICON_RESET .. _("Reset shelf menu to defaults"),
+            help_text = _("Clears your custom shelf menu (which shelves are "
+                .. "shown, their order, their labels and icons, their "
+                .. "sources and filters and sorts) and restores the "
+                .. "fresh-install set: Home / Recent / Series / "
+                .. "Favorites enabled, the rest available to toggle on. "
+                .. "Also returns the active shelf to Home and the page "
+                .. "indicator to 1. Other settings (top-panel text, fonts, "
+                .. "colors) are unaffected."),
+            callback = function(touchmenu_instance)
+                local ConfirmBox = require("ui/widget/confirmbox")
+                UIManager:show(ConfirmBox:new{
+                    text = _("Reset the shelf menu to default settings?\n\n"
+                        .. "All custom shelves you have created or edited "
+                        .. "will be lost. Other Bookshelf settings (top "
+                        .. "panel text, fonts, colors) are unaffected."),
+                    ok_text = _("Reset"),
+                    ok_callback = function()
+                        BookshelfSettings.delete("tabs")
+                        -- The active chip / cursor / page might point at a
+                        -- custom chip ID that no longer exists after reset.
+                        -- Drop them so the next render starts cleanly on
+                        -- Home (the default).
+                        BookshelfSettings.save("active_chip",   "all")
+                        BookshelfSettings.save("active_cursor", 1)
+                        BookshelfSettings.save("active_page",   1)
+                        BookshelfSettings.flush()
+                        if touchmenu_instance then
+                            UIManager:close(touchmenu_instance)
+                        end
+                        -- Rebuild the live bookshelf so the new chip
+                        -- layout paints immediately (also clears any
+                        -- in-memory state from the chip bar widget).
+                        if self._bw and self._bw._rebuild then
+                            self._bw.chip    = "all"
+                            self._bw._cursor = 1
+                            if self._bw._syncPageFromCursor then
+                                self._bw:_syncPageFromCursor()
+                            end
+                            self._bw._drilldown_path = {}
+                            self._bw:_rebuild()
+                            UIManager:setDirty(self._bw, "ui")
+                        end
+                    end,
+                })
+            end,
+        },
+        {
+            text = ICON_RESET .. _("Reset top panel content to defaults"),
+            help_text = _("Clears your top-panel customizations and "
+                .. "restores the fresh-install detail layout, including the "
+                .. "bundled title (Inter ExtraBold) and author (Caveat) fonts. "
+                .. "The Bookshelf UI font and shelf menu are unaffected."),
+            callback = function(touchmenu_instance)
+                local ConfirmBox = require("ui/widget/confirmbox")
+                UIManager:show(ConfirmBox:new{
+                    text = _("Reset the top panel's content to default settings?\n\n"
+                        .. "All top-panel text and font customizations will be "
+                        .. "lost. The Bookshelf UI font and shelf menu are unaffected."),
+                    ok_text = _("Reset"),
+                    ok_callback = function()
+                        local Regions = require("lib/bookshelf_hero_regions")
+                        Regions.applyFreshInstallDefaults()
+                        BookshelfSettings.flush()
+                        if touchmenu_instance then UIManager:close(touchmenu_instance) end
+                        if self._bw and self._bw._rebuild then
+                            self._bw:_rebuild()
+                            UIManager:setDirty(self._bw, "ui")
+                        end
+                    end,
+                })
+            end,
+            -- End the resets band before the calibre switch.
+            separator = true,
+        },
+        {
+            text = _("Read calibre metadata.calibre"),
+            -- Says what the code does. The previous wording promised the
+            -- opposite ("Calibre data only fills gaps"), which is how a
+            -- Calibre library built from filenames ended up overriding
+            -- correct metadata with a chapter title as the author (#381).
+            help_text = _("For users with a Calibre-managed library. "
+                .. "Reads the metadata.calibre file in your home folder, or "
+                .. "the folder above it, to "
+                .. "fill in title, authors, series, tags, language and "
+                .. "description for every book at once, with no per-book "
+                .. "extraction. Calibre's values take priority over the "
+                .. "metadata KOReader extracted from the book file itself. "
+                .. "Anything you have edited in Book information still wins "
+                .. "over both. Covers and page counts always come from "
+                .. "KOReader."),
+            checked_func   = function()
+                return BookshelfSettings.read("calibre_metadata") == true
+            end,
+            keep_menu_open = true,
+            callback = function()
+                local enabled = BookshelfSettings.read("calibre_metadata") == true
+                BookshelfSettings.save("calibre_metadata", not enabled)
+                local ok, Repo = pcall(require, "lib/bookshelf_book_repository")
+                if ok and Repo and Repo.invalidateWalkCache then
+                    Repo.invalidateWalkCache()
+                end
+                if self._bw and self._bw._rebuild then
+                    self._bw:_rebuild()
+                    UIManager:setDirty(self._bw, "ui")
+                end
+            end,
+        },
+    }
+
+    return items
+end
+
+-- Anchor for the pickers that adjust the chip bar ITSELF (its colours, its font
+-- size): hang the dialog off the strip rather than centring it over the very
+-- thing being judged -- you cannot pick a colour you cannot see.
+--
+-- Returns a FUNCTION so the rect is read at show time: each reinit re-runs it, so
+-- the dialog keeps up when a change moves the strip (a font-size nudge does).
+-- nil rect -> ButtonDialog falls back to centring, which is right when there's no
+-- strip on screen to avoid.
+function Settings:_chipBarAnchor()
+    return function()
+        local bar = self._bw and self._bw._chip_bar
+        local d = bar and bar.dimen
+        if not (d and d.x and d.w and d.w > 0) then return nil end
+        -- A copy: MovableContainer writes its defaults into the anchor it is
+        -- handed, and this one is a live widget's own dimen. The second return
+        -- (prefers_pop_down) overrides its preference for opening ABOVE the
+        -- anchor -- above the chip bar is exactly what we're getting off.
+        local Geom = require("ui/geometry")
+        return Geom:new{ x = d.x, y = d.y, w = d.w, h = d.h }, true
+    end
+end
+
+-- Tiny centred dialog that lets the user cycle through cover size and
+-- hero size with the bookshelf visible behind. Each cycle saves the new
+-- value in-memory and rebuilds the widget so the preview is realtime;
+-- Cancel restores the snapshot, Accept commits to disk. Closing either
+-- way restores the touchmenu the user came from.
+function Settings:_openLayoutEditor(touchmenu_instance)
+    local ButtonDialog = require("ui/widget/buttondialog")
+
+    local bw = self._bw
+    -- Snapshot the stored values (may be nil = legacy/unset) so Cancel can
+    -- restore the exact prior state, including "never set".
+    local original_columns = BookshelfSettings.read("bookshelf_columns")
+    local original_rows    = BookshelfSettings.read("bookshelf_rows")
+
+    local restoreMenu = self._plugin:hideMenu(touchmenu_instance)
+
+    -- Preview the thing being edited. These are the COVER GRID's rows and
+    -- columns whatever style is on screen (see the readers below), so over a
+    -- list or spine shelf the reader was adjusting one set of numbers and
+    -- watching another change. Held for the dialog's life and released once,
+    -- in close(), which both exits funnel through -- the dialog is
+    -- dismissable = false, so there is no third way out.
+    local unpinned = false
+    local function unpinCovers()
+        if unpinned then return end
+        unpinned = true
+        if bw and bw.unpinCoverPreview then bw:unpinCoverPreview() end
+        if bw and bw._rebuild then
+            bw:_rebuild()
+            UIManager:setDirty(bw, "ui")
+        end
+    end
+    if bw and bw.pinCoverPreview then
+        bw:pinCoverPreview()
+        if bw._rebuild then
+            bw:_rebuild()
+            UIManager:setDirty(bw, "ui")
+        end
+    end
+
+    -- Effective current grid, reading through the widget so an unset (legacy)
+    -- value still shows the real column/row count being rendered.
+    --
+    -- Explicitly the COVER GRID's numbers (_gridCols / _gridBaseRows /
+    -- _gridMaxRows), not whatever the shelf happens to be rendering: these
+    -- readers feed nudgeCols/nudgeRows, which SAVE the value they read back
+    -- into bookshelf_columns / bookshelf_rows. Opened over list view, the live
+    -- _nCols() is 1 and _baseShelves() counts list rows, so a single "+" tap
+    -- would overwrite a 5-column grid with 2 and the row count with a list
+    -- fill. Same rule the pinch/spread handler follows (_nudgeColumns swallows
+    -- the gesture in list mode); this is the other writer.
+    local function curCols()
+        return (bw and bw._gridCols and bw:_gridCols()) or 4
+    end
+    local function curRows()
+        return (bw and bw._gridBaseRows and bw:_gridBaseRows()) or 2
+    end
+    local function maxRows()
+        return (bw and bw._gridMaxRows and bw:_gridMaxRows()) or 6
+    end
+    local COLS_MIN, COLS_MAX = 2, 6
+
+    -- Draft regrid: step the layout instantly by rescaling cached covers
+    -- (no fresh decodes); the widget's settle timer upgrades them to
+    -- correct-size covers ~300ms after the last tap (and Accept/Cancel force it
+    -- immediately).
+    local function draftRebuild()
+        if not (bw and bw._draftRebuild) then return end
+        bw:_draftRebuild()
+        UIManager:setDirty(bw, "ui")
+        bw:_scheduleCoverSettle()
+    end
+
+    local dialog
+    local function nudgeCols(delta)
+        local v = math.max(COLS_MIN, math.min(COLS_MAX, curCols() + delta))
+        BookshelfSettings.save("bookshelf_columns", v)
+        draftRebuild()
+        Focus.reinitLocked(dialog)
+    end
+    local function nudgeRows(delta)
+        local v = math.max(1, math.min(maxRows(), curRows() + delta))
+        BookshelfSettings.save("bookshelf_rows", v)
+        draftRebuild()
+        Focus.reinitLocked(dialog)
+    end
+    local function restore(key, val)
+        if val == nil then
+            BookshelfSettings.delete(key)
+        else
+            BookshelfSettings.save(key, val)
+        end
+    end
+    local function close()
+        UIManager:close(dialog)
+        unpinCovers()
+        restoreMenu()
+    end
+    -- Both exits force the full-quality covers immediately (cancelling the
+    -- pending settle timer) so the shelf revealed behind the closing dialog is
+    -- sharp, not the last draft frame. Cancel restores the original grid first.
+    local function settleNow()
+        if bw and bw._settleCoversNow then bw:_settleCoversNow() end
+    end
+    local function cancel()
+        restore("bookshelf_columns", original_columns)
+        restore("bookshelf_rows", original_rows)
+        settleNow()
+        close()
+    end
+    local function accept()
+        BookshelfSettings.flush()
+        settleNow()
+        close()
+    end
+
+    -- What these two numbers really set is how the screen is DIVIDED, which
+    -- neither label says on its own -- and the shelf switching to covers under
+    -- the dialog needs a reason on screen, or it reads as a bug.
+    local Font_          = require("ui/font")
+    local TextBoxWidget_ = require("ui/widget/textboxwidget")
+    local Size_          = require("ui/size")
+    local Screen_        = require("device").screen
+    local dlg_w  = math.floor(math.min(Screen_:getWidth(), Screen_:getHeight()) * 0.6)
+    local help_w = dlg_w - 2 * Size_.border.window - 2 * Size_.padding.button
+                   - 2 * (Size_.padding.large + Size_.margin.title)
+    local help_widget = TextBoxWidget_:new{
+        text  = _("Rows and columns set how much of the screen the shelf takes; the top panel above fills whatever is left. List and spine shelves use that same space with their own row counts, so covers are shown here while you adjust it."),
+        face  = Font_:getFace("x_smallinfofont"),
+        width = help_w,
+    }
+    help_widget.not_focusable = true
+
+    dialog = ButtonDialog:new{
+        dismissable = false,  -- explicit Cancel/Accept; tap-outside disabled
+        title = _("Adjust shelf/top panel size"),
+        title_align = "left",
+        use_info_style = false,
+        _added_widgets = { help_widget },
+        width_factor = 0.6,
+
+        buttons = {
+            -- +/- greyed out at the limits so a dead tap doesn't read as a
+            -- bug. Button:paintTo re-evaluates enabled_func on every paint, and
+            -- the dialog repaints after each nudge (that's what updates the
+            -- count label), so the enabled state tracks the value live.
+            {
+                { text = "−", enabled_func = function() return curCols() > COLS_MIN end,
+                  callback = function() nudgeCols(-1) end },
+                { text_func = function() return _("Columns: ") .. curCols() end,
+                  enabled = false },
+                { text = "+", enabled_func = function() return curCols() < COLS_MAX end,
+                  callback = function() nudgeCols(1) end },
+            },
+            {
+                { text = "−", enabled_func = function() return curRows() > 1 end,
+                  callback = function() nudgeRows(-1) end },
+                { text_func = function() return _("Rows: ") .. curRows() end,
+                  enabled = false },
+                { text = "+", enabled_func = function() return curRows() < maxRows() end,
+                  callback = function() nudgeRows(1) end },
+            },
+            {
+                { text = _("Cancel"), callback = cancel },
+                { text = _("Accept"), is_enter_default = true, callback = accept },
+            },
+        },
+        tap_close_callback = cancel,
+    }
+    if dialog.movable then dialog.movable.ges_events = {} end
+    -- dismissable = false leaves Back unbound (ButtonDialog binds it only for
+    -- dismissable dialogs), so on a keys-only device it did nothing (GitHub
+    -- issue 361). Back is Cancel here: revert and close.
+    local Device = require("device")
+    if Device:hasKeys() then
+        dialog.key_events.BSSizeBack = { { Device.input.group.Back } }
+        dialog.onBSSizeBack = function() cancel() return true end
+    end
+    require("lib/bookshelf_gesture_zones").passSwipesOn(dialog)
+    UIManager:show(dialog)
+end
+
+-- The top panel's font scale: a size page (_showScaleNudge), the shelf
+-- rebuilt behind it once the taps pause. Cancel puts back the value it
+-- opened on; Default resets to 100; Done keeps it.
+function Settings:_pickFontScale(touchmenu_instance)
+    self:_showScaleNudge(touchmenu_instance, {
+        key = "font_scale", title = _("Top panel font scale"), max = 200, fine = 5,
+    })
+end
+
+-- Hero micro-modules size knob (issue #180). Same nudge-dialog shape as
+-- _pickFontScale, but a SEPARATE key so the micro-module grid scales
+-- independently of the currently-reading card / status line. It's a multiplier
+-- on each module's cell auto-fit (100 = unchanged), so lower renders the modules
+-- smaller with more whitespace. Live preview = the bookshelf rebuild behind.
+function Settings:_pickHeroModuleFontScale(touchmenu_instance)
+    self:_showScaleNudge(touchmenu_instance, {
+        key = "hero_module_font_scale", title = _("Module font scale"), max = 200, fine = 5,
+    })
+end
+
+-- The shelf menu's font scale: a size page as _pickFontScale's, with 1 / 10
+-- steps (5 / 10 for the top panel's).
+function Settings:_pickChipFontScale(touchmenu_instance)
+    self:_showScaleNudge(touchmenu_instance, {
+        key = "chip_font_scale", title = _("Shelf menu font scale"), max = 300, fine = 1,
+        -- Open below the chip bar, not over it: this dialog resizes the strip.
+        anchor = self:_chipBarAnchor(),
+    })
+end
+
+-- The list-view row scale, stepped in ROWS rather than in percent.
+--
+-- It was 1 / 10 percentage-point nudges, then it was a ROW-COUNT stepper, and
+-- it is a text-size control again -- which is what the key was always called.
+--
+-- The middle version existed because list_font_scale moved the row height and
+-- the type together, so a percentage step either did nothing visible or
+-- crossed two row boundaries at once. That is fixed at the source now: the row
+-- count is its own setting and the row height comes from it, so this key does
+-- one thing.
+--
+--     "it should now control the size of text lines within the rows without
+--      changing the row height"
+--
+-- So: 5-point steps, no snapping, no live-shelf probe, and no relationship to
+-- how many books are on screen. Rows moved out to the chip's own shelf-style
+-- menu and to the pinch.
+--
+-- No `anchor`. _pickChipFontScale opens below the chip bar because it resizes
+-- that strip and would otherwise sit on top of the thing being resized; the
+-- rows this one resizes fill the whole shelf, so it opens as the others do,
+-- a slim panel at the bottom.
+function Settings:_pickListFontScale(touchmenu_instance)
+    self:_showScaleNudge(touchmenu_instance, {
+        key = "list_font_scale", title = _("Text size"), max = 300, fine = 1,
+    })
+end
+
+-- Nudge dialog for the stack & folder cardboard-label font scale --
+-- Series / Author / Genre / Tag stack names and folder card names
+-- (FolderCard.build, lib/bookshelf_folder_card.lua). Same shape as
+-- the other pick functions; 50-300% range so users with very long
+-- Genre / Tag strings (issue #60) can fit more text per card.
+function Settings:_pickStackLabelFontScale(touchmenu_instance)
+    self:_showScaleNudge(touchmenu_instance, {
+        key = "stack_label_font_scale", title = _("Stack & folder label scale"), max = 300, fine = 5,
+    })
+end
+
+-- _startMenuPreview() -> preview, on_done: the start menu open behind a
+-- size page as its live preview (as the shelf is behind the others), and
+-- closed again after if it was opened for it. Only opened if one is not
+-- already showing. self._bw is always the LIBRARY widget -- buildMenuItems
+-- shares one _bw global across both hosts, so reaching this setting from
+-- inside the reader has to go through the reader's own opener instead, or
+-- no preview appears at all and nudging looks like it does nothing (#297).
+function Settings:_startMenuPreview()
+    local StartMenu = require("lib/bookshelf_start_menu")
+    local in_reader = self._plugin and self._plugin.ui and self._plugin.ui.document
+    local opened = false
+    if not StartMenu._live then
+        if in_reader then
+            if self._plugin._openReaderStartMenu then
+                self._plugin:_openReaderStartMenu()
+                opened = true
+            end
+        elseif self._bw then
+            self._bw:_openStartMenu()
+            opened = true
+        end
+    end
+    return function() if StartMenu._live then StartMenu._live:_reload() end end,
+        function() if opened and StartMenu._live then StartMenu._live:_close() end end
+end
+
+function Settings:_pickStartMenuFontScale(touchmenu_instance)
+    local preview, on_done = self:_startMenuPreview()
+    self:_nudgePage(touchmenu_instance, {
+        key = "start_menu_font_scale", default = 100, min = 50, max = 200,
+        fine = 5, unit = "%", no_shelf = true,
+        title = _("Start menu font scale"),
+        preview = preview, on_done = on_done,
+    })
+end
+
+-- Start menu: the menu itself, then a fenced-off band for the reader-only
+-- launcher settings. Split out of the Settings root (where five loose rows made
+-- it unclear which applied where) and modelled on the Cover display submenu.
+function Settings:_startMenuSubItems()
+    local items = {}
+    -- Start-menu position: three-state radio. "left" (default; an absent key
+    -- reads as left), "right" mirrors the whole stack (footer button, popup
+    -- anchor, leftward flyout), "off" removes the button and its d-pad slot.
+    items[#items + 1] = (function()
+        local function readPos()
+            local v = BookshelfSettings.read("start_menu_position", "left")
+            if v == "right" or v == "off" then return v end
+            return "left"
+        end
+        local labels = {
+            left  = _("Left"),
+            right = _("Right"),
+            off   = _("Off"),
+        }
+        local function optionRow(pos, label)
+            return {
+                text           = label,
+                checked_func   = function() return readPos() == pos end,
+                radio          = true,
+                keep_menu_open = true,
+                callback       = function(touchmenu_instance)
+                    BookshelfSettings.save("start_menu_position", pos)
+                    refreshReaderLauncher()
+                    if self._bw and self._bw._rebuild then
+                        self._bw:_rebuild()
+                        UIManager:setDirty(self._bw, "ui")
+                    end
+                    if touchmenu_instance and touchmenu_instance.updateItems then
+                        touchmenu_instance:updateItems()
+                    end
+                end,
+            }
+        end
+        return {
+            text_func = function()
+                return _("Start menu") .. ": " .. labels[readPos()]
+            end,
+            help_text = _("Where the start-menu button sits in the"
+                .. " footer. Right moves the button and its menu to"
+                .. " the bottom-right corner; Off hides the button"
+                .. " entirely."),
+            sub_item_table_func = function()
+                return {
+                    optionRow("left",  labels.left),
+                    optionRow("right", labels.right),
+                    optionRow("off",   labels.off),
+                }
+            end,
+        }
+    end)()
+    -- Minimum panel width: the start menu otherwise sizes itself to its longest
+    -- row label, so short menu text also narrows the module cards.
+    items[#items + 1] = {
+        text_func = function()
+            local dp = BookshelfSettings.read("start_menu_min_width", 180) or 180
+            if dp == 180 then return _("Minimum start menu width: default") end
+            return T(_("Minimum start menu width: %1 dp"), dp)
+        end,
+        help_text = _("The start menu is normally only as wide as its longest"
+            .. " label, so short menu text also narrows the module cards."
+            .. " Raise this to widen the panel without lengthening the text."),
+        keep_menu_open = true,
+        callback = function(touchmenu_instance)
+            self:_pickStartMenuMinWidth(touchmenu_instance)
+        end,
+    }
+    return items
+end
+
+-- Launcher buttons: one canvas for position (both axes), size and edge.
+--
+-- Replaces the separate position/size rows, which only affected reader mode and
+-- so appeared to do nothing when adjusted from the library. This opens a BLANK
+-- full-screen canvas with the launcher glyphs drawn at their real geometry, and
+-- puts every control over it, so each nudge visibly moves something.
+function Settings:_pickLauncherButtons(touchmenu_instance)
+    local ButtonDialog  = require("ui/widget/buttondialog")
+    local ReaderButtons = require("lib/bookshelf_reader_buttons")
+    local restoreMenu   = self._plugin:hideMenu(touchmenu_instance)
+
+    local K_Y, K_X, K_S, K_TOP =
+        "reader_launcher_lift", "reader_launcher_offset_x",
+        "reader_launcher_scale", "reader_launcher_top"
+    local K_SIDE = "reader_launcher_side"
+    -- Snapshot for Cancel. An UNSET key must come back unset rather than being
+    -- coerced to a default, so Cancel walks this KEY LIST -- not pairs(orig).
+    -- `orig[k] = nil` stores nothing, so on an install that had never touched
+    -- these (the common case) the snapshot table was empty and pairs() iterated
+    -- nothing: Cancel silently kept whatever had just been nudged.
+    local KEYS = { K_Y, K_X, K_S, K_TOP, K_SIDE }
+    local orig = {}
+    for _, k in ipairs(KEYS) do orig[k] = BookshelfSettings.read(k) end
+
+    local canvas = ReaderButtons.previewWidget()
+    UIManager:show(canvas)
+
+    local function get(k, dflt) return BookshelfSettings.read(k, dflt) or dflt end
+    local function clampSet(k, v, lo, hi)
+        BookshelfSettings.save(k, math.max(lo, math.min(hi, v)))
+    end
+
+    local dialog
+    -- Both the dialog AND the canvas must be dirtied on every change: the dialog
+    -- so its value labels update, the canvas so the glyphs move. e-ink repaints
+    -- nothing without an explicit setDirty (desktop SDL does, which is how the
+    -- old rows shipped looking dead on device). reinitLocked also re-applies the
+    -- movable lockdown that ButtonDialog:reinit() would otherwise discard.
+    local function refresh()
+        Focus.reinitLocked(dialog)
+        UIManager:setDirty(canvas, "ui")
+        UIManager:setDirty(dialog, "ui")
+        if touchmenu_instance and touchmenu_instance.updateItems then
+            touchmenu_instance:updateItems()
+        end
+    end
+    local function nudgeY(d) clampSet(K_Y, get(K_Y, 0) + d, -60, 200); refresh() end
+    local function nudgeX(d) clampSet(K_X, get(K_X, 0) + d, -60, 200); refresh() end
+    local function nudgeS(d) clampSet(K_S, get(K_S, 100) + d, 50, 150); refresh() end
+    local function toggleSide()
+        BookshelfSettings.save("reader_launcher_side",
+            ReaderButtons.side() == "right" and "left" or "right")
+        refresh()
+    end
+    local function toggleEdge()
+        BookshelfSettings.save(K_TOP, not (BookshelfSettings.read(K_TOP, false) == true))
+        refresh()
+    end
+    local function close()
+        UIManager:close(dialog)
+        -- The canvas is an opaque full-screen widget, so what it covered has to be
+        -- FLUSHED, not merely repainted. UIManager:close with no refreshtype ends
+        -- up in _refresh(nil), which current KOReader drops outright ("to avoid
+        -- enqueuing a useless full-screen refresh") -- so the shelf underneath was
+        -- painted back into the framebuffer and never reached the panel, and came
+        -- back stale on e-ink. Same trap MicroFullscreen.open documents for show().
+        local Geom   = require("ui/geometry")
+        local Screen = require("device").screen
+        UIManager:close(canvas, "ui", canvas.dimen or Geom:new{
+            x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() })
+        restoreMenu()
+        refreshReaderLauncher()
+    end
+
+    dialog = ButtonDialog:new{
+        dismissable = false, -- nudge-dialog lockdown; see _showScaleNudge
+        title = _("Launcher buttons"),
+        buttons = {
+            {
+                { text = "-10", callback = function() nudgeY(-10) end },
+                { text = "-2",  callback = function() nudgeY(-2)  end },
+                { text_func = function()
+                    return T(_("edge %1 dp"), tostring(get(K_Y, 0))) end,
+                  enabled = false },
+                { text = "+2",  callback = function() nudgeY(2)  end },
+                { text = "+10", callback = function() nudgeY(10) end },
+            },
+            {
+                { text = "-10", callback = function() nudgeX(-10) end },
+                { text = "-2",  callback = function() nudgeX(-2)  end },
+                { text_func = function()
+                    return T(_("side %1 dp"), tostring(get(K_X, 0))) end,
+                  enabled = false },
+                { text = "+2",  callback = function() nudgeX(2)  end },
+                { text = "+10", callback = function() nudgeX(10) end },
+            },
+            {
+                { text = "-10", callback = function() nudgeS(-10) end },
+                { text = "-5",  callback = function() nudgeS(-5)  end },
+                { text_func = function()
+                    return T(_("size %1%"), tostring(get(K_S, 100))) end,
+                  enabled = false },
+                { text = "+5",  callback = function() nudgeS(5)  end },
+                { text = "+10", callback = function() nudgeS(10) end },
+            },
+            {
+                { text_func = function()
+                    return ReaderButtons.side() == "right"
+                        and _("Side: right") or _("Side: left")
+                  end,
+                  callback = toggleSide },
+                { text_func = function()
+                    return BookshelfSettings.read(K_TOP, false) == true
+                        and _("Edge: top") or _("Edge: bottom")
+                  end,
+                  callback = toggleEdge },
+                { text = _("Cancel"), callback = function()
+                    for _, k in ipairs(KEYS) do
+                        local v = orig[k]
+                        if v == nil then BookshelfSettings.delete(k)
+                        else BookshelfSettings.save(k, v) end
+                    end
+                    close()
+                  end },
+                { text = _("Default"), callback = function()
+                    BookshelfSettings.delete(K_Y); BookshelfSettings.delete(K_X)
+                    BookshelfSettings.delete(K_S); BookshelfSettings.delete(K_TOP)
+                    BookshelfSettings.delete(K_SIDE)
+                    refresh()
+                  end },
+                { text = _("Apply"), is_enter_default = true, callback = close },
+            },
+        },
+    }
+    if dialog.movable then dialog.movable.ges_events = {} end
+    require("lib/bookshelf_gesture_zones").passSwipesOn(dialog)
+    UIManager:show(dialog)
+    UIManager:setDirty(canvas, "ui")
+end
+
+-- Minimum start-menu panel width. The panel is otherwise sized by its longest
+-- row LABEL, so users who prefer short menu text end up with narrow module
+-- cards too; this decouples the two. Same live-preview shape (and the same
+-- reader-vs-library routing, #297) as _pickStartMenuFontScale.
+function Settings:_pickStartMenuMinWidth(touchmenu_instance)
+    local preview, on_done = self:_startMenuPreview()
+    self:_nudgePage(touchmenu_instance, {
+        -- The same bounds the panel itself clamps to (_panelWidthBounds).
+        key = "start_menu_min_width", default = 180, min = 120, max = 600,
+        fine = 5, big = 20, unit = " dp", no_shelf = true,
+        title = _("Minimum start menu width"),
+        preview = preview, on_done = on_done,
+    })
+end
+
+-- Nudge dialog for the book-detail popup's tab bar (Edit/Description/
+-- Reviews/Tags) label font scale. Same shape as _pickChipFontScale, but no
+-- live-rebuild call: the popup is per-book and not open while in Settings,
+-- so there's nothing on-screen to preview -- just persist and let the touch
+-- menu row's own label refresh.
+function Settings:_pickModalTabFontScale(touchmenu_instance)
+    local ReviewsModal = require("lib/bookshelf_reviews_modal")
+    self:_showScaleNudge(touchmenu_instance, {
+        key = "modal_tab_font_scale", title = _("Modal tab label font scale"),
+        max = 200, fine = 5,
+        -- Live preview: if the book-detail popup is open (this setting is
+        -- normally tuned with it open, watching the tab strip), rebuild its
+        -- tab strip at the new label size in place. Only that strip changes.
+        -- The shelf rebuild after it is kept even though this setting does not
+        -- change the shelf: this picker once dirtied nothing on screen, which
+        -- stalled the e-ink refresh pipeline and stopped taps registering
+        -- (confirmed on-device).
+        preview = function()
+            local live = ReviewsModal._live
+            if live and not live._dismissed and live.refreshTabBar then
+                live:refreshTabBar()
+            end
+        end,
+    })
+end
+
+-- Bookshelf UI font picker -- reuses the hero line editor's font picker
+-- (bookends-rich preview when available, FontList file picker otherwise).
+-- Applies on tap: the chosen font is saved and the live bookshelf rebuilt
+-- immediately. "(Default)" in the picker clears the setting -> follow KOReader.
+function Settings:_pickBookshelfUIFont(touchmenu_instance)
+    local Fonts      = require("lib/bookshelf_fonts")
+    local LineEditor = require("lib/bookshelf_hero_line_editor")
+    LineEditor.showFontPicker(Fonts.getUIFontFace(), nil, function(face)
+        Fonts.setUIFontFace(face)            -- face is a resolvable path, or nil = follow
+        if self._bw and self._bw._rebuild then
+            self._bw:_rebuild()
+            UIManager:setDirty(self._bw, "ui")
+        end
+        -- Refresh the menu row's text_func so "Bookshelf UI font: X" updates
+        -- without leaving and re-entering the menu (the pick is async).
+        if touchmenu_instance and touchmenu_instance.updateItems then
+            touchmenu_instance:updateItems()
+        end
+    end)
+end
+
+-- _textSizeSubItems() -- single home for every font-scale knob in the
+-- plugin (issue #60). Pre-#60 these were scattered: Hero in Edit hero
+-- card, Cover badges in Cover display, Expanded shelf labels in
+-- Expanded shelf, Shelf menu in Tabs..., and stack/folder labels weren't
+-- configurable at all. Bringing them under one Settings menu makes the
+-- "where do I dial X smaller?" question single-answer.
+function Settings:_textSizeSubItems()
+    -- Labels are pre-translated at call time (each menu open). Going
+    -- through `row(_("..."), ...)` instead of `row("...", ...)` so
+    -- xgettext sees the literal strings -- dynamic `_(label_key)` in
+    -- text_func would not be picked up by extraction.
+    local function row(label, setting_key, default, pick_fn)
+        return {
+            text_func = function()
+                local v = BookshelfSettings.read(setting_key, default)
+                return label .. ": " .. tostring(v) .. "%"
+            end,
+            keep_menu_open = true,
+            callback = function(touchmenu_instance)
+                self[pick_fn](self, touchmenu_instance)
+            end,
+        }
+    end
+    -- Prefix the two hero rows with their chip glyphs so they read as a pair and
+    -- map onto the on-screen chips: open-book (U+E7BD) = currently-reading hero,
+    -- view-grid (U+EC6F) = micro-module hero. Glyphs render via KOReader's
+    -- symbols-font fallback, same as the chips.
+    local HERO_BOOK = "\xEE\x9E\xBD  "
+    local HERO_GRID = "\xEE\xB1\xAF  "
+    return {
+        -- ── shelf ──
+        -- Sizes the label strip under covers on BOTH surfaces since the 4.0
+        -- unification (the key keeps its historical name).
+        row(_("Cover captions"),        "expanded_shelf_font_scale", 100, "_pickExpandedShelfFontScale"),
+        row(_("Cover badges"),          "cover_badge_font_scale",    100, "_pickCoverBadgeFontScale"),
+        row(_("Stack & folder labels"), "stack_label_font_scale",    100, "_pickStackLabelFontScale"),
+        row(_("Shelf menu"),              "chip_font_scale",           100, "_pickChipFontScale"),
+        -- Adjacent to the chip bar because a list row is built to the same
+        -- shape -- same face, same base size, same band arithmetic
+        -- (lib/bookshelf_band_metrics.lua) -- and at 100 on both they render
+        -- identically. They are separate keys so the two can be tuned apart.
+        --
+        -- "List rows" is what this row said while the key was a density
+        -- control. It is not one any more -- the row count is its own setting,
+        -- per chip -- so the label says what it now does: the size of the text
+        -- inside a row, with the row's height left alone.
+        (function()
+            local r = row(_("List text"), "list_font_scale", 100, "_pickListFontScale")
+            r.separator = true  -- end the shelf band
+            return r
+        end)(),
+        -- ── hero area ──
+        row(HERO_BOOK .. _("Top panel"),         "font_scale",             100, "_pickFontScale"),
+        (function()
+            local r = row(HERO_GRID .. _("Modules"), "hero_module_font_scale", 100, "_pickHeroModuleFontScale")
+            r.separator = true  -- end the hero band
+            return r
+        end)(),
+        -- ── menus & dialogs ──
+        row(_("Start menu"),            "start_menu_font_scale",     100, "_pickStartMenuFontScale"),
+        row(_("Modal tabs"),            "modal_tab_font_scale",      100, "_pickModalTabFontScale"),
+    }
+end
+
+-- _pickImageLibraryPath() -- folder picker for the image-library root
+-- (#70 extension). Resolution: inside that folder bookshelf looks for
+-- <kind>s/<name>.<ext> when rendering author / series / genre / tag
+-- stacks. Default lives at <home_dir>/.bookshelf-images; the picker
+-- defaults to that location so users converging on the default get a
+-- one-tap setup. A long-press confirms the current folder per
+-- PathChooser's UX.
+function Settings:_pickImageLibraryPath(touchmenu_instance)
+    local PathChooser = require("ui/widget/pathchooser")
+    local ImageSource = require("lib/bookshelf_image_source")
+    local start_path = ImageSource.getImageLibraryPath()
+        or require("lib/bookshelf_home_dir").get() or "/"
+    UIManager:show(PathChooser:new{
+        title            = _("Choose image library folder"),
+        path             = start_path,
+        select_directory = true,
+        select_file      = false,
+        show_files       = false,
+        onConfirm        = function(folder)
+            ImageSource.setImageLibraryPath(folder)
+            ImageSource.invalidateCache()
+            if Settings._bw and Settings._bw._rebuild then
+                Settings._bw:_rebuild()
+                UIManager:setDirty(Settings._bw, "ui")
+            end
+            if touchmenu_instance and touchmenu_instance.updateItems then
+                touchmenu_instance:updateItems()
+            end
+        end,
+    })
+end
+
+function Settings:_pickLatestDepth()
+    local current = BookshelfSettings.read("latest_walk_depth") or 3
+    UIManager:show(SpinWidget:new{
+        value      = current,
+        value_min  = 1,
+        value_max  = 99,
+        value_step = 1,
+        title_text = _("\"Latest\" folder walk depth"),
+        info_text  = _("How deep to scan your library folder for newly-added books."
+                        .. " Higher values take longer on a cold start."),
+        callback   = function(spin)
+            BookshelfSettings.save("latest_walk_depth", spin.value)
+        end,
+    })
+end
+
+function Settings:_pickCoverCacheBudget(touchmenu_instance)
+    local SCC = require("lib/bookshelf_scaled_cover_cache")
+    local default = SCC.deviceDefaultBudgetMB()
+    local current = BookshelfSettings.read("cover_cache_mb") or default
+    UIManager:show(SpinWidget:new{
+        value      = current,
+        value_min  = 8,
+        value_max  = 128,
+        value_step = 8,
+        default_value = default,
+        unit       = _("MB"),
+        title_text = _("Cover cache budget"),
+        info_text  = T(_("Memory budget for ready-scaled book covers (MB)."
+                        .. " Higher = smoother paging and preloading, more RAM."
+                        .. " Default %1 MB on this device."), default),
+        callback   = function(spin)
+            BookshelfSettings.save("cover_cache_mb", spin.value)
+            -- Apply immediately so the change takes effect without a restart
+            -- (shrinking evicts down to the new budget right away).
+            require("lib/bookshelf_scaled_cover_cache")
+                :setByteBudget(spin.value * 1024 * 1024)
+            if touchmenu_instance and touchmenu_instance.updateItems then
+                touchmenu_instance:updateItems()
+            end
+        end,
+    })
+end
+
+-- _tabsMenuItems() -- sub_item_table_func payload for "Bookshelf tabs...".
+-- Each tab gets a checkbox row: tap toggles enabled, long-press opens the
+-- per-tab editor. A footer row creates a new custom tab and opens its editor.
+--
+-- hideParentMenu pattern mirrors bookshelf_hero_line_editor.lua: close the
+-- CenterContainer wrapping the TouchMenu so the editor has a clear canvas,
+-- then do NOT re-show -- the user can re-open the menu if they want to edit
+-- another tab. The chevron buttons inside editTab let them reach adjacent
+-- tabs by holding a neighbour chip instead.
+function Settings:_tabsMenuItems()
+    local TabModel = require("lib/bookshelf_tab_model")
+    local Editor   = require("lib/bookshelf_chip_editor")
+    local UIManager_ref = require("ui/uimanager")
+
+    local function rebuild()
+        if self._bw and self._bw._rebuild then
+            self._bw:_rebuild()
+            UIManager_ref:setDirty(self._bw, "ui")
+        end
+    end
+
+    local function hideParentMenu(touchmenu_instance)
+        if not touchmenu_instance then return end
+        local container = touchmenu_instance.show_parent or touchmenu_instance
+        UIManager_ref:close(container, "ui")
+    end
+
+    -- Shelf menu font scale moved to Settings -> Text size (#60).
+    local items = {
+        {
+            text = _("Flexible shelf widths"),
+            help_text = _("Off: every shelf gets the same width. On: each "
+                .. "shelf is sized to its label, so single-icon shelves stay "
+                .. "narrow and longer text labels get more room. Falls "
+                .. "back to equal widths when natural sizes don't fit."),
+            checked_func   = function()
+                return BookshelfSettings.isTrue("chip_flex_widths")
+            end,
+            keep_menu_open = true,
+            callback = function()
+                local on = BookshelfSettings.isTrue("chip_flex_widths")
+                BookshelfSettings.save("chip_flex_widths", not on)
+                rebuild()
+            end,
+        },
+        {
+            text = _("Uppercase labels"),
+            help_text = _("On: shelf names and the drill breadcrumb are shown"
+                .. " in capitals, the default look. Off: each label reads"
+                .. " exactly as you typed it, so \"Sci-Fi\" stays \"Sci-Fi\"."),
+            checked_func   = function()
+                return BookshelfSettings.nilOrTrue("chip_uppercase_labels")
+            end,
+            keep_menu_open = true,
+            callback = function()
+                local on = BookshelfSettings.nilOrTrue("chip_uppercase_labels")
+                BookshelfSettings.save("chip_uppercase_labels", not on)
+                rebuild()
+            end,
+            separator = true,
+        },
+        -- The shelf list follows, and every one of those rows hides its
+        -- editor behind a long press. Readers were not finding it (Reddit
+        -- feedback), which is not surprising: nothing on screen says so.
+        --
+    }
+    local tabs = TabModel.load()
+    for _i, tab in ipairs(tabs) do
+        local tab_id = tab.id
+        -- Sub-shelves live inside their shelf of shelves (long-press a tile
+        -- there to edit one), not in this list of the strip's shelves; a
+        -- card's own shelf is edited from its card.
+        if not tab.parent and not TabModel.isCardOnly(tab) then
+        items[#items + 1] = {
+            keep_menu_open = true,
+            text_func = function()
+                -- Re-read from model so label reflects any edits made via
+                -- the long-press editor without re-opening the menu.
+                local fresh = TabModel.load()
+                for _i, t in ipairs(fresh) do
+                    if t.id == tab_id then return t.label end
+                end
+                return tab_id
+            end,
+            checked_func = function()
+                local fresh = TabModel.load()
+                for _i, t in ipairs(fresh) do
+                    if t.id == tab_id then return t.enabled ~= false end
+                end
+                return true
+            end,
+            -- Tap EDITS. Editing is what a reader opens this menu to do, and
+            -- it used to be the hidden half of the pair: a tap toggled the
+            -- shelf on or off and nothing advertised the long-press except a
+            -- line above the list, which is read before the shelves rather
+            -- than while looking at one (maintainer). The checkbox still
+            -- shows whether a shelf is on; the long-press is what changes it.
+            callback = function(touchmenu_instance)
+                hideParentMenu(touchmenu_instance)
+                Editor:editTab(tab_id, { on_change = function() rebuild() end })
+            end,
+            hold_callback = function(touchmenu_instance)
+                local fresh = TabModel.load()
+                for _i, t in ipairs(fresh) do
+                    if t.id == tab_id then
+                        t.enabled = (t.enabled == false) and true or false
+                        TabModel.save(fresh)
+                        rebuild()
+                        break
+                    end
+                end
+                if touchmenu_instance and touchmenu_instance.updateItems then
+                    touchmenu_instance:updateItems()
+                end
+            end,
+        }
+        end
+    end
+
+    -- The hint goes at the FOOT of the list, not above it: a reader who has
+    -- just read down their shelves is looking at the rows it describes, where
+    -- one placed first is read before there is anything to apply it to. Still
+    -- a disabled row rather than help_text, for the reason the pair further up
+    -- this file gives: help_text costs a tap to read, and the whole problem is
+    -- a reader who does not know there is anything to look for.
+    items[#items + 1] = {
+        text = _("Tap a shelf to edit it. Long-press to show or hide it."),
+        enabled = false,
+    }
+    -- Footer: add a new custom tab and open its editor immediately.
+    items[#items + 1] = {
+        text = _("+ Add new shelf"),
+        callback = function(touchmenu_instance)
+            -- A new shelf: no source yet, pending until the editor saves it
+            -- (TabModel.newTab); backing out of the editor removes it.
+            local fresh = TabModel.load()
+            local new_tab = TabModel.newTab(fresh, _("New shelf"))
+            local new_id = new_tab.id
+            fresh[#fresh + 1] = new_tab
+            TabModel.save(fresh)
+            hideParentMenu(touchmenu_instance)
+            -- Same as the editor's own "+": choose the source first, since it
+            -- is what the chip is FOR and what gives it its name.
+            Editor:editTab(new_id, {
+                on_change = function() rebuild() end,
+                pick_source_first = true,
+            })
+        end,
+    }
+
+    return items
+end
+
+return Settings

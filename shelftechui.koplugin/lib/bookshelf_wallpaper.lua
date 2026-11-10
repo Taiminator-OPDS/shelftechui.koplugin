@@ -1,0 +1,2069 @@
+-- bookshelf_wallpaper.lua
+-- A background image behind the whole screen, chosen PER SHELF.
+--
+-- ── WHY PER SHELF ───────────────────────────────────────────────────────────
+--
+-- Every UI plugin that has wallpaper has one wallpaper. Bookshelf's unit is
+-- the shelf, not the screen: a chip already carries its own view mode, folder
+-- tile style, densities and spine settings, so a chip carrying its own
+-- backdrop is the same idea one step further, and it is the reason to do this
+-- at all rather than copy what already exists elsewhere (maintainer's call).
+-- Genres can be a library, Recent can be a desk, and neither has to agree.
+--
+-- Three states, using the convention already established by the per-book
+-- facts store and the chip pins, so there is one rule and not three:
+--
+--     a string   this shelf shows that file
+--     false      this shelf shows NOTHING, even if the library has a default
+--     absent     this shelf follows the library default
+--
+-- ── WHERE THE FILES LIVE ────────────────────────────────────────────────────
+--
+-- <KOReader settings dir>/bookshelf/wallpapers/. Not icons/, where the
+-- ornaments live: that folder was chosen because ornaments genuinely are the
+-- small vector assets KOReader keeps there, and a full-screen photograph is
+-- not. Other home-screen tools keep theirs the same way, beside their own
+-- (settings/simpleui/sui_wallpapers), which is the convention a reader who
+-- has used one is most likely to expect from the other.
+--
+-- ── WHAT THIS MODULE DOES NOT DO ────────────────────────────────────────────
+--
+-- It does not decide whether a wallpaper is legible, or paint a scrim, or
+-- know anything about the widgets it sits behind. It answers "which file,
+-- and give me a widget for it at this size", and the shelf does the rest.
+
+local logger = require("logger")
+local _ = require("lib/bookshelf_i18n").gettext
+local _gettime
+do
+    local ok, sock = pcall(require, "socket")
+    _gettime = (ok and sock and type(sock.gettime) == "function")
+        and function() return sock.gettime() end
+        or  os.clock
+end
+local AssetFolder = require("lib/bookshelf_asset_folder")
+
+local M = {}
+
+-- Everything RenderImage can decode and a reader is likely to have. No SVG:
+-- a wallpaper is a photograph or a texture, and nanosvg at full-screen size
+-- is a very different cost from an ornament at 100px.
+M.EXT_LIST = { "png", "jpg", "jpeg", "bmp", "gif", "webp" }
+local EXTS = AssetFolder.extsFromList(M.EXT_LIST)
+
+M.SUBDIR    = "bookshelf/wallpapers"
+-- The library default, in Bookshelf's own settings.
+M.SETTING   = "wallpaper_default"
+
+-- ── The page ground ────────────────────────────────────────────────────────
+--
+-- What the screen is where no wallpaper reaches: the whole page when no
+-- wallpaper is set, and anything a picture does not cover. Stored in the
+-- same {grey=} / {hex=} shape as every other Bookshelf colour, so the shared
+-- picker and its day/night key suffix work unchanged.
+M.BG_SETTING = "wallpaper_bg"
+
+
+-- ── Invert in night mode ────────────────────────────────────────────────────
+--
+-- OFF by default. A wallpaper normally looks the same by night as by day: the
+-- panel inverts the whole frame and the picture is pre-inverted to match, so
+-- only the chrome changes. With this on, the picture shows as its negative
+-- whenever the shelf has its night look -- a pale texture becomes a dark one.
+--
+-- "Night look" is the shelf's theme (CoverProgress.theme), not KOReader's flag
+-- alone: pinned Dark inverts it with KOReader in day mode, pinned Light keeps
+-- it as drawn with KOReader in night mode.
+M.INVERT_NIGHT_SETTING = "wallpaper_invert_night"
+
+local function settingsRead(key)
+    local ok, Set = pcall(require, "lib/bookshelf_settings_store")
+    return ok and Set and Set.read(key) or nil
+end
+
+-- partRead(key): a part of the look as the theme on screen has it (the
+-- reader's edit to it, the theme's own, else Custom theme's: the seam,
+-- bookshelf_theme_pack.partRead); a key that is not a part, the reader's own.
+function M.partRead(key)
+    local ok_t, TP = pcall(require, "lib/bookshelf_theme_pack")
+    if ok_t and TP and TP.partRead then return TP.partRead(key) end
+    return settingsRead(key)
+end
+
+function M.invertsAtNight()
+    return M.partRead(M.INVERT_NIGHT_SETTING) == true
+end
+
+-- showsNegative(frame_night) -> should the picture DISPLAY as its negative,
+-- for a frame that is (or is not) inverting? The theme's answer for that
+-- frame, when the setting is on.
+function M.showsNegative(frame_night)
+    if not M.invertsAtNight() then return false end
+    -- The shelf on screen may wear its own theme (bookshelf_theme_pack).
+    local ok_t, TP = pcall(require, "lib/bookshelf_theme_pack")
+    local want = (ok_t and TP and TP.shelfLook) and TP.shelfLook()
+                 or settingsRead("shelf_theme")   -- CoverProgress.THEME_SETTING
+    if want == "dark" then return true end
+    if want == "light" then return false end
+    return frame_night and true or false         -- auto: follow the device
+end
+
+-- preInvert(frame_night) -> should the cached picture HOLD the negative of the
+-- file? What M.bg's `night` and flipNight's target mean. The frame's own
+-- inversion is undone by default (so the picture displays as drawn), and a
+-- wanted negative is one inversion more.
+function M.preInvert(frame_night)
+    return (frame_night and true or false) ~= M.showsNegative(frame_night)
+end
+
+-- ── Transparent buttons ────────────────────────────────────────────────────
+--
+-- OFF by default (maintainer's call). Chrome that goes see-through reads well
+-- over a calm texture and badly over a busy photograph, and the safe default
+-- for something that affects legibility is the one that keeps contrast. Covers
+-- the shelf menu bar's chips and the hero's tag pills.
+M.BUTTONS_SETTING = "wallpaper_transparent_buttons"
+
+function M.transparentButtons(read)
+    if type(read) ~= "function" then return false end
+    return read(M.BUTTONS_SETTING) and true or false
+end
+
+
+-- ── Chrome scrim ───────────────────────────────────────────────────
+--
+-- A solid panel behind the top panel and footer defeats the wallpaper, and a
+-- border around each shape is not enough separation over a busy photograph.
+-- What works is what a phone OS does: tint the strip, leave the picture
+-- readable through it.
+--
+-- Blitbuffer gives us that for one C call. blendRectRGB32 composites a colour
+-- OVER the rect at its alpha, via BB_blend_RGB32_over_rect, so the cost does
+-- not scale with how many shapes sit on top. It subsumes the two states we
+-- already had: alpha 0xFF is the solid fill, alpha 0 is transparent buttons.
+--
+-- NO DAY/NIGHT BRANCH, and that is not an oversight. The panel inverts the
+-- whole frame in night mode and the wallpaper is pre-inverted to match (see
+-- M.bg), so painted 0xFF is the page ground in BOTH modes -- white by day,
+-- black at night. Tinting toward chrome_bg therefore always moves the strip
+-- toward the ground colour the chrome was drawn for. Same reasoning as the
+-- night card shadow's #D9D9D9.
+M.SCRIM_SETTING = "wallpaper_chrome_scrim"
+-- Covers shelves get list mode's one continuous panel (top panel, shelf and
+-- footer) when this is true, and their labels lose the plate (issue 483).
+M.COVERS_PANEL_SETTING = "covers_full_panel"
+
+-- Fraction of chrome_bg to blend over the strip. Heavy rather than Medium:
+-- 0.6 leaves the picture legible under the chrome, but "legible under" is not
+-- the same as "legible", and which it turns out to be depends entirely on the
+-- picture the reader chose. A busy or high-contrast one puts detail straight
+-- through the chip labels. 0.85 still shows the picture through the strip and
+-- is safe with any of them (maintainer: "safer legibility"). Anyone who wants
+-- more of their wallpaper can turn it down; nobody has to discover that they
+-- need to.
+M.SCRIM_DEFAULT = 0.85
+
+-- scrimStrength(read) -> 0..1
+--
+-- Transparent buttons is the zero point rather than a separate code path, so
+-- there is only ever one question at the paint site: how much to tint.
+-- read: the shelf's reader (M.partRead, the theme on screen's: Panel shading
+-- is part of the theme since 2026-10-09); a fixed table of values in tests.
+function M.scrimStrength(read)
+    if type(read) ~= "function" then return M.SCRIM_DEFAULT end
+    if M.transparentButtons(read) then return 0 end
+    local v = read(M.SCRIM_SETTING)
+    if type(v) ~= "number" then return M.SCRIM_DEFAULT end
+    if v < 0 then return 0 end
+    if v > 1 then return 1 end
+    return v
+end
+
+-- shading() -> 0..1, Panel shading as the theme on screen sets it, NOT
+-- scrimStrength(): that one also answers 0 for transparent buttons, a choice
+-- about the CHROME. The label plates under covers and the add tile read
+-- this (bookshelf_shelf_row, bookshelf_add_tile).
+function M.shading()
+    local v = M.partRead(M.SCRIM_SETTING)
+    if type(v) ~= "number" then return M.SCRIM_DEFAULT end
+    if v < 0 then return 0 end
+    if v > 1 then return 1 end
+    return v
+end
+
+-- coversPanel() -> Panel behind Covers shelves, as the theme on screen sets it.
+function M.coversPanel() return M.partRead(M.COVERS_PANEL_SETTING) == true end
+
+-- _roundedSpans(x, y, w, h, r) -> a list of {x, y, w, h} rows that tile a
+-- rounded rectangle EXACTLY ONCE each.
+--
+-- Blitbuffer has paintRoundedRect but no blended equivalent, and the obvious
+-- workaround -- blend the body, then blend the corners -- is wrong: every
+-- pixel in the overlap gets the tint twice and the corners come out darker
+-- than the panel they belong to. Tiling by row means each pixel is written
+-- once, so a 60% tint is 60% everywhere.
+--
+-- Rows only, no anti-aliasing. These panels sit on a 16-level greyscale e-ink
+-- screen over a photograph, where a one-pixel stair step is invisible and a
+-- feathered edge would just look like a smudge.
+-- One table, reused, for the square case. _roundedSpans is called for every
+-- panel and every band of the shelf recess -- several dozen times a frame --
+-- and the square answer is always the same one-element list. Callers iterate
+-- it and are done with it before the next call, so there is nothing to alias.
+local _SQUARE = { { } }
+
+local function _roundedSpans(x, y, w, h, r)
+    r = math.min(r or 0, math.floor(w / 2), math.floor(h / 2))
+    if r <= 0 then
+        local sp = _SQUARE[1]
+        sp.x, sp.y, sp.w, sp.h = x, y, w, h
+        return _SQUARE
+    end
+
+    local spans = {}
+    for i = 0, r - 1 do
+        -- Distance from the corner circle's centre to this row's midline.
+        local dy = r - i - 0.5
+        local inset = math.floor(r - math.sqrt(r * r - dy * dy) + 0.5)
+        local sw = w - inset * 2
+        if sw > 0 then
+            spans[#spans + 1] = { x = x + inset, y = y + i,         w = sw, h = 1 }
+            spans[#spans + 1] = { x = x + inset, y = y + h - 1 - i, w = sw, h = 1 }
+        end
+    end
+    local mid_h = h - r * 2
+    if mid_h > 0 then
+        spans[#spans + 1] = { x = x, y = y + r, w = w, h = mid_h }
+    end
+    return spans
+end
+M._roundedSpans = _roundedSpans
+
+-- isShowing() -> is a wallpaper on screen right now?
+--
+-- The decoded backdrop is the only honest answer: a name can be set for an
+-- image that has since been deleted or failed to decode, and chrome that
+-- adapts itself for a picture that is not there looks broken on a plain page.
+--
+-- The kept picture alone is not the answer: it stays decoded when the shelf
+-- on screen has none (so going back to the shelf that wears it is instant),
+-- and a book opened on a picture-less shelf flashed that other shelf's
+-- picture behind its row (PW5). The shelf says which it is (setShowing).
+M._none = nil
+function M.setShowing(on) M._none = (not on) or nil end
+local function shown()
+    if M._none then return nil end
+    return M._bg
+end
+M._shown = shown
+function M.isShowing()
+    return shown() ~= nil
+end
+
+-- shade(bb, x, y, w, h, strength, night, radius) -> true if it painted.
+--
+-- A drop shadow over a picture. Unlike scrim this DOES branch on night, and
+-- the difference is worth stating because the two look like the same job.
+--
+-- A panel tints toward the page ground, and the page ground is one painted
+-- value in both modes (0xFF), so scrim needs no branch. A shadow has to come
+-- out DARKER THAN WHATEVER IS BEHIND IT on screen -- and "darker on screen"
+-- is a lower painted value by day and a HIGHER one at night, because the
+-- panel inverts the frame. Opposite directions, hence the branch.
+--
+-- Which is also why a shadow cannot be a fixed colour over a picture: the
+-- shipped grey reads as a shadow on white paper and as a HIGHLIGHT over a
+-- dark wallpaper, because it is lighter than the thing it falls on. Blending
+-- pure black (or white) at a fraction is relative to what is there, so it
+-- darkens anything.
+-- shadeRect(bb, x, y, w, h, strength, night) -> the direct form: one rect,
+-- no radius, no pcall, no span table. For callers that issue thousands per
+-- paint from inside a pcall of their own (the recess painter: ~2000 bands
+-- per spine page), where shade()'s per-call wrapping WAS the cost.
+--
+-- Both forms refuse a buffer whose C blitter is unavailable
+-- (bb:canUseCbb() false, the flip flag being set on a device that cannot
+-- flip in hardware): darkenRect/lightenRect are then per-pixel Lua, and a
+-- missing shadow beats a paint measured in seconds.
+function M.shadeRect(bb, x, y, w, h, strength, night)
+    if not bb then return false end
+    if not w or not h or w <= 0 or h <= 0 then return false end
+    if not strength or strength <= 0 then return false end
+    if strength > 1 then strength = 1 end
+    if type(bb.canUseCbb) == "function" and not bb:canUseCbb() then return false end
+    local op = night and bb.lightenRect or bb.darkenRect
+    if not op then return false end
+    op(bb, x, y, w, h, strength)
+    return true
+end
+
+-- shadeClipped(bb, x, y, w, h, strength, night, radius, clips) -> true
+--
+-- Shades (the rounded rect) INTERSECTED WITH (the union of clips), each
+-- clip a { x, y, w, h }. For a shadow that something opaque is about to
+-- cover almost entirely: a cover tile's shadow is its own size, and the
+-- card then hides all but an L-shaped margin, so blending the whole rect
+-- was a read-modify-write of the framebuffer twenty times larger than what
+-- shows. Clips must be disjoint, or the overlap is darkened twice. No
+-- clips: plain shade.
+function M.shadeClipped(bb, x, y, w, h, strength, night, radius, clips)
+    if type(clips) ~= "table" or #clips == 0 then
+        return M.shade(bb, x, y, w, h, strength, night, radius)
+    end
+    if not bb then return false end
+    if not w or not h or w <= 0 or h <= 0 then return false end
+    if not strength or strength <= 0 then return false end
+    if strength > 1 then strength = 1 end
+    if type(bb.canUseCbb) == "function" and not bb:canUseCbb() then return false end
+    local op = night and bb.lightenRect or bb.darkenRect
+    if not op then return false end
+    local spans = _roundedSpans(x, y, w, h, radius)
+    for i = 1, #spans do
+        local sp = spans[i]
+        for k = 1, #clips do
+            local c  = clips[k]
+            local x0 = math.max(sp.x, c.x)
+            local y0 = math.max(sp.y, c.y)
+            local x1 = math.min(sp.x + sp.w, c.x + c.w)
+            local y1 = math.min(sp.y + sp.h, c.y + c.h)
+            if x1 > x0 and y1 > y0 then op(bb, x0, y0, x1 - x0, y1 - y0, strength) end
+        end
+    end
+    return true
+end
+
+function M.shade(bb, x, y, w, h, strength, night, radius)
+    if not bb then return false end
+    if not w or not h or w <= 0 or h <= 0 then return false end
+    if not strength or strength <= 0 then return false end
+    if strength > 1 then strength = 1 end
+    if type(bb.canUseCbb) == "function" and not bb:canUseCbb() then return false end
+    local op = night and bb.lightenRect or bb.darkenRect
+    if not op then return false end
+    return pcall(function()
+        for _i, sp in ipairs(_roundedSpans(x, y, w, h, radius)) do
+            op(bb, sp.x, sp.y, sp.w, sp.h, strength)
+        end
+    end)
+end
+
+-- scrim(bb, x, y, w, h, colour, strength, radius) -> true if it painted.
+--
+-- Tolerant by design: this runs inside paintTo, where an error takes the whole
+-- shelf down, and a missing scrim is a cosmetic loss not a broken screen.
+-- The blitbuffer module, looked up once per module identity. scrim runs
+-- several hundred times a frame through _reshade; a pcall(require) on each
+-- was measurable. Re-checked against package.loaded so the headless tests,
+-- which install their stub after this file is read, still see it.
+local _bb_mod, _bb_seen = nil, nil
+local function _blitbuffer()
+    local cur = package.loaded["ffi/blitbuffer"]
+    if _bb_mod ~= nil and _bb_seen == cur then return _bb_mod end
+    local ok, B = pcall(require, "ffi/blitbuffer")
+    _bb_mod, _bb_seen = (ok and B) or false, package.loaded["ffi/blitbuffer"]
+    return _bb_mod
+end
+
+function M.scrim(bb, x, y, w, h, colour, strength, radius)
+    if not bb or not colour then return false end
+    if not w or not h or w <= 0 or h <= 0 then return false end
+    strength = strength or M.SCRIM_DEFAULT
+    if strength <= 0 then return false end
+
+    local Blitbuffer = _blitbuffer()
+    if not Blitbuffer or not Blitbuffer.ColorRGB32 then return false end
+
+    local ok = pcall(function()
+        local tint, alpha = M._scrimTint(Blitbuffer, colour, strength)
+        local opaque = M._scrimOpaque(bb, alpha)
+        local spans = _roundedSpans(x, y, w, h, radius)
+        if opaque and alpha < 255
+                and M._blendThroughInverse(bb, spans, tint, alpha, Blitbuffer) then
+            return
+        end
+        -- No C blitter at all (KOReader switches it off on 24-bit PocketBooks,
+        -- the Era Color among them): blend in bookshelf's own byte loop rather
+        -- than fall back to solid (issue 520).
+        if opaque and alpha < 255 and M._lutBlend(bb, spans, tint, alpha, Blitbuffer) then
+            return
+        end
+        if not opaque and M._blendInCopy(bb, spans, tint, Blitbuffer) then return end
+        for _i, s in ipairs(spans) do
+            if opaque then
+                require("lib/bookshelf_color").paintRect(bb, s.x, s.y, s.w, s.h, colour)
+            else
+                bb:blendRectRGB32(s.x, s.y, s.w, s.h, tint)
+            end
+        end
+    end)
+    return ok
+end
+
+-- _blendInCopy(bb, spans, tint, Blitbuffer) -> true when the spans were
+-- blended. On the screen's own buffer a blend reads every pixel back, and a
+-- Kindle's framebuffer is slow memory to read: the micro-modules view's
+-- full-screen panel cost ~650 ms on a PW5, where the same blend in a copy is
+-- 23 ms and reading the area once 70 ms (rig device/editdrive.koplugin). So
+-- the area is read once, blended in memory and written back. false, with
+-- nothing painted, for any other buffer (blended in place, as before) or an
+-- inverted one (_blendThroughInverse's).
+function M._blendInCopy(bb, spans, tint, Blitbuffer)
+    if not (Blitbuffer.new and bb.blitFrom and #spans > 0) then return false end
+    local ok_d, Device = pcall(require, "device")
+    local screen = ok_d and Device and Device.screen
+    if not (screen and rawequal(bb, screen.bb)) then return false end
+    if type(bb.getInverse) == "function" and bb:getInverse() ~= 0 then return false end
+    local x0, y0, x1, y1 = math.huge, math.huge, -math.huge, -math.huge
+    for _i, s in ipairs(spans) do
+        if s.x < x0 then x0 = s.x end
+        if s.y < y0 then y0 = s.y end
+        if s.x + s.w > x1 then x1 = s.x + s.w end
+        if s.y + s.h > y1 then y1 = s.y + s.h end
+    end
+    local w, h = x1 - x0, y1 - y0
+    if w <= 0 or h <= 0 then return false end
+    local tmp = Blitbuffer.new(w, h, bb:getType())
+    local ok = pcall(function()
+        tmp:blitFrom(require("lib/bookshelf_clip_bb").real(bb), 0, 0, x0, y0, w, h)
+        for _i, s in ipairs(spans) do
+            tmp:blendRectRGB32(s.x - x0, s.y - y0, s.w, s.h, tint)
+        end
+        bb:blitFrom(tmp, x0, y0, 0, 0, w, h)
+    end)
+    tmp:free()
+    return ok
+end
+
+-- _scrimTint(Blitbuffer, colour, strength) -> tint, alpha: the colour scrim
+-- blends over a panel, with the strength as its alpha. Shared with the blur's
+-- baked panel (frostBuild), so the two cannot drift apart.
+function M._scrimTint(Blitbuffer, colour, strength)
+    local c = colour.getColorRGB32 and colour:getColorRGB32() or colour
+    local alpha = math.floor(255 * strength + 0.5)
+    if alpha > 255 then alpha = 255 end
+    return Blitbuffer.ColorRGB32(c:getR(), c:getG(), c:getB(), alpha), alpha
+end
+
+-- _blendThroughInverse(bb, spans, tint, alpha, Blitbuffer) -> true when the
+-- spans were blended. Night mode on a device that cannot invert in hardware
+-- (every PocketBook, the MediaTek Kobos) sets the buffer's invert flag, which
+-- the C blitter does not honour, so the panels went solid there (a PocketBook
+-- Era Color on Reddit). The flag only means the buffer holds 255 - shown, and
+-- blending those stored pixels with the inverted colour is the same blend:
+-- s' = s(1-a) + (255-c)a = 255 - (v(1-a) + ca). So the flag comes off for the
+-- C blend and goes straight back on. false, with nothing painted, when the
+-- buffer is not inverted or the C blitter is off for another reason.
+function M._blendThroughInverse(bb, spans, tint, alpha, Blitbuffer)
+    if type(bb.getInverse) ~= "function" or type(bb.setInverse) ~= "function"
+            or not bb.blendRectRGB32 or bb:getInverse() ~= 1 then
+        return false
+    end
+    bb:setInverse(0)
+    local done = false
+    pcall(function()
+        if type(bb.canUseCbb) == "function" and not bb:canUseCbb() then return end
+        local inv = Blitbuffer.ColorRGB32(255 - tint:getR(), 255 - tint:getG(),
+                                          255 - tint:getB(), alpha)
+        for _i, s in ipairs(spans) do
+            bb:blendRectRGB32(s.x, s.y, s.w, s.h, inv)
+        end
+        done = true
+    end)
+    bb:setInverse(1)
+    return done
+end
+
+-- _lutBlend(bb, spans, tint, alpha, Blitbuffer) -> true when the spans were
+-- blended. For a buffer the C blitter will not take: KOReader turns it off on
+-- 24-bit PocketBooks (device.lua, canUseCBB = no), and its Lua fallback is a
+-- function call per pixel, which is why the panels were drawn solid there --
+-- in day and night mode alike (issue 520, an Era Color). A tint over a
+-- rectangle is the same blend for every byte of a channel, so each channel
+-- gets a 256-entry table and the loop is one lookup per byte. Rotation only
+-- moves the rectangle (getPhysicalRect); an inverted buffer (night mode
+-- without hardware inversion) holds 255 - shown, and blending those bytes with
+-- the inverted colour is the same blend (see _blendThroughInverse). BB8,
+-- RGB24 and RGB32 only; false, with nothing painted, for anything else.
+local _ffi_ok, _ffi = pcall(require, "ffi")
+local function _lut(c, a)
+    local t, na = {}, 255 - a
+    for v = 0, 255 do t[v] = math.floor((v * na + c * a) / 255 + 0.5) end
+    return t
+end
+function M._lutBlend(bb, spans, tint, alpha, Blitbuffer)
+    if not (_ffi_ok and bb and bb.data and bb.getType and bb.getPhysicalRect) then return false end
+    local typ = bb:getType()
+    local bpp = (typ == Blitbuffer.TYPE_BB8 and 1) or (typ == Blitbuffer.TYPE_BBRGB24 and 3)
+             or (typ == Blitbuffer.TYPE_BBRGB32 and 4) or nil
+    if not bpp then return false end
+    local ok = pcall(function()
+        local inv = bb.getInverse and bb:getInverse() == 1
+        local r, g, b = tint:getR(), tint:getG(), tint:getB()
+        if inv then r, g, b = 255 - r, 255 - g, 255 - b end
+        local lr, lg, lb, ly
+        if bpp == 1 then
+            local grey = tint:getColor8().a
+            ly = _lut(inv and 255 - grey or grey, alpha)
+        else
+            lr, lg, lb = _lut(r, alpha), _lut(g, alpha), _lut(b, alpha)
+        end
+        local data = _ffi.cast("uint8_t*", bb.data)
+        local stride = tonumber(bb.stride)
+        for _i, sp in ipairs(spans) do
+            local x, y, w, h = bb:getBoundedRect(sp.x, sp.y, sp.w, sp.h)
+            if w > 0 and h > 0 then
+                local px, py, pw, ph = bb:getPhysicalRect(x, y, w, h)
+                for row = py, py + ph - 1 do
+                    local p = data + row * stride + px * bpp
+                    if bpp == 1 then
+                        for i = 0, pw - 1 do p[i] = ly[p[i]] end
+                    else
+                        for i = 0, (pw - 1) * bpp, bpp do
+                            p[i] = lr[p[i]]; p[i + 1] = lg[p[i + 1]]; p[i + 2] = lb[p[i + 2]]
+                        end
+                    end
+                end
+            end
+        end
+    end)
+    return ok
+end
+
+-- _scrimOpaque(bb, alpha) -> true when scrim paints the colour SOLID on bb.
+-- blendRectRGB32 is C only while canUseCbb() holds. When the buffer
+-- carries the flip flag the C blitter refuses it (a dark display on
+-- a device that cannot flip in hardware, and the desktop emulator)
+-- and the blend is a per-pixel Lua loop: the top panel is ~588k
+-- pixels of it per paint. Opaque there, translucent everywhere else.
+function M._scrimOpaque(bb, alpha)
+    local no_cbb = type(bb.canUseCbb) == "function" and not bb:canUseCbb()
+    return alpha >= 255 or not bb.blendRectRGB32 or no_cbb
+end
+
+-- ── Blur behind the panels (frosted glass) ─────────────────────────────
+--
+-- OFF by default. With it on, the picture behind a translucent panel is
+-- blurred before the panel's tint goes over it, so the panel reads as frosted
+-- glass: the wallpaper's tone and colour come through, its detail does not
+-- fight the text on top. Only the PICTURE is blurred.
+--
+-- The blur itself is lib/bookshelf_frost (downscale, box blur, bilinear back
+-- up). It is built once per panel rect and kept, keyed by what is behind it
+-- -- the decoded picture's own key, which already names the file, the screen
+-- size and the night pre-inversion -- so a paint is one blit, and only a new
+-- picture, a night toggle or a panel that moved pays for a rebuild.
+-- Part of the theme on screen (M.partRead): a pack may switch it off.
+M.BLUR_SETTING = "wallpaper_panel_blur"
+function M.blurOn() return M.partRead(M.BLUR_SETTING) == true end
+
+-- ── Dithered onto the panel's greys (greyscale e-ink) ──
+--
+-- A greyscale e-ink panel shows 16 greys, and a PW5 shows framebuffer grey v
+-- as level v >> 4 (no hardware dithering is asked for on a greyscale screen;
+-- see the widget's self.dithered). The blur under a tint is a smooth field
+-- of in-between greys, so on the device it posterised into two or three flat
+-- greys with hard edges: "that doesn't really look like a blur, it just looks
+-- like a pattern" (maintainer, photo of the PW5). On those screens the panel's
+-- whole background -- the blurred picture WITH the tint over it -- is built
+-- once, dithered onto exact levels (Frost.dither, KOReader's own ordered 8x8),
+-- and cached; the panel is then that one blit and NO scrim, so the text, icons
+-- and covers paint over exact greys and stay crisp.
+--
+-- The tint has to be inside the dithered result: blended over dithered levels
+-- at paint time it would land between them again. It is the scrim's own blend
+-- (blendRectRGB32, _scrimTint), done in the cache instead of on the screen, so
+-- it is in painted space like everything else here and night mode needs no
+-- branch: painted 17n displays as 255 - 17n = 17(15 - n), a level too.
+--
+-- Not on a colour screen (the panel dithers its own colour there, and the
+-- shelf asks for it), not on the desktop, and not where scrim would paint the
+-- panel solid anyway (_scrimOpaque).
+local _dev_mod, _dev_seen = nil, nil
+function M.ditherPanels()
+    if M._dither_on ~= nil then return M._dither_on end
+    local cur = package.loaded["device"]
+    if _dev_mod == nil or _dev_seen ~= cur then
+        local ok, D = pcall(require, "device")
+        _dev_mod, _dev_seen = (ok and D) or false, package.loaded["device"]
+    end
+    local D = _dev_mod
+    if not D then return false end
+    local eink = type(D.hasEinkScreen) == "function" and D:hasEinkScreen()
+    local colour = type(D.hasColorScreen) == "function" and D:hasColorScreen()
+    return (eink and not colour) and true or false
+end
+M._dither_on = nil     -- seam: true/false overrides the device (tests)
+
+-- A handful of entries: the top panel, the footer, and one big panel (list
+-- mode's, Covers' with Show panel behind, or the micro-module screen's).
+-- Cleared whenever the picture changes (frostClear).
+M._frost = {}
+M._frost_build = nil   -- seam: fn(src_bb, x, y, w, h, tint) -> bb (tests)
+local FROST_MAX = 4
+
+local function frostClear()
+    for _i, e in ipairs(M._frost) do
+        pcall(function() e.bb:free() end)
+    end
+    M._frost = {}
+end
+M._frostClear = frostClear
+
+-- frostBuild(src_bb, x, y, w, h, tint) -> a w x h Blitbuffer of the blurred
+-- picture under that rect, or nil. src_bb is the full-screen picture.
+-- tint, a { colour, strength } (dithered panels only): the panel's tint is
+-- blended over the blur and the whole dithered onto exact greys, so the
+-- result is the panel's finished background, in an 8-bit grey buffer.
+local function frostBuild(src_bb, x, y, w, h, tint)
+    local Blitbuffer = _blitbuffer()
+    if not (Blitbuffer and Blitbuffer.new) then return nil end
+    local ok_ffi, ffi = pcall(require, "ffi")
+    if not ok_ffi then return nil end
+    local Frost = require("lib/bookshelf_frost")
+    local t0 = _gettime()
+    -- Grey stays grey (a PW5's picture is BB8 after toScreenType); anything
+    -- else is worked on as RGB32 so a colour picture keeps its colour.
+    local grey = src_bb:getType() == Blitbuffer.TYPE_BB8
+    local btype = grey and Blitbuffer.TYPE_BB8 or Blitbuffer.TYPE_BBRGB32
+    local bpp, nch = grey and 1 or 4, grey and 1 or 3
+    local rx, ry, rw, rh = Frost.region(x, y, w, h, Frost.margin(),
+                                        src_bb:getWidth(), src_bb:getHeight())
+    if rw <= 0 or rh <= 0 then return nil end
+    -- A plain copy of the region first: one C blit, and it leaves a buffer
+    -- with no rotation, no inversion flag and a known byte layout to read.
+    local region = Blitbuffer.new(rw, rh, btype)
+    region:blitFrom(src_bb, 0, 0, rx, ry, rw, rh)
+    local out = Blitbuffer.new(w, h, btype)
+    local alloc = function(n) return ffi.new("double[?]", math.max(1, n)) end
+    local ok, err = pcall(Frost.blur,
+        ffi.cast("uint8_t *", region.data), tonumber(region.stride), bpp, nch, rw, rh,
+        x - rx, y - ry, w, h,
+        ffi.cast("uint8_t *", out.data), tonumber(out.stride),
+        (not grey) and 255 or nil, alloc)
+    region:free()
+    local t_blur = _gettime()
+    if ok and tint then
+        ok, err = pcall(function()
+            -- The scrim's own blend, into the cache instead of the screen.
+            out:blendRectRGB32(0, 0, w, h, (M._scrimTint(Blitbuffer, tint.colour, tint.strength)))
+            if not grey then
+                -- An RGB32 picture on a greyscale screen (the rig's): to
+                -- grey first, as blitting it to the screen would.
+                local g = Blitbuffer.new(w, h, Blitbuffer.TYPE_BB8)
+                g:blitFrom(out, 0, 0, 0, 0, w, h)
+                out:free()
+                out = g
+            end
+            Frost.dither(ffi.cast("uint8_t *", out.data), tonumber(out.stride), w, h, x, y)
+        end)
+    end
+    if not ok then
+        logger.warn("[bookshelf] panel blur failed:", err)
+        out:free()
+        return nil
+    end
+    -- Permanent, per the [bookshelf perf] convention: the one cost this
+    -- option adds, paid once per picture and panel rect.
+    local t1 = _gettime()
+    logger.dbg(string.format("[bookshelf perf] frost: build=%.1fms %dx%d at %d,%d %s%s",
+        (t1 - t0) * 1000, w, h, x, y, grey and "BB8" or "RGB32",
+        tint and string.format(" (tint+dither %.1fms)", (t1 - t_blur) * 1000) or ""))
+    return out
+end
+
+-- The cover disk cache, for decoded pictures (M._disk_cache: test seam;
+-- false switches it off).
+local function diskCache()
+    if M._disk_cache == nil then
+        local ok, DC = pcall(require, "lib/bookshelf_cover_disk_cache")
+        M._disk_cache = ok and DC or false
+    end
+    return M._disk_cache or nil
+end
+-- diskKey(path, w, h) -> the cache key for this picture at this size, or nil.
+local function diskKey(path, w, h)
+    local ok, key = pcall(function()
+        local lfs = require("libs/libkoreader-lfs")
+        local attr = lfs.attributes(path)
+        if not (attr and attr.modification) then return nil end
+        local Screen = require("device").screen
+        local fbt = Screen and Screen.bb and Screen.bb.getType and Screen.bb:getType()
+        return string.format("wallpaper:%s|%s|%s|%dx%d|%s", path,
+            tostring(attr.modification), tostring(attr.size), w, h, tostring(fbt))
+    end)
+    return ok and key or nil
+end
+
+-- frostFor(x, y, w, h, tint) -> the cached blur for exactly that panel rect
+-- (and, dithered, that tint) over the current picture, built on a miss; nil
+-- without a picture.
+local function frostFor(x, y, w, h, tint)
+    local bg = M._bg
+    if not (bg and bg.bb and M._bg_key) then return nil end
+    local tc, ts = tint and tint.key, tint and tint.strength
+    for i, e in ipairs(M._frost) do
+        if e.bg_key == M._bg_key and e.x == x and e.y == y and e.w == w and e.h == h
+                and e.tint_key == tc and e.tint_strength == ts then
+            if i > 1 then table.remove(M._frost, i); table.insert(M._frost, 1, e) end
+            return e.bb
+        end
+    end
+    -- The finished blur outlives the session too, beside the picture it was
+    -- made from (the first full-screen view of a session built its panel's
+    -- blur, ~0.2-0.8 s on the PW5). Keyed on the picture's own disk key, the
+    -- mode it is in, the rect, the tint and the blur's constants.
+    local fkey
+    if bg.dkey and not M._frost_build and diskCache() then
+        local Frost = require("lib/bookshelf_frost")
+        fkey = string.format("frost:%s|%s|%d,%d,%dx%d|%s|%s|%d/%d/%d", bg.dkey,
+            M._bg_key:sub(-2) == "|n" and "n" or "d", x, y, w, h, tostring(tc), tostring(ts),
+            Frost.FACTOR, Frost.RADIUS, Frost.PASSES)
+    end
+    local bb = fkey and diskCache().load(fkey)
+    if not bb then
+        bb = (M._frost_build or frostBuild)(bg.bb, x, y, w, h, tint)
+        if bb and fkey then pcall(diskCache().store, fkey, bb) end
+    end
+    if not bb then return nil end
+    table.insert(M._frost, 1, { bg_key = M._bg_key, x = x, y = y, w = w, h = h, bb = bb,
+                                tint_key = tc, tint_strength = ts })
+    while #M._frost > FROST_MAX do
+        local old = table.remove(M._frost)
+        pcall(function() old.bb:free() end)
+    end
+    return bb
+end
+
+-- frost(target, x, y, w, h, radius, outer, colour, strength) -> painted,
+-- tinted: painted when the blurred picture was laid over that (rounded)
+-- rect; tinted when what was laid is the panel's FINISHED background (tint
+-- and dither included, ditherPanels), and the caller must not tint again.
+-- colour and strength are the panel's tint; without them it is never baked.
+--
+-- outer, a { x, y, w, h }, is the PANEL the rect belongs to: the blur is
+-- built for the whole panel and this rect cut from it, so a patch put back
+-- inside a panel (restore's reshade) matches the panel around it exactly --
+-- dither pattern included. Without outer the rect is its own panel. Refuses
+-- an offscreen target, as restore does: the picture is screen-indexed.
+local _tint = {}
+-- _colourKey(colour) -> a number naming the colour's value: the panel's
+-- colour is resolved afresh on every rebuild, so the cache cannot compare the
+-- objects (and a cdata colour must not be compared with ==, see bg's notes).
+local function _colourKey(colour)
+    if type(colour) == "number" then return colour end
+    local c = colour.getColorRGB32 and colour:getColorRGB32() or colour
+    return (c:getR() * 256 + c:getG()) * 256 + c:getB()
+end
+function M.frost(target, x, y, w, h, radius, outer, colour, strength)
+    if not M.blurOn() then return false, false end
+    local bg = shown()
+    if not (bg and bg.bb and target and w and h) or w <= 0 or h <= 0 then return false, false end
+    if target.getWidth == nil or target:getWidth() ~= bg.w or target:getHeight() ~= bg.h then
+        return false, false
+    end
+    local ox, oy, ow, oh = x, y, w, h
+    if outer then ox, oy, ow, oh = outer.x, outer.y, outer.w, outer.h end
+    -- Clamped to the picture: a panel rect can overhang the screen edge.
+    if ox < 0 then ow = ow + ox; ox = 0 end
+    if oy < 0 then oh = oh + oy; oy = 0 end
+    if ox + ow > bg.w then ow = bg.w - ox end
+    if oy + oh > bg.h then oh = bg.h - oy end
+    if ow <= 0 or oh <= 0 then return false, false end
+    -- Baked only where scrim would have blended (not painted solid).
+    local tint = nil
+    if type(colour) ~= "nil" and strength and strength > 0 and M.ditherPanels()
+            and not M._scrimOpaque(target, math.floor(255 * strength + 0.5)) then
+        _tint.colour, _tint.strength, _tint.key = colour, strength, _colourKey(colour)
+        tint = _tint
+    end
+    local fb = frostFor(ox, oy, ow, oh, tint)
+    if not fb then return false, false end
+    local ok = pcall(function()
+        for _i, s in ipairs(_roundedSpans(x, y, w, h, radius)) do
+            local x0, y0 = math.max(s.x, ox), math.max(s.y, oy)
+            local x1 = math.min(s.x + s.w, ox + ow)
+            local y1 = math.min(s.y + s.h, oy + oh)
+            if x1 > x0 and y1 > y0 then
+                target:blitFrom(fb, x0, y0, x0 - ox, y0 - oy, x1 - x0, y1 - y0)
+            end
+        end
+    end)
+    return ok and true or false, (ok and tint ~= nil) and true or false
+end
+
+-- panel(bb, x, y, w, h, colour, strength, radius, frost) -> true if painted.
+-- A panel: the blurred picture, when the caller says the picture is what is
+-- behind it (frost) and the option is on, then the tint -- or, on a
+-- greyscale e-ink screen, the two together, dithered (ditherPanels). A Solid
+-- panel hides the picture anyway, so it is never blurred.
+function M.panel(bb, x, y, w, h, colour, strength, radius, frost)
+    if frost and strength and strength > 0 and strength < 1 then
+        local _painted, tinted = M.frost(bb, x, y, w, h, radius, nil, colour, strength)
+        if tinted then return true end
+    end
+    return M.scrim(bb, x, y, w, h, colour, strength, radius)
+end
+
+
+M._data_dir = nil          -- override for the data dir (tests)
+M._lfs      = nil          -- lazily required
+M._render   = nil          -- function(path, w, h) -> bb (tests)
+
+local function lfs()
+    if M._lfs then return M._lfs end
+    local ok, l = pcall(require, "libs/libkoreader-lfs")
+    if ok then M._lfs = l end
+    return M._lfs
+end
+
+function M.dataDir()
+    if M._data_dir then return M._data_dir end
+    local ok, DataStorage = pcall(require, "datastorage")
+    if ok and DataStorage then return DataStorage:getSettingsDir() end
+    return nil
+end
+
+function M.dir()
+    local base = M.dataDir()
+    if not base then return nil end
+    return base .. "/" .. M.SUBDIR
+end
+
+-- ensureDir() -- create the folder (and its parent) so a reader has somewhere
+-- to put files. Cheap and idempotent; called before any scan.
+M._ensured = false
+-- Pictures shipped with the plugin, copied in the first time the folder is
+-- made. A wallpaper folder that starts empty documents nothing: the reader has
+-- to already know the feature exists, find the folder, and guess what belongs
+-- in it. One picture in place answers all three.
+--
+-- Seeded ONCE PER FILE, recorded in a setting, so a reader who deletes one
+-- does not find it back next launch.
+--
+-- It used to key off the folder's creation instead, which is a worse proxy
+-- for the same intent in two ways. A folder that already exists but is EMPTY
+-- -- which is every device that ran a build where seeding was broken, and
+-- every reader who cleared it out and then wondered where the example went --
+-- could never be seeded again. And a picture added to a LATER release would
+-- reach only people installing fresh, never anyone upgrading.
+--
+-- The record is a list of names, so deleting one is remembered per picture
+-- rather than for the folder as a whole.
+M.SEED_SUBDIR = "assets/wallpapers"
+M.SEEDED_SETTING = "wallpaper_seeded"
+
+-- copyFile(src, dst) -> true if the bytes landed.
+--
+-- Block-wise rather than a single read: these are ~500KB JPEGs and the whole
+-- point of doing this at folder-creation time is that it happens once, so
+-- there is no reason to hold the entire file in memory to do it.
+local function copyFile(src, dst)
+    local fi = io.open(src, "rb")
+    if not fi then return false end
+    local fo = io.open(dst, "wb")
+    if not fo then fi:close(); return false end
+    local ok = true
+    while true do
+        local chunk = fi:read(64 * 1024)
+        if not chunk then break end
+        if not fo:write(chunk) then ok = false; break end
+    end
+    fi:close()
+    fo:close()
+    return ok
+end
+
+-- seedDir(d) -- copy the shipped pictures into a freshly made folder.
+--
+-- Silent on every failure: a missing seed folder (a source checkout that never
+-- ran the build, say) is not a reason to keep a reader out of the feature.
+-- seedSource() -- where the shipped pictures live, resolved from this file's
+-- own location (the idiom bookshelf_i18n and start_menu_modules use: it works
+-- whether the plugin was loaded by absolute path on a device or relatively by
+-- the test runner). One level up from lib/ is the plugin root.
+function M.seedSource()
+    local libdir = debug.getinfo(1, "S").source:match("^@(.+/)") or "./"
+    return libdir .. "../" .. M.SEED_SUBDIR
+end
+
+function M.seedDir(d, skip)
+    local fs = lfs()
+    if not (d and fs) then return end
+    skip = skip or {}
+    -- This file's own directory, the idiom bookshelf_i18n and
+    -- start_menu_modules already use -- it resolves whether the plugin was
+    -- loaded by absolute path (the device) or relative (the test runner).
+    -- One level up from lib/ is the plugin root.
+    local from = M.seedSource()
+    if fs.attributes(from, "mode") ~= "directory" then return end
+    -- The `for` statement takes fs.dir's returns DIRECTLY, and that is the
+    -- whole point of the closure. lfs.dir returns TWO values -- the iterator
+    -- and the directory object it needs as its state -- and the first cut
+    -- wrote `local ok, iter = pcall(fs.dir, from)`, which kept the iterator
+    -- and dropped the state. Every call then died on "directory metatable
+    -- expected, got nil", inside a pcall at the call site, so the bundled
+    -- picture was never copied on any device and nothing ever said so.
+    local seeded = {}
+    pcall(function()
+        for name in fs.dir(from) do
+            local ext = name:match("%.([^%.]+)$")
+            if name ~= "." and name ~= ".." and ext and EXTS[ext:lower()]
+                    and not skip[name] then
+                if copyFile(from .. "/" .. name, d .. "/" .. name) then
+                    seeded[#seeded + 1] = name
+                end
+            end
+        end
+    end)
+    return seeded
+end
+
+function M.ensureDir()
+    if M._ensured then return end
+    local d, fs = M.dir(), lfs()
+    if not (d and fs) then return end
+    M._ensured = true
+    local parent = d:match("^(.*)/[^/]+$")
+    if parent and fs.attributes(parent, "mode") ~= "directory" then
+        pcall(fs.mkdir, parent)
+    end
+    -- Seed only on CREATION: existing readers keep whatever they have, and a
+    -- deleted seed stays deleted.
+    if fs.attributes(d, "mode") ~= "directory" then pcall(fs.mkdir, d) end
+    if fs.attributes(d, "mode") ~= "directory" then return end
+    -- Copy any shipped picture this install has not handed over before. The
+    -- record is what stops a deleted one coming back; the folder's existence
+    -- is not, because an empty folder and a cleared-out one look the same.
+    local ok_set, Set = pcall(require, "lib/bookshelf_settings_store")
+    if not (ok_set and Set) then return end
+    local done = Set.read(M.SEEDED_SETTING) or {}
+    if type(done) ~= "table" then done = {} end
+    local seen = {}
+    for _i = 1, #done do seen[done[_i]] = true end
+    local pending = false
+    pcall(function()
+        for name in fs.dir(M.seedSource() or "") do
+            local ext = name:match("%.([^%.]+)$")
+            if name ~= "." and name ~= ".." and ext and EXTS[ext:lower()]
+                    and not seen[name] then
+                pending = true
+            end
+        end
+    end)
+    if not pending then return end
+    local ok_seed, seeded = pcall(M.seedDir, d, seen)
+    if not (ok_seed and seeded) then return end
+    for _i = 1, #seeded do done[#done + 1] = seeded[_i] end
+    pcall(Set.save, M.SEEDED_SETTING, done)
+    pcall(Set.flush)
+end
+
+-- ── which file ─────────────────────────────────────────────────────────────
+
+-- FULL_SETTING -- a second library-wide image, for full screen shelves only.
+--
+-- The two views want different backdrops: the top panel is mostly text over
+-- the picture, while full screen shelves are wall-to-wall covers and spines,
+-- and a backdrop that reads well behind one is often wrong behind the other.
+M.FULL_SETTING = "wallpaper_full"
+
+-- resolveFor(full_value, default_value, is_full) -> name or nil
+--
+-- Pure: names only, no filesystem. pathFor turns a name into something to
+-- open, and is where a file that has since been deleted drops out.
+--
+-- There WAS a third, more specific source here: a per-shelf image, picked in
+-- the chip editor. It was removed rather than fixed. Changing the backdrop on
+-- a chip tap means the whole screen has to repaint, and the shelf's refreshes
+-- are regional by design, so moving between two chips with different pictures
+-- left stale rectangles behind. The same hazard applies to the full screen
+-- image below, which is why that switch goes through a full repaint.
+function M.resolveFor(full_value, default_value, is_full)
+    -- Three states for the full screen image, not two: unset means "same as
+    -- the default", false means "no picture in this view". Treating false as
+    -- unset would make None unreachable for full screen shelves.
+    if is_full then
+        if full_value == false then return nil end
+        if type(full_value) == "string" and full_value ~= "" then
+            return full_value
+        end
+    end
+    if type(default_value) == "string" and default_value ~= "" then
+        return default_value
+    end
+    return nil
+end
+
+-- pathFor(name) -> absolute path, or nil if there is no such wallpaper.
+--
+-- The folder is the whole namespace. A name carrying a separator is refused
+-- rather than resolved, because these names come out of settings and a
+-- settings file is something a reader can hand-edit -- the same reasoning
+-- that produced the updater's traversal fix.
+function M.pathFor(name)
+    if type(name) ~= "string" or name == "" then return nil end
+    -- A pack's borrowed wallpaper (bookshelf_theme_pack): resolved there, into
+    -- the pack's theme/ folder. Checked before the separator refusal below,
+    -- which is about the reader's own names.
+    if name:sub(1, 11) == "theme-pack\1" then
+        local ok, TP = pcall(require, "lib/bookshelf_theme_pack")
+        return ok and TP.wallpaperPath(name:sub(12)) or nil
+    end
+    if name:find("/", 1, true) or name:find("\\", 1, true) then return nil end
+    if name == "." or name == ".." then return nil end
+    local d, fs = M.dir(), lfs()
+    local tok, rest = name:match("^([^:]+):(.+)$")
+    if tok then
+        if rest == "." or rest == ".." then return nil end
+        d = nil
+        for _i, f in ipairs(M.extraFolders()) do
+            if f.token == tok then d = f.dir; break end
+        end
+        name = rest
+    end
+    if not (d and fs) then return nil end
+    local path = d .. "/" .. name
+    if fs.attributes(path, "mode") ~= "file" then return nil end
+    return path
+end
+
+-- ── what is on offer ───────────────────────────────────────────────────────
+
+-- list() -> { { name, label, path }, ... } sorted by name.
+--
+-- label is the filename without its extension: the picker shows a name, not
+-- a filename. Cached on the folder's contents, not on its mtime alone -- see
+-- lib/bookshelf_asset_folder.lua for the two ways that goes wrong.
+M._list_cache = nil
+M._list_key   = nil
+-- ── Other folders that hold wallpapers ────────────────────────────────────
+--
+-- A reader who already keeps pictures for another tool should not have to
+-- copy them. Every image in any of these folders that exists joins the list,
+-- under a name that says which folder it came from ("<folder>:<file>") so
+-- pathFor knows where to look. Read only: none of them is ever created, and
+-- nothing outside them is read.
+--
+-- NOT the screensaver folder, though it was here at first on the reasoning
+-- that readers commonly fill one and the same picture often suits both. It
+-- does not survive contact with real ones: most screensaver images shared for
+-- KOReader are PNGs with transparency, cut to sit alone on a blank screen, and
+-- behind a shelf they read as holes rather than as a backdrop. A folder of
+-- them also floods the picker, each entry looking exactly like a wallpaper the
+-- reader chose to put there (maintainer, having looked through their own).
+--
+-- The mechanism stays: SimpleUI's folder is a genuine wallpaper folder, and so
+-- is /mnt/us/Wallpapers.
+M.EXTRA_DIRS = nil     -- override for the tests; nil = the defaults below
+-- Issue 419: a folder of the reader's own, chosen in the menu, for pictures
+-- kept for something else (another tool's folder, a synced one) that should
+-- not have to be copied here. Read only, like the others, and listed first,
+-- so its token wins if two folders end in the same name.
+M.USER_DIR_SETTING = "wallpaper_folder"
+function M.userDir()
+    local ok, Set = pcall(require, "lib/bookshelf_settings_store")
+    local d = ok and Set and Set.read(M.USER_DIR_SETTING)
+    if type(d) ~= "string" or d == "" then return nil end
+    return (d:gsub("/+$", ""))
+end
+function M.setUserDir(d)
+    local ok, Set = pcall(require, "lib/bookshelf_settings_store")
+    if not (ok and Set) then return end
+    if type(d) == "string" and d ~= "" then Set.save(M.USER_DIR_SETTING, (d:gsub("/+$", "")))
+    else Set.delete(M.USER_DIR_SETTING) end
+    Set.flush()
+    M._list_cache, M._list_key = nil, nil
+end
+function M.extraDirs()
+    if M.EXTRA_DIRS then return M.EXTRA_DIRS end
+    local out = {}
+    local user = M.userDir()
+    if user then out[#out + 1] = user end
+    local settings = M.dataDir()
+    if settings then out[#out + 1] = settings .. "/simpleui/sui_wallpapers" end
+    out[#out + 1] = "/mnt/us/Wallpapers"
+    return out
+end
+
+-- The token a folder's files are named under: its last path component.
+local function _dirToken(d)
+    return (tostring(d):gsub("/+$", "")):match("([^/]+)$") or "x"
+end
+
+-- extraFolders() -> { {token, dir}, ... } for the extra folders that exist.
+function M.extraFolders()
+    local fs = lfs()
+    if not fs then return {} end
+    local seen, out = {}, {}
+    for _i, d in ipairs(M.extraDirs()) do
+        d = tostring(d):gsub("/+$", "")
+        if not seen[d] and d ~= M.dir() and fs.attributes(d, "mode") == "directory" then
+            seen[d] = true
+            out[#out + 1] = { token = _dirToken(d), dir = d }
+        end
+    end
+    return out
+end
+
+function M.list()
+    M.ensureDir()
+    local d, fs = M.dir(), lfs()
+    if not (d and fs) then return {} end
+    local names, key = AssetFolder.scan(fs, d, EXTS)
+    if not names then return {} end
+    -- The other folders are part of the cache key: a file added to one of
+    -- them must show up here too.
+    local folders = M.extraFolders()
+    local extra = {}
+    for _i, f in ipairs(folders) do
+        local fnames, fkey = AssetFolder.scan(fs, f.dir, EXTS)
+        extra[#extra + 1] = { folder = f, names = fnames or {} }
+        key = key .. "|" .. f.token .. "=" .. tostring(fkey)
+    end
+    if M._list_cache and M._list_key == key then return M._list_cache end
+    local out, labels = {}, {}
+    local function add(name, label, path)
+        out[#out + 1] = { name = name, label = label, path = path }
+        labels[label] = (labels[label] or 0) + 1
+    end
+    for _i = 1, #names do
+        local name = names[_i]
+        add(name, name:match("^(.+)%.[^%.]+$") or name, d .. "/" .. name)
+    end
+    for _i, e in ipairs(extra) do
+        for _j = 1, #e.names do
+            local name = e.names[_j]
+            add(e.folder.token .. ":" .. name, name:match("^(.+)%.[^%.]+$") or name,
+                e.folder.dir .. "/" .. name)
+        end
+    end
+    -- Two folders holding a file of the same name: say which is which.
+    for _i, it in ipairs(out) do
+        if labels[it.label] > 1 then
+            local tok = it.name:match("^([^:]+):")
+            it.label = it.label .. " (" .. (tok or _("wallpapers")) .. ")"
+        end
+    end
+    M._list_cache, M._list_key = out, key
+    return out
+end
+
+-- eraser(active, w, h) -> a widget that paints the wallpaper back over its own
+-- rect, or nil when there is no wallpaper.
+--
+-- For chrome that is opaque ON PURPOSE because it has to hide what is beneath
+-- it -- the start menu's close X sits exactly over the hamburger and must
+-- replace it, not sit on top of it. On paper a white fill does that. Over a
+-- wallpaper the same fill is a white box, so the erasing is done by putting
+-- the image's own pixels back and then drawing the glyph over them.
+--
+-- Returns nil rather than a no-op widget so callers can keep their opaque
+-- background in the plain case, where it is both correct and cheaper.
+--
+-- scrim_color/scrim_strength put the PANEL back too. "The image's own pixels"
+-- stopped being the whole truth once the footer grew a tinted panel: the
+-- hamburger sits inside it, so restoring the raw wallpaper there punches a
+-- dark rectangle through the panel exactly the size of the close X's box.
+-- What was on screen is wallpaper THEN tint, so the eraser replays both.
+--
+-- under, optional: fn() -> { bb, x, y, w, h }, a copy of the screen under
+-- the button taken before the button was painted (the shelf keeps one, see
+-- BookshelfWidget:burgerUnder). It is the exact answer -- the panel, its
+-- blur AND the bottom shelf's plank design reaching into the footer, all of
+-- which replaying the picture and the tint would wipe -- so it wins whenever
+-- it covers this rect. Otherwise the replay, as before.
+local Eraser = nil
+function M.eraser(active, w, h, scrim_color, scrim_strength, under)
+    if not active or not w or not h or w <= 0 or h <= 0 then return nil end
+    if not Eraser then
+        local Widget = require("ui/widget/widget")
+        Eraser = Widget:extend{ w = 0, h = 0 }
+        function Eraser:init()
+            self.dimen = require("ui/geometry"):new{ w = self.w, h = self.h }
+        end
+        function Eraser:paintTo(target, x, y)
+            self.dimen.x, self.dimen.y = x, y
+            local s = self.under and self.under()
+            if s and s.bb and x >= s.x and y >= s.y
+                    and x + self.w <= s.x + s.w and y + self.h <= s.y + s.h then
+                local ok = pcall(function()
+                    target:blitFrom(s.bb, x, y, x - s.x, y - s.y, self.w, self.h)
+                end)
+                if ok then return end
+            end
+            M.restore(target, x, y, self.w, self.h)
+            -- No radius: this patch is strictly INSIDE the panel, so it wants
+            -- the panel's fill, never its corners.
+            if self.scrim_color and (self.scrim_strength or 0) > 0 then
+                M.scrim(target, x, y, self.w, self.h,
+                        self.scrim_color, self.scrim_strength)
+            end
+        end
+    end
+    return Eraser:new{ w = w, h = h, under = under,
+                       scrim_color = scrim_color, scrim_strength = scrim_strength }
+end
+
+-- backdrop(target) -> true if the whole backdrop was painted into `target`.
+--
+-- For code that composes a frame in its OWN screen-sized buffer rather than
+-- painting to the screen -- the chip strip's page wipe does exactly that.
+-- Blitbuffer.new callocs, so such a buffer starts BLACK, and whatever the
+-- widget does not cover reveals black when the wipe runs. That was invisible
+-- while chips were opaque white cards over a white page.
+--
+-- Reuses the background widget's own paintTo, so the ground colour
+-- are honoured without a second implementation to keep in step.
+-- backdrop(target [, region]) -> true when the wallpaper was laid into
+-- target. With a region, only that rect is blitted: the chip strip's page
+-- wipe needs the picture under its own band in a scratch buffer, and laying
+-- the whole screen into it for a 60px strip was most of the wipe's cost.
+function M.backdrop(target, region)
+    local bg = shown()
+    if not (bg and bg.bb and target) then return false end
+    if target.getWidth == nil or target.getHeight == nil then return false end
+    if target:getWidth() ~= bg.w or target:getHeight() ~= bg.h then return false end
+    if type(region) == "table" and region.w and region.h then
+        local ok = pcall(function()
+            target:blitFrom(bg.bb, region.x, region.y, region.x, region.y,
+                            region.w, region.h)
+        end)
+        return ok and true or false
+    end
+    local ok = pcall(function() bg:paintTo(target, 0, 0) end)
+    return ok and true or false
+end
+
+-- restore(target, x, y, w, h) -> true if the wallpaper was put back there.
+--
+-- For chrome that CUTS a shape by painting the page ground back over itself --
+-- the shelf plank's chamfered ends, a book's eased foot corners. On a plain
+-- page "the ground" is a colour you can just paint. Over a wallpaper it is a
+-- photograph, and the only honest way to cut a corner is to put back exactly
+-- the pixels that were there.
+--
+-- Which is easy, because the cached image is full-screen and painted at 0,0:
+-- screen (x, y) IS wallpaper (x, y), so a corner is one small blit from the
+-- same coordinates.
+--
+-- REFUSES an offscreen target. A widget that renders into its own buffer (a
+-- spine slot does) passes coordinates relative to that buffer, and blitting
+-- the screen-indexed wallpaper into it would paste the wrong part of the
+-- picture. Comparing dimensions is a cheap, self-validating way to tell the
+-- two apart, and returning false lets the caller keep its old behaviour.
+-- ── the ground, which is not always a picture ──────────────────────────────
+--
+-- restore() and patch() exist to answer "what is behind this rect", and for a
+-- long time the only answer worth having was a photograph. It is not the only
+-- one: a reader can set a page colour, and the shelf's own dark theme is a
+-- ground too. Both want exactly the same compositing the picture does -- the
+-- chrome stops painting its own paper and whatever is behind shows through --
+-- so the ground is set here and these two answer for it whether or not an
+-- image was ever loaded.
+--
+-- nil means the shelf is plain paper and every caller should take its
+-- historical no-picture path, which is what keeps a default install
+-- byte-identical.
+M._ground = nil
+function M.setGround(colour)
+    M._ground = (type(colour) ~= "nil") and colour or nil
+end
+function M.ground() return M._ground end
+
+-- THE PANEL, registered so restore can tell the truth.
+--
+-- restore()'s contract is "put back what was behind this rect". Inside a
+-- panel that is NOT the raw picture: the panel tinted it first, and blitting
+-- the untouched photograph back punches a bright hole in the tint. That is
+-- what the hero cover's rounded corners were -- four light notches on a dark
+-- panel, at the picture's own brightness (maintainer, on device).
+--
+-- One rect, set by whoever paints the panel, cleared when it does not. Kept
+-- here rather than threaded through every caller because the callers are
+-- asking "what is behind me", not "am I in a panel" -- they have no business
+-- knowing, and every one of them would have to be told.
+M._panel = nil
+-- gap_y: a 1px row across the panel left untinted, where the full panel
+-- meets the footer (the shelf's own panel, list mode and Covers): a repaint
+-- over it puts the bare picture back there, as the panel left it.
+-- frost: the panel was painted over the blurred picture (M.panel's frost), so
+-- a patch put back inside it gets the same blur before the tint.
+function M.setPanel(x, y, w, h, colour, strength, radius, gap_y, frost)
+    if not (x and y and w and h) or w <= 0 or h <= 0
+            or type(colour) == "nil" or not strength or strength <= 0 then
+        M._panel = nil
+        return
+    end
+    -- Called on every paint of the top panel; mutate rather than allocate.
+    local p = M._panel or {}
+    p.x, p.y, p.w, p.h = x, y, w, h
+    p.colour, p.strength, p.radius = colour, strength, radius or 0
+    p.gap_y = gap_y
+    p.frost = frost and true or false
+    M._panel = p
+end
+
+-- _reshade(target, x, y, w, h): re-apply the panel over a rect that has just
+-- had raw picture put back into it -- the blur first when the panel has it,
+-- then the tint. Clipped to the panel, so a rect straddling its edge only
+-- gets the panel on the inside.
+local function _reshade(target, x, y, w, h)
+    local p = M._panel
+    if not p then return end
+    local x0 = math.max(x, p.x)
+    local y0 = math.max(y, p.y)
+    local x1 = math.min(x + w, p.x + p.w)
+    local y1 = math.min(y + h, p.y + p.h)
+    if x1 <= x0 or y1 <= y0 then return end
+    local g = p.gap_y
+    local function shade(sy, sh)
+        if p.frost then
+            -- Dithered panels: the patch is the panel's finished background
+            -- (same cache, same pattern), so no tint over it.
+            local _painted, tinted = M.frost(target, x0, sy, x1 - x0, sh, 0, p, p.colour, p.strength)
+            if tinted then return end
+        end
+        M.scrim(target, x0, sy, x1 - x0, sh, p.colour, p.strength, 0)
+    end
+    pcall(function()
+        if g and g >= y0 and g < y1 then
+            -- Either side of the gap row; the row itself stays bare.
+            if g > y0 then shade(y0, g - y0) end
+            if y1 > g + 1 then shade(g + 1, y1 - g - 1) end
+        else
+            shade(y0, y1 - y0)
+        end
+    end)
+end
+
+
+-- restoreBare(target, x, y, w, h) -> restore without the panel's tint: the
+-- bare picture (or ground), for a gap that must show through a panel (the
+-- 1px row above the footer). The registered panel is left as it is.
+function M.restoreBare(target, x, y, w, h)
+    local p = M._panel
+    M._panel = nil
+    local ok = M.restore(target, x, y, w, h)
+    M._panel = p
+    return ok
+end
+
+function M.restore(target, x, y, w, h)
+    if not (target and w and h) or w <= 0 or h <= 0 then return false end
+    local bg = shown()
+    if bg and bg.bb then
+        if target.getWidth == nil or target.getHeight == nil then return false end
+        if target:getWidth() ~= bg.w or target:getHeight() ~= bg.h then return false end
+        local ok = pcall(function()
+            target:blitFrom(bg.bb, x, y, x, y, w, h)
+        end)
+        if ok then
+            _reshade(target, x, y, w, h)
+            return true
+        end
+        return false
+    end
+    -- No picture, but a ground: the flat colour IS what is behind this rect,
+    -- and the caller's own fallback would paint paper white into it.
+    if type(M._ground) == "nil" then return false end
+    local ok = pcall(function()
+        -- The page colour pick: through Color.paintRect.
+        require("lib/bookshelf_color").paintRect(target, x, y, w, h, M._ground)
+    end)
+    return ok and true or false
+end
+
+-- patch(target, dx, dy, sx, sy, w, h) -> true if it painted.
+--
+-- restore()'s offscreen sibling. restore refuses anything that is not
+-- screen-sized, because it blits source-to-destination at the same
+-- coordinates; this takes the two separately, so a small scratch buffer can
+-- be given the slice of wallpaper that sits under the rect it will be blitted
+-- back to.
+--
+-- Needed wherever a one-shot frame is composed offscreen and then copied over
+-- the screen: it cannot alphablit (the screen still holds the outgoing frame,
+-- which would show through), so it needs a real ground, and over a wallpaper
+-- the only correct ground is the picture itself.
+function M.patch(target, dx, dy, sx, sy, w, h)
+    if not (target and w and h) or w <= 0 or h <= 0 then return false end
+    local bg = shown()
+    if not (bg and bg.bb) then
+        -- No picture, but a ground: the flat colour is what belongs here, and
+        -- it needs no source coordinates at all. Same reasoning as restore.
+        if type(M._ground) == "nil" then return false end
+        local ok = pcall(function()
+            require("lib/bookshelf_color").paintRect(target, dx, dy, w, h, M._ground)
+        end)
+        return ok and true or false
+    end
+    if not (sx and sy) or sx < 0 or sy < 0 then return false end
+    -- CLAMP rather than refuse. A slot at the right or bottom edge of the
+    -- screen overhangs the picture by a pixel or two, and refusing the whole
+    -- copy for that sent the caller to its flat-colour fallback -- a white (or
+    -- black) hole where the wallpaper should have been.
+    if sx + w > bg.w then w = bg.w - sx end
+    if sy + h > bg.h then h = bg.h - sy end
+    if w <= 0 or h <= 0 then return false end
+    local ok = pcall(function()
+        target:blitFrom(bg.bb, dx, dy, sx, sy, w, h)
+    end)
+    return ok and true or false
+end
+
+-- ── chrome that must stop painting its own page ────────────────────────────
+
+-- unfill(active, ...) -> the same widgets, so it can wrap a build inline.
+--
+-- KOReader's Button has no transparent mode. It builds a FrameContainer with
+-- background = COLOR_WHITE unless given a colour, and a colour drops the
+-- border and rounds the corners -- so "see-through" is not something the
+-- constructor can express. Clearing frame.background afterwards is the way,
+-- and it is what Button itself does for its own borderless state (it stashes
+-- orig_background and nils the field). FrameContainer then skips the fill:
+-- `if self.background then`.
+--
+-- Gated on `active` rather than done unconditionally, because on a plain page
+-- the white fill is CORRECT: it is what makes a button read as a button
+-- against the paper. This only applies when there is something behind it.
+function M.unfill(active, ...)
+    if not active then return ... end
+    for i = 1, select("#", ...) do
+        local w = select(i, ...)
+        if type(w) == "table" then
+            if type(w.frame) == "table" then
+                -- Button's own idiom for this, so anything that looks for the
+                -- stash finds it (Button:hide does exactly these two lines).
+                w.frame.orig_background = w.frame.background
+                w.frame.background = nil
+                -- ...and then the part Button never has to think about,
+                -- because it only ever unfills an ICON button.
+                --
+                -- With flash_ui on, a TEXT button's tap feedback inverts the
+                -- frame's fill in place rather than setting the invert flag:
+                --
+                --     if self[1].radius == nil or self.background then
+                --         self[1].background = self[1].background:invert()
+                --
+                -- There is no fill any more, and nil has no :invert(), so the
+                -- tap took KOReader down -- "attempt to index field
+                -- 'background' (a nil value)" in Button:_doFeedbackHighlight,
+                -- reported from a PW5 (#436). The page counter is a text
+                -- button and it is unfilled here, so every wallpapered shelf
+                -- had a crash sitting in its footer.
+                --
+                -- Both halves of that guard have to read false for the flag
+                -- branch to run instead, which is the right feedback anyway:
+                -- inverting the rect shows the tap without needing a fill.
+                -- A radius of 0 is what nil already meant to paintBorder, so
+                -- nothing moves on screen, and it is deliberately NOT
+                -- Size.radius.button, which is what _undoFeedbackHighlight
+                -- keys on to decide it must invert back.
+                if w.frame.radius == nil then w.frame.radius = 0 end
+                if w.background then
+                    w.orig_background = w.background
+                    w.background = nil
+                end
+            end
+            -- AND the icon, which is the other half and the less obvious one.
+            -- ImageWidget defaults to alpha = false, and Button builds its
+            -- IconWidget without setting it, so a chevron's SVG is FLATTENED
+            -- onto white and blitted opaquely. Clearing the frame's fill alone
+            -- leaves a white square the exact size of the icon -- which is
+            -- precisely what it looked like on device, and why the page
+            -- counter (text, no icon) came out clean while every chevron did
+            -- not.
+            local icon = w.label_widget
+            -- A DISABLED icon dims by lightening its whole RECT
+            -- (ImageWidget: `if self.dim then bb:lightenRect(...)`), which on
+            -- paper greys a black glyph and over a wallpaper washes a pale
+            -- square out of the image instead. KOReader knows: the comment
+            -- right above that line says the fix would be "to take the icon
+            -- pixmap as an alpha-mask ... and colorBlit it a dim gray onto
+            -- the target bb", which is exactly M.mask. So do that, in the
+            -- same COLOR_DARK_GRAY Button already dims its TEXT to.
+            if type(icon) == "table" and w.enabled == false and icon.dim then
+                icon.dim = false
+                local lc = w.label_container
+                if type(lc) == "table" and lc[1] == icon then
+                    local Blitbuffer = require("ffi/blitbuffer")
+                    lc[1] = M.mask(true, icon, Blitbuffer.COLOR_DARK_GRAY)
+                end
+            end
+            if type(icon) == "table" and icon.alpha == false then
+                icon.alpha = true
+                -- ImageWidget keys its render cache on the alpha flag, so a
+                -- bitmap rendered flat before this point would not be reused
+                -- anyway; dropping it just makes that explicit rather than
+                -- relying on the hash.
+                if icon._bb and icon._bb_disposable and icon._bb.free then
+                    pcall(function() icon._bb:free() end)
+                end
+                icon._bb = nil
+            end
+        end
+    end
+    return ...
+end
+
+-- iconHasColour(icon) -> true if the icon's own artwork is chromatic.
+--
+-- IconWidget looks in `<data dir>/icons` BEFORE `resources/icons/mdlight`, so
+-- "chevron.left" is whatever the user dropped there. Replacing the pagination
+-- chevrons is a common thing to do and the replacements are often coloured.
+-- Everything else in this file can treat an icon as black line art; the mask
+-- cannot, because it has room for exactly one colour.
+--
+-- Read off the rendered bitmap rather than the file, because that is the thing
+-- that gets painted: an SVG, a PNG and a scaled copy of either all end up here
+-- as the same kind of buffer, and getColorRGB32 normalises every blitbuffer
+-- type to r/g/b so the answer does not depend on which one it is.
+--
+-- TWO THINGS the naive version gets wrong:
+--
+--   * ALPHA. NanoSVG hands back STRAIGHT alpha, so the RGB sitting behind a
+--     fully transparent pixel is whatever the rasteriser last left there --
+--     frequently not grey, and never visible. Sampling it says "colour" for
+--     every icon ever drawn. Skip anything close to invisible.
+--   * TOLERANCE. A scaled or dithered greyscale render lands a channel a
+--     point or two off its neighbours. Require a real spread, not inequality.
+--
+-- Sampled on a stride so the cost is ~256 reads whatever the icon's size, and
+-- cached against the RESOLVED PATH -- which is the field that distinguishes a
+-- user's chevron.left from the shipped one of the same name. The answer is a
+-- property of the file, so once per session is once too many already.
+local CHROMA_TOLERANCE = 8      -- r/g/b spread below this is grey enough
+local CHROMA_MIN_ALPHA = 0x10   -- fainter than this contributes nothing
+local _icon_colour = {}
+function M.iconHasColour(icon)
+    if type(icon) ~= "table" then return false end
+    local key = icon.file or icon.icon
+    if type(key) ~= "string" or key == "" then return false end
+    local hit = _icon_colour[key]
+    if type(hit) == "boolean" then return hit end
+
+    local scanned, found = false, false
+    pcall(function()
+        if not icon._bb and type(icon._render) == "function" then
+            icon:_render()
+        end
+        local bb = icon._bb
+        if not bb or type(bb.getPixel) ~= "function" then return end
+        local w, h = bb:getWidth(), bb:getHeight()
+        if not w or not h or w <= 0 or h <= 0 then return end
+        scanned = true
+        local step = math.max(1, math.floor(math.min(w, h) / 16))
+        for y = 0, h - 1, step do
+            for x = 0, w - 1, step do
+                local c = bb:getPixel(x, y):getColorRGB32()
+                if (c.alpha or 0xFF) > CHROMA_MIN_ALPHA then
+                    local lo = math.min(c.r, c.g, c.b)
+                    local hi = math.max(c.r, c.g, c.b)
+                    if hi - lo >= CHROMA_TOLERANCE then
+                        found = true
+                        return
+                    end
+                end
+            end
+        end
+    end)
+    -- Only remember a verdict we actually reached. A render that has not
+    -- happened yet is not evidence that the icon is grey.
+    if scanned then _icon_colour[key] = found end
+    return found
+end
+
+-- recolourIcons(active, ink, ...) -> the same widgets, so it can wrap a list
+-- inline. Paints every ENABLED button icon in `ink` instead of its own black.
+--
+-- For the shelf's own dark theme, where nothing inverts the frame for us and
+-- KOReader's icons are black-on-transparent bitmaps with no colour to set.
+--
+-- MASKED, not inverted. ImageWidget has an `invert` flag, and it is the wrong
+-- tool here: it inverts the icon's whole RECT, so the panel showing through
+-- the transparent part flips too and every chevron gains a pale box -- which
+-- is exactly what it looked like. The mask takes the pixmap as an alpha
+-- stencil and colour-blits it, leaving everything around the glyph alone.
+--
+-- Same wrapping unfill uses for a DISABLED icon: replace the widget inside
+-- Button's label_container, since that is what actually gets painted.
+--
+-- SKIPPED for an icon that carries colour. KOReader resolves icons from the
+-- user's own `<data dir>/icons` before its own set, so the chevron here may be
+-- a cat paw somebody drew -- and a mask has exactly one colour. Flattening
+-- stock black line art is the whole point; flattening a painted icon is just
+-- deleting it. So ask the bitmap first.
+-- tintIcon(ink, icon) -> the icon, or a stand-in that paints it in `ink`.
+--
+-- The rule recolourIcons applies, lifted out so it can be pointed at a bare
+-- IconWidget as well as at a Button's. KOReader icons are black-on-transparent
+-- bitmaps and take no colour from anyone: an `fgcolor` handed to the widget
+-- that builds one is simply ignored. That is fine while the surface behind is
+-- white, and it is why a micro-module can pass the right ink to its icon and
+-- still paint black on a black card.
+--
+-- ALWAYS returns something paintable, so a caller can assign the result
+-- unconditionally. It hands the original straight back when there is nothing
+-- to do:
+--   * no ink, or not an alpha bitmap -- nothing to recolour;
+--   * an ink that is already black -- the artwork is drawn in it, so a mask
+--     render would cost a buffer to change nothing;
+--   * a COLOUR icon -- mask is an alpha stencil with one fgcolor, so it would
+--     flatten the artwork to a silhouette. iconHasColour is that test.
+function M.tintIcon(ink, icon)
+    if type(ink) == "nil" or type(icon) ~= "table" or icon.alpha == nil then
+        return icon
+    end
+    local ok_l, lum = pcall(function() return ink:getColor8().a end)
+    if ok_l and lum == 0 then return icon end
+    if M.iconHasColour(icon) then return icon end
+    icon.dim = false
+    return M.mask(true, icon, ink)
+end
+
+function M.recolourIcons(active, ink, ...)
+    if not active or not ink then return ... end
+    for i = 1, select("#", ...) do
+        local w = select(i, ...)
+        if type(w) == "table" and w.enabled ~= false then
+            local icon = w.label_widget
+            local lc   = w.label_container
+            -- lc[1] == icon: only swap what the container is actually painting.
+            if type(icon) == "table" and type(lc) == "table" and lc[1] == icon then
+                lc[1] = M.tintIcon(ink, icon)
+            end
+        end
+    end
+    return ...
+end
+
+-- nightProofIcons(night, ...) -> the same widgets, so it can wrap a list
+-- inline. Stops a COLOUR icon displaying as its own negative in night mode.
+--
+-- ImageWidget pre-inverts what it paints so the panel's inversion lands on the
+-- original, and then exempts anything flagged `is_icon`:
+--
+--     if Screen.night_mode and self.original_in_nightmode and not self.is_icon
+--
+-- For black line art that exemption is the whole trick -- paint black, display
+-- white, match the text. For a colour icon it is simply wrong, and upstream
+-- says so in the comment directly above that line: "As for *color* icons, we
+-- really *ought* to invert them here, but we currently don't, as we don't
+-- really trickle down a way to discriminate them from the B&W ones."
+--
+-- iconHasColour IS that discrimination, so do what the note asks. Inverting
+-- here means the icon DISPLAYS the colours its author chose, in both modes --
+-- never a negative of them, which is the one outcome nobody wants.
+--
+-- A PRIVATE COPY, never the widget's own buffer: `_bb` normally belongs to
+-- ImageWidget's render cache, shared with every other widget showing the same
+-- icon at the same size. Inverting it in place would flip those too, and flip
+-- them again on the next rebuild.
+--
+-- The RGB32 invert masks 0x00FFFFFF in both the Lua and the C path, so the
+-- alpha channel survives and the glyph keeps its shape. That only holds for a
+-- buffer that still HAS an alpha channel: with no wallpaper up, ImageWidget
+-- caches the icon already flattened onto white (`if self.is_icon and not
+-- self.alpha`), and inverting that gives a black card. So this is gated on
+-- alpha being on, which is the state unfill puts these icons in.
+function M.nightProofIcons(night, ...)
+    if not night then return ... end
+    for i = 1, select("#", ...) do
+        local w = select(i, ...)
+        if type(w) == "table" and w.enabled ~= false then
+            local icon = w.label_widget
+            local lc   = w.label_container
+            -- lc[1] == icon: if a mask already replaced it, that wrapper is
+            -- what gets painted and it has no colour left to protect.
+            if type(icon) == "table" and icon.alpha == true
+                    and type(lc) == "table" and lc[1] == icon
+                    and M.iconHasColour(icon) then
+                pcall(function()
+                    local src = icon._bb
+                    if not src or type(src.copy) ~= "function" then return end
+                    local copy = src:copy()
+                    copy:invertRect(0, 0, copy:getWidth(), copy:getHeight())
+                    if icon._bb_disposable and type(src.free) == "function" then
+                        src:free()
+                    end
+                    icon._bb = copy
+                    icon._bb_disposable = true
+                end)
+            end
+        end
+    end
+    return ...
+end
+
+-- mask(active, inner, fgcolor) -> a widget, or `inner` untouched.
+--
+-- The answer to the one surface a wallpaper cannot simply be placed behind:
+-- text. TextBoxWidget renders into its own buffer, fills it with bgcolor
+-- (white) and blits it OPAQUELY; the HTML widgets are worse still, because
+-- MuPDF hands back a page, not a picture with holes in it. Neither has a
+-- transparent mode.
+--
+-- But an opaque render of dark text on a white page IS a glyph-coverage mask,
+-- just the wrong way round. colorblitFrom uses the source's 8-bit grey VALUE
+-- as alpha (setPixelColorize: `local alpha = mask:getColor8().a`), so:
+--
+--     paint the widget onto white  ->  glyphs dark, page white
+--     invert                       ->  glyphs bright, page black
+--     colorblitFrom(mask, colour)  ->  glyphs painted, page contributes 0
+--
+-- Anti-aliasing survives intact, because a half-covered edge pixel becomes a
+-- half alpha. Measured against real blitbuffers before this was written: an
+-- edge at grey 201 over a ground of 71 came out at exactly 56 in black and
+-- 110 in white, both matching the arithmetic to the integer.
+--
+-- fgcolor defaults to BLACK because this plugin paints in PRE-INVERT space:
+-- black here displays white once the panel inverts in night mode, which is
+-- the same rule the rest of the shelf follows.
+--
+-- THE LIMIT, worth knowing before using it somewhere new: a mask has one
+-- colour. Bold and italic survive (they are glyph shapes) but anything that
+-- relied on being a DIFFERENT colour is flattened to a density of this one.
+-- For book text -- prose, outlined pills, a progress bar -- that is fine.
+--
+-- The mask is built once per wrapper instance and kept. These wrappers are
+-- created by a layout build and die with it, so that is once per rebuild
+-- rather than once per frame.
+local Mask = nil
+function M.mask(active, inner, fgcolor)
+    if not active or type(inner) ~= "table" then return inner end
+    if not Mask then
+        local Widget = require("ui/widget/widget")
+        Mask = Widget:extend{ inner = nil, fgcolor = nil, _mask = nil }
+        function Mask:init()
+            self.dimen = self.inner:getSize()
+        end
+        function Mask:getSize() return self.inner:getSize() end
+        function Mask:_build()
+            local Blitbuffer = require("ffi/blitbuffer")
+            local sz = self.inner:getSize()
+            if not sz or sz.w <= 0 or sz.h <= 0 then return nil end
+            -- BB8: a mask is a single channel by definition, and one byte per
+            -- pixel is a quarter of what RGB32 would cost for the same answer.
+            local scratch = Blitbuffer.new(sz.w, sz.h, Blitbuffer.TYPE_BB8)
+            scratch:fill(Blitbuffer.COLOR_WHITE)
+            self.inner:paintTo(scratch, 0, 0)
+            scratch:invertRect(0, 0, sz.w, sz.h)
+            return scratch
+        end
+        function Mask:paintTo(target, x, y)
+            if not self._mask then
+                local ok, m = pcall(self._build, self)
+                if not ok or not m then
+                    -- Better an opaque block of readable text than nothing.
+                    return self.inner:paintTo(target, x, y)
+                end
+                self._mask = m
+            end
+            self.dimen.x, self.dimen.y = x, y
+            local m = self._mask
+            pcall(function()
+                target:colorblitFrom(m, x, y, 0, 0,
+                                     m:getWidth(), m:getHeight(), self.fgcolor)
+            end)
+        end
+        function Mask:free()
+            if self._mask then
+                pcall(function() if self._mask.free then self._mask:free() end end)
+                self._mask = nil
+            end
+            if self.inner and self.inner.free then pcall(function() self.inner:free() end) end
+        end
+        Mask.onCloseWidget = Mask.free
+    end
+    local Blitbuffer = require("ffi/blitbuffer")
+    return Mask:new{ inner = inner, fgcolor = fgcolor or Blitbuffer.COLOR_BLACK }
+end
+
+-- ── the widget ─────────────────────────────────────────────────────────────
+
+-- ONE cached entry, deliberately. A full-screen bitmap is ~2MB as greyscale
+-- (measured on a PW5: 1236x1648 comes back BB8) and ~8MB as RGB32; holding a
+-- handful so that flipping between shelves never re-decodes would cost more
+-- memory than this plugin has any business taking, on devices where running
+-- out of it is a live bug (issue 388). One entry means a shelf switch
+-- re-decodes, which is the trade to measure before widening.
+M._bg     = nil
+M._bg_key = nil
+-- The one exception, measured (PW5, 2026-10-04): with shelves wearing
+-- themes of their own, every switch between two shelves with different
+-- wallpapers re-decoded the other one, ~200ms each way. While any shelf has
+-- a theme of its own, the previous picture is kept as a second entry (~2MB
+-- on an 8-bit panel, ~8MB on colour); with none, one entry as before
+-- (maintainer).
+M._bg2     = nil
+M._bg2_key = nil
+M._keep_two = nil   -- seam: fn() -> keep a second picture
+local function keepTwo()
+    if M._keep_two then return M._keep_two() == true end
+    local ok, TP = pcall(require, "lib/bookshelf_theme_pack")
+    return ok and TP and TP.anyShelfTheme and TP.anyShelfTheme() == true or false
+end
+
+-- free() -- drop the decoded backdrop (both entries); freeWidget(w) one.
+--
+-- The buffer is freed on the NEXT TICK, not here. The widget holding it may
+-- still be in the live tree: the shelf swaps trees on rebuild, and a repaint
+-- can land between the free and the swap. Painting a freed blitbuffer is a
+-- segfault in the C blitter with no Lua traceback -- which is what a night
+-- toggle produced, because that path frees the day image and rebuilds a tick
+-- later. Detaching first and freeing after the next paint closes the window:
+-- a stale paint finds bb = nil and draws nothing, which is a blank frame at
+-- worst.
+local function freeWidget(old)
+    if not (old and old.bb) then return end
+    local bb = old.bb
+    local ok_ui, UIManager = pcall(require, "ui/uimanager")
+    if ok_ui and UIManager and UIManager.nextTick then
+        UIManager:nextTick(function()
+            old.bb = nil
+            pcall(function() if bb.free then bb:free() end end)
+        end)
+    else
+        old.bb = nil
+        pcall(function() if bb.free then bb:free() end end)
+    end
+end
+
+function M.free()
+    local old, old2 = M._bg, M._bg2
+    M._bg, M._bg_key, M._bg2, M._bg2_key = nil, nil, nil, nil
+    frostClear()
+    freeWidget(old)
+    freeWidget(old2)
+end
+
+-- flipNight(target_night) -> true if the cached backdrop was moved to that mode.
+--
+-- A night toggle inverts the panel, so the wallpaper already on screen shows
+-- as a NEGATIVE until something repaints it pre-inverted the other way. The
+-- shelf's rebuild does that eventually, but it is a tick or two away and the
+-- negative is very visible in the meantime.
+--
+-- Re-decoding would cost a full JPEG decode for a result that differs from
+-- what we already hold by exactly one inversion -- and invertRect IS that
+-- inversion, over a buffer in hand. One C pass instead of a decode.
+--
+-- The key has to follow, or the next M.bg call reads it as the wrong mode and
+-- throws this buffer away for an identical one.
+--
+-- TARGET MODE, NOT A BLIND TOGGLE (issue 426). This used to invert whatever it
+-- held, on the word of the caller, which is only safe if every caller stands
+-- for a real change of state. SetNightMode does not: KOReader's own
+-- DeviceListener compares the requested state to the stored one and returns
+-- without touching the panel when they already agree, and dispatcher.lua
+-- offers the event as `set_night_mode` with args={true,false} -- which is how
+-- a gesture, a profile or a home-screen UI turns night mode *on* rather than
+-- toggling it, and how autowarmth fires it on a schedule. Each redundant one
+-- inverted a backdrop that nothing was going to invert back, leaving a
+-- negative on screen until the deferred rebuild noticed the key no longer
+-- matched and paid for a full decode of the very same picture.
+--
+-- The buffer's own key records which mode it holds, so comparing against that
+-- is right whether this runs before or after DeviceListener -- which matters,
+-- because the answer depends on where the shelf sits in the window stack.
+function M.flipNight(target_night)
+    local bg = M._bg
+    if not (bg and bg.bb and bg.bb.invertRect and M._bg_key) then return false end
+    local holds_night = M._bg_key:sub(-2) == "|n"
+    local want_night  = target_night and true or false
+    if want_night == holds_night then return false end
+    local ok = pcall(function()
+        bg.bb:invertRect(0, 0, bg.bb:getWidth(), bg.bb:getHeight())
+    end)
+    if not ok then return false end
+    frostClear()   -- blurred from the other mode's picture
+    if holds_night then
+        M._bg_key = M._bg_key:sub(1, -3)
+    else
+        M._bg_key = M._bg_key .. "|n"
+    end
+    return true
+end
+
+-- RenderImage straight to a blitbuffer, NOT an ImageWidget.
+--
+-- ImageWidget was the obvious choice and did not work: on a PW5 it built
+-- happily -- the widget was constructed, inserted and logged -- and then
+-- painted nothing at all, whether it sat at the bottom of the overlap group
+-- or on top of everything. RenderImage reads the very same file, by the very
+-- same relative path, into a 1236x1648 BB8 without complaint, so the file and
+-- the decoder were never in question.
+--
+-- Rather than keep chasing it, this uses the path the ornaments already prove
+-- on this hardware every time a plant appears on a shelf. It also buys
+-- explicit control of the night pre-invert and a memory figure that can be
+-- stated rather than guessed.
+--
+-- SCALING IS A STRETCH TO THE SCREEN, for now. Choosing between stretch and
+-- letterbox needs the image's NATIVE size, and there is no cheap way to get
+-- it: RenderImage decodes to whatever size you ask for, and every Pic.open*
+-- decodes the whole image. Reading it out of the file header is the answer
+-- (the ornaments module already parses PNG IHDR for exactly this) but it is a
+-- per-format parser each, so it is its own piece of work rather than a
+-- rider on this one.
+local function decode(path, w, h)
+    -- M._render is the test seam, the same one the ornaments module exposes:
+    -- the painting is what is worth pinning headless, and a real decode would
+    -- drag KOReader's image stack into a plain-Lua suite.
+    if M._render then return M._render(path, w, h) end
+    local RenderImage = require("ui/renderimage")
+    local t0 = _gettime()
+    local bb = RenderImage:renderImageFile(path, false, w, h)
+    -- Permanent, per the [bookshelf perf] convention: this is the one
+    -- synchronous decode on the cold-start path, and it is the number to
+    -- watch if a picture ever lands in a launch complaint.
+    logger.dbg(string.format("[bookshelf perf] wallpaper: decode=%.0fms %dx%d %s",
+        (_gettime() - t0) * 1000, w or 0, h or 0, tostring(path)))
+    return bb
+end
+
+-- A background is a plain opaque blit: it is the bottom of the stack, there is
+-- nothing behind it to blend with, and blitFrom is markedly cheaper than the
+-- alpha path over a full screen.
+--
+-- A wallpaper covers the whole screen. The ground colour is painted first so
+-- an image whose aspect ratio leaves a margin shows the page colour there
+-- rather than whatever the last frame left behind.
+-- The widget class, built on first use (ui/widget/widget is not needed until a
+-- wallpaper is shown). A module local: it used to be a global.
+local Background
+local function backgroundWidget(bb, w, h)
+    if not Background then
+        local Widget = require("ui/widget/widget")
+        Background = Widget:extend{ bb = nil, w = 0, h = 0,
+                                    ground = nil }
+        function Background:init()
+            self.dimen = require("ui/geometry"):new{ w = self.w, h = self.h }
+        end
+        function Background:paintTo(target, x, y)
+            self.dimen.x, self.dimen.y = x, y
+            if not self.bb then return end
+            -- THIS WIDGET OWNS THE WHOLE SCREEN. The ground is painted first
+            -- so a picture that does not cover every pixel (a different aspect
+            -- ratio, say) leaves the page colour behind it rather than last
+            -- frame's content -- the page frame above deliberately does not
+            -- fill when a wallpaper is present.
+            -- ...but only when there IS a margin. decode() scales the picture
+            -- to exactly the screen, so this fill was a 2MB write per paint
+            -- that the blit then covered in full.
+            local ground = self.ground
+            if ground then
+                local ok_c, covers = pcall(function()
+                    return self.bb:getWidth() >= self.w and self.bb:getHeight() >= self.h
+                end)
+                if not (ok_c and covers) then
+                    pcall(function() require("lib/bookshelf_color").paintRect(target, x, y, self.w, self.h, ground) end)
+                end
+            end
+            pcall(function()
+                target:blitFrom(self.bb, x, y, 0, 0, self.w, self.h)
+            end)
+        end
+    end
+    return Background:new{ bb = bb, w = w, h = h }
+end
+
+
+-- toScreenType(bb) -> bb, converted once to the framebuffer's own type when
+-- that is greyscale.
+--
+-- The decoder hands back RGB24 even on a greyscale panel, and a blit between
+-- different types converts every pixel: on a PW5 that was 55ms for the one
+-- full-screen wallpaper paint in every page turn and shelf switch, 15% of a
+-- page turn (measured on device). Same-type is a row copy. Converting here
+-- costs that 55ms once, per decode, and the grey copy is a third of the
+-- size. Colour screens keep the decoder's buffer: their framebuffer is not
+-- BB8, so the picture keeps its colour.
+function M.toScreenType(bb)
+    local ok, out = pcall(function()
+        local Screen = require("device").screen
+        local fb = Screen and Screen.bb
+        local Blitbuffer = require("ffi/blitbuffer")
+        if not (fb and fb.getType and fb:getType() == Blitbuffer.TYPE_BB8) then return bb end
+        if bb:getType() == Blitbuffer.TYPE_BB8 then return bb end
+        local grey = Blitbuffer.new(bb:getWidth(), bb:getHeight(), Blitbuffer.TYPE_BB8)
+        grey:blitFrom(require("lib/bookshelf_clip_bb").real(bb), 0, 0, 0, 0, bb:getWidth(), bb:getHeight())
+        bb:free()
+        return grey
+    end)
+    return (ok and out) or bb
+end
+
+-- bg(name, w, h, night) -> a paintable full-screen widget, or nil.
+--
+-- night is part of the key AND of the render: the panel inverts everything at
+-- refresh, so a wallpaper that should look like itself has to be painted
+-- pre-inverted, exactly as a cover is. Same reasoning as the ornaments'
+-- faithful mode.
+function M.bg(name, w, h, night)
+    local path = M.pathFor(name)
+    if not path or not w or not h or w <= 0 or h <= 0 then return nil end
+    -- Image contrast's wallpaper brightness and contrast are part of the
+    -- picture: applied once here, to the decoded copy (the disk copy stays
+    -- raw), and in every key that copy is kept under, its blurs' included.
+    local ImageContrast = require("lib/bookshelf_image_contrast")
+    local adjust = ImageContrast.wallpaperKey()
+    -- The night marker stays LAST: flipNight and frostFor read the held
+    -- buffer's mode from the key's last two characters.
+    local key = path .. "|" .. w .. "x" .. h .. adjust .. (night and "|n" or "")
+    if M._bg and M._bg_key == key then return M._bg end
+    local keep = keepTwo()
+    -- A different picture: the blurs are of the old one. (Entries carry the
+    -- picture's key, so this is about the memory, not correctness.)
+    frostClear()
+    if keep and M._bg2 and M._bg2_key == key then
+        -- Back to the previous shelf's picture: swap, no decode.
+        M._bg, M._bg2 = M._bg2, M._bg
+        M._bg_key, M._bg2_key = M._bg2_key, M._bg_key
+        return M._bg
+    end
+    if keep and M._bg then
+        local older = M._bg2
+        M._bg2, M._bg2_key = M._bg, M._bg_key
+        M._bg, M._bg_key = nil, nil
+        freeWidget(older)
+    else
+        M.free()
+    end
+    -- The decoded picture outlives the session in the cover disk cache (raw
+    -- pixels, already in the screen's own type): a full-screen JPEG decode
+    -- was ~0.5 s of the first visit to each shelf with its own wallpaper on
+    -- the PW5; reading the raw buffer back is a few tens of ms. Keyed on the
+    -- file's mtime and size as well, so an edited picture is decoded again.
+    local dkey = diskKey(path, w, h)
+    local bb = dkey and diskCache() and diskCache().load(dkey)
+    if not bb then
+        local ok
+        ok, bb = pcall(decode, path, w, h)
+        if not ok or not bb then
+            logger.info("[bookshelf] wallpaper could not be decoded:", path)
+            return nil
+        end
+        bb = M.toScreenType(bb)
+        if dkey and diskCache() then pcall(diskCache().store, dkey, bb) end
+    end
+    if adjust ~= "" then
+        pcall(function()
+            local _lo, med = ImageContrast.levels(bb)
+            local b, c = ImageContrast.wallpaper()
+            ImageContrast.applyLUT(bb, ImageContrast.wallpaperLUT(med or 128, b, c))
+        end)
+    end
+    if night and bb.invertRect then
+        pcall(function() bb:invertRect(0, 0, bb:getWidth(), bb:getHeight()) end)
+    end
+    local widget = backgroundWidget(bb, w, h)
+    widget.bb = bb
+    -- What its blurs are kept under (frostFor): an adjusted picture blurs
+    -- differently from the raw one.
+    widget.dkey = dkey and (dkey .. adjust)
+    M._bg, M._bg_key = widget, key
+    return widget
+end
+
+return M

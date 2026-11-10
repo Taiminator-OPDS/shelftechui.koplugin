@@ -1,0 +1,466 @@
+--[[
+Shared helpers for micro-module authors. The goal: a module never has to
+reinvent font scaling, text-fitting, the standard "label + value" card, or
+aspect detection — so a naive module looks good at any size, and the layout
+rules live in ONE place instead of being copied (differently) into each module.
+
+SIZE is the parent's job. The hero grid (bookshelf_hero_modules._renderFitted)
+grows an under-filled card and shrinks an overflowing one by re-rendering the
+module at different scale_pct. A module therefore does NOT run its own font
+loop — it renders once at the scale_pct it is handed and lets a flexible text
+block clamp to avail_h via fitText, which reports its NATURAL height when the
+text fits (so the parent's grow can see free space) and ellipsis-clamps only at
+the extreme. See micromodules/README.md for the full contract.
+]]
+local Fonts = require("lib/bookshelf_fonts")
+local SM    = require("lib/bookshelf_start_menu_modules")
+
+local Kit = {}
+
+-- Colour roles (re-exported so a module needs one require). COLOR_PRIMARY = the
+-- changing/interesting content; COLOR_MUTED = headings, hints, attributions;
+-- CARD_BG = the grey card surface a TextBoxWidget must paint on.
+Kit.COLOR_PRIMARY = SM.COLOR_PRIMARY
+Kit.COLOR_MUTED   = SM.COLOR_MUTED
+Kit.CARD_BG       = SM.CARD_BG
+
+-- tintIcon(icon [, fg]) -> the icon, recoloured for the current card surface.
+--
+-- For the SVG/PNG path only. A glyph never needs this: TextWidget takes an
+-- fgcolor and honours it, so `fgcolor = Kit.COLOR_PRIMARY` is the whole answer.
+-- An IconWidget is a black-on-transparent bitmap that ignores fgcolor entirely,
+-- so under the shelf's dark theme it paints black on a near-black card and the
+-- module looks like it failed to render.
+--
+-- Safe to call unconditionally, and safe to call on a host that predates it:
+-- it hands the icon straight back on a light card, for artwork that carries
+-- its own colour, and if the wallpaper module cannot be reached at all.
+function Kit.tintIcon(icon, fg)
+    local ok, WP = pcall(require, "lib/bookshelf_wallpaper")
+    if not (ok and type(WP) == "table" and WP.tintIcon) then return icon end
+    local ink = fg
+    if type(ink) == "nil" then ink = Kit.COLOR_PRIMARY end
+    local ok_t, out = pcall(WP.tintIcon, ink, icon)
+    if ok_t and out then return out end
+    return icon
+end
+
+-- fmtDuration(secs) -> "3h 05m" / "3h" / "45m", gettext-wrapped so translated
+-- unit letters render translated everywhere. Was copied (divergently) into
+-- reading_stats and twice into reading_goal - the goal copies had dropped the
+-- gettext wrapping, so goal durations rendered untranslated.
+function Kit.fmtDuration(secs)
+    local _ = require("lib/bookshelf_i18n").gettext
+    local T = require("ffi/util").template
+    secs = math.max(0, tonumber(secs) or 0)
+    local h = math.floor(secs / 3600)
+    local m = math.floor((secs % 3600) / 60)
+    if h > 0 and m > 0 then return T(_("%1h %2m"), h, string.format("%02d", m)) end
+    if h > 0 then return T(_("%1h"), h) end
+    return T(_("%1m"), m)
+end
+
+-- ─── Tap regions ─────────────────────────────────────────────────────────────
+-- Hit-test a module-local point against the regions a module declared via
+-- ctx.set_tap_regions during render. Regions are rects in the coordinate
+-- space of the widget the module RETURNED (its top-left = 0,0); the host does
+-- the screen-to-module translation (cell position, card chrome, clip centring)
+-- before calling this - modules never see screen coordinates. First matching
+-- region wins (declare overlapping regions most-specific first). Returns the
+-- region's id and the region itself, or nil for a miss/malformed input -
+-- and on_tap must ALWAYS handle a nil ctx.tapped_region: D-pad activation,
+-- whole-cell taps outside every region, and older hosts all produce it.
+function Kit.hitRegion(regions, x, y)
+    if type(regions) ~= "table" or type(x) ~= "number" or type(y) ~= "number" then
+        return nil
+    end
+    for i = 1, #regions do
+        local r = regions[i]
+        if type(r) == "table"
+                and type(r.x) == "number" and type(r.y) == "number"
+                and type(r.w) == "number" and type(r.h) == "number"
+                and x >= r.x and x < r.x + r.w
+                and y >= r.y and y < r.y + r.h then
+            return r.id, r
+        end
+    end
+    return nil
+end
+
+-- ─── Settings-dialog helpers ─────────────────────────────────────────────────
+-- The standard "a pick landed" triple every module settings dialog performs:
+-- close the dialog, reload the menu beneath (so the card re-renders with the
+-- new setting), and re-open the dialog so its checkmarks refresh. Was copied
+-- verbatim into six modules.
+function Kit.settingsReopen(ctx, dialog, show_settings)
+    require("ui/uimanager"):close(dialog)
+    if ctx and ctx.menu and ctx.menu._reload then ctx.menu:_reload() end
+    if show_settings then show_settings(ctx) end
+end
+
+-- Kit.withClose(spec) -> a module settings ButtonDialog's spec with a close X
+-- at the right end of its title: tapping outside closed it, but nothing on
+-- it said so. The X does what that tap does (onClose, so a
+-- tap_close_callback runs). ButtonDialog has no place for one, so the
+-- spec's own init (which Widget:new calls in place of the class's) builds
+-- the dialog as usual, then lays the X over the title line, the same size,
+-- so nothing below moves. With no title, a Close row at the foot instead.
+function Kit.withClose(spec)
+    -- A side swipe off it turns the shelf's page behind (maintainer).
+    require("lib/bookshelf_gesture_zones").passSwipesOn(spec)
+    if not spec.title then
+        local _ = require("lib/bookshelf_i18n").gettext
+        spec.buttons = spec.buttons or {}
+        table.insert(spec.buttons, { { text = _("Close"), callback = function()
+            if spec.onClose then spec:onClose() else require("ui/uimanager"):close(spec) end
+        end } })
+        return spec
+    end
+    function spec:init()
+        require("ui/widget/buttondialog").init(self)
+        local group = self.title_group and self.title_group[1]
+        local title = group and group[1]
+        if not (title and title.getSize) then return end
+        local sz = title:getSize()
+        local Geom = require("ui/geometry")
+        local dimen = Geom:new{ w = sz.w, h = sz.h }
+        local x = require("ui/widget/iconbutton"):new{
+            icon = "close", width = sz.h, height = sz.h,
+            callback = function() self:onClose() end,
+        }
+        group[1] = require("ui/widget/overlapgroup"):new{ dimen = dimen, title,
+            require("ui/widget/container/rightcontainer"):new{ dimen = dimen, x } }
+    end
+    return spec
+end
+
+-- Kit.radioRow{ label=, active=, on_pick=, toggle= } -> ButtonDialog row.
+-- Checkmark-prefixed radio row (U+2713 when active, two-space placeholder
+-- otherwise, so labels stay aligned). Tapping the already-active row is a
+-- no-op unless toggle = true (a toggle/multi-select row acts on every tap).
+function Kit.radioRow(o)
+    return {
+        text = (o.active and "\xE2\x9C\x93 " or "  ") .. tostring(o.label),
+        callback = function()
+            if o.active and not o.toggle then return end
+            o.on_pick()
+        end,
+    }
+end
+
+-- sc(scale_pct) -> function(n): scaled, rounded pixel size, floored at 1.
+function Kit.sc(scale_pct)
+    local p = scale_pct or 100
+    return function(n) return math.max(1, math.floor(n * p / 100 + 0.5)) end
+end
+
+-- face(size, scale_pct, opts) -> a cfont face scaled by scale_pct. opts is the
+-- usual {bold=true}/{italic=true}; returns face[, bold] exactly like
+-- Fonts:getFace so callers can write `local f, b = Kit.face(...)`.
+function Kit.face(size, scale_pct, opts)
+    local sc = Kit.sc(scale_pct)
+    return Fonts:getFace("cfont", sc(size), opts)
+end
+
+-- fitText{...} -> TextBoxWidget. The blessed way to render a flexible text
+-- block: wraps to `width`, sizes its font from `size`*scale_pct, and (when
+-- `max_h` is given) caps to it with an ellipsis. height_adjust means it reports
+-- its NATURAL height when the text fits (so the parent's grow sees free space)
+-- and clamps to max_h with an ellipsis only at the extreme. Omit max_h for an
+-- uncapped natural block (the parent still clips as a backstop).
+function Kit.fitText(o)
+    local TextBoxWidget = require("ui/widget/textboxwidget")
+    local args = {
+        text          = o.text or "",
+        face          = Kit.face(o.size or 15, o.scale_pct, o.opts),
+        width         = math.max(1, o.width or 50),
+        fgcolor       = o.fgcolor or Kit.COLOR_PRIMARY,
+        bgcolor       = o.bgcolor or Kit.CARD_BG,
+        alignment     = o.align or "left",
+        height_adjust = true,
+    }
+    if o.max_h and o.max_h > 0 then
+        args.height = o.max_h
+        args.height_overflow_show_ellipsis = true
+    end
+    return TextBoxWidget:new(args)
+end
+
+-- coverFit(width, height, gap, overhang) -> how many 2:3 covers a width x
+-- height box holds side by side at full height, with `gap` between them and
+-- `overhang` px kept above and below for the status marks. At least one, at
+-- most twelve. Recently read and the Shelf module size their rows by it.
+function Kit.coverFit(width, height, gap, overhang)
+    local h = height - 2 * (overhang or 0)
+    local w = math.floor(h * 2 / 3)
+    if w < 1 then return 1 end
+    local n = math.floor((width + (gap or 0)) / (w + (gap or 0)))
+    return math.max(1, math.min(n, 12))
+end
+
+-- isStrip(width, height) -> true for a cell clearly wider than tall (a 3x1 or
+-- 6x1 on the grid), where a card reads better laid out sideways. No height
+-- (the start menu, the picker): false, the stacked layout as always.
+function Kit.isStrip(width, height)
+    if not (width and height and height > 0) then return false end
+    return width >= height * 2.4
+end
+
+-- valueCard{...} -> VerticalGroup. The shared "heading + big value + suffix +
+-- bar + sub + context" card (reading_goal / reading_stats, and a good default
+-- for any stat module). All fields optional except width/scale_pct.
+--   heading - small muted bold line               value  - big primary value
+--   suffix  - baseline-aligned small primary       bar    - optional full-width widget
+--   sub     - optional muted small line            context- optional small primary line
+--   height  - the cell height, when the host has one: in a strip (isStrip) the
+--             value goes on the left and the rest in a column beside it.
+function Kit.valueCard(o)
+    local TextWidget      = require("lib/bookshelf_colour_text")
+    local VerticalGroup   = require("ui/widget/verticalgroup")
+    local VerticalSpan    = require("ui/widget/verticalspan")
+    local HorizontalGroup = require("ui/widget/horizontalgroup")
+    local sc = Kit.sc(o.scale_pct)
+    local mw = math.max(50, o.width or 50)
+    if o.value and Kit.isStrip(mw, o.height) then
+        local HorizontalSpan = require("ui/widget/horizontalspan")
+        local fbig, bbig = Kit.face(26, o.scale_pct, { bold = true })
+        local left = VerticalGroup:new{ align = "left",
+            TextWidget:new{ text = o.value, face = fbig, bold = bbig,
+                fgcolor = Kit.COLOR_PRIMARY } }
+        if o.suffix then
+            left[#left + 1] = TextWidget:new{ text = (o.suffix:gsub("^%s+", "")),
+                face = Kit.face(14, o.scale_pct), fgcolor = Kit.COLOR_PRIMARY }
+        end
+        local gap = sc(16)
+        local rw = math.max(10, mw - left:getSize().w - gap)
+        local right = VerticalGroup:new{ align = "left" }
+        if o.heading then
+            local f, b = Kit.face(15, o.scale_pct, { bold = true })
+            right[#right + 1] = TextWidget:new{ text = o.heading, face = f, bold = b,
+                fgcolor = Kit.COLOR_MUTED, max_width = rw }
+        end
+        if o.sub then
+            right[#right + 1] = TextWidget:new{ text = o.sub, face = Kit.face(13, o.scale_pct),
+                fgcolor = Kit.COLOR_MUTED, max_width = rw }
+        end
+        if o.context then
+            right[#right + 1] = TextWidget:new{ text = o.context,
+                face = Kit.face(13, o.scale_pct, { italic = true }),
+                fgcolor = Kit.COLOR_PRIMARY, max_width = rw }
+        end
+        if o.bar_fraction then
+            right[#right + 1] = VerticalSpan:new{ width = sc(6) }
+            right[#right + 1] = Kit.progressBar{ width = rw, height = sc(6), fraction = o.bar_fraction }
+        end
+        return HorizontalGroup:new{ align = "center", left,
+            HorizontalSpan:new{ width = gap }, right }
+    end
+    local g = VerticalGroup:new{ align = "left" }
+    if o.heading then
+        local f, b = Kit.face(15, o.scale_pct, { bold = true })
+        g[#g + 1] = TextWidget:new{ text = o.heading, face = f, bold = b,
+            fgcolor = Kit.COLOR_MUTED, max_width = mw }
+    end
+    if o.value then
+        local fbig, bbig = Kit.face(20, o.scale_pct, { bold = true })
+        local num = TextWidget:new{ text = o.value, face = fbig, bold = bbig,
+            fgcolor = Kit.COLOR_PRIMARY, max_width = mw }
+        if o.suffix then
+            local suf = TextWidget:new{ text = o.suffix, face = Kit.face(14, o.scale_pct),
+                fgcolor = Kit.COLOR_PRIMARY, max_width = math.max(10, mw - num:getSize().w) }
+            local dy = math.max(0, num:getBaseline() - suf:getBaseline())
+            g[#g + 1] = HorizontalGroup:new{ align = "top", num,
+                VerticalGroup:new{ align = "left", VerticalSpan:new{ width = dy }, suf } }
+        else
+            g[#g + 1] = num
+        end
+    end
+    if o.bar then
+        g[#g + 1] = VerticalSpan:new{ width = sc(4) }
+        g[#g + 1] = o.bar
+    end
+    if o.sub then
+        g[#g + 1] = TextWidget:new{ text = o.sub, face = Kit.face(13, o.scale_pct),
+            fgcolor = Kit.COLOR_MUTED, max_width = mw }
+    end
+    if o.context then
+        g[#g + 1] = VerticalSpan:new{ width = sc(3) }
+        g[#g + 1] = TextWidget:new{ text = o.context,
+            face = Kit.face(13, o.scale_pct, { italic = true }),
+            fgcolor = Kit.COLOR_PRIMARY, max_width = mw }
+    end
+    return g
+end
+
+-- progressBar{ width, height, fraction } -> a full-width track with the filled
+-- part in the card's ink, for valueCard's `bar`. Moved here from reading_goal
+-- so the battery card draws the same bar.
+--
+-- The bar is DRAWING, not text, so nothing hands it a colour: it was a
+-- hard-coded black fill on a fixed 0xCC track. Under the shelf's dark theme
+-- that reads exactly backwards -- the black fill sinks into the card and the
+-- pale track becomes the part that looks filled, so 20% shows as 80%.
+--
+-- Fill is the card's ink. The track keeps the relationship it has always had
+-- to it: 0xCC is a seventh of the way from the 0xEE card toward black, so a
+-- seventh of the way from the card toward the ink reproduces the light theme
+-- exactly (238 + (0-238)/7 = 204 = 0xCC) and gives the dark one a 0x33 track
+-- on its near-black card.
+function Kit.progressBar(o)
+    local Blitbuffer = require("ffi/blitbuffer")
+    local Widget     = require("ui/widget/widget")
+    local Geom       = require("ui/geometry")
+    local FILL  = Kit.COLOR_PRIMARY or Blitbuffer.COLOR_BLACK
+    local TRACK = Blitbuffer.Color8(0xCC)
+    local ok_lum, lum = pcall(function() return FILL:getColor8().a end)
+    if ok_lum and type(lum) == "number" then
+        local card = (lum > 128) and 0x11 or 0xEE
+        TRACK = Blitbuffer.Color8(math.floor(card + (lum - card) / 7 + 0.5))
+    end
+    local bar_w, bar_h = o.width, o.height
+    local fill_w = math.max(0, math.min(bar_w, math.floor(bar_w * (o.fraction or 0))))
+    local Bar = Widget:extend{}
+    function Bar:init()   self.dimen = Geom:new{ w = bar_w, h = bar_h } end
+    function Bar:getSize() return Geom:new{ w = bar_w, h = bar_h } end
+    function Bar:paintTo(bb, x, y)
+        self.dimen = Geom:new{ x = x, y = y, w = bar_w, h = bar_h }
+        -- Color.paintRect: the fill is the card's ink, which may be a colour.
+        local Color = require("lib/bookshelf_color")
+        Color.paintRect(bb, x, y, bar_w, bar_h, TRACK)
+        if fill_w > 0 then Color.paintRect(bb, x, y, fill_w, bar_h, FILL) end
+    end
+    return Bar:new{}
+end
+
+-- The width at which a flexible card can hold TWO comfortable text columns
+-- instead of one. Single source for every surface that decides between a
+-- one- and two-column layout: the hero/full-screen grid uses it as a flex
+-- cell's minimum width (so a third module wraps rather than squeezing three
+-- narrow cells onto a row), and the start menu uses it to pick the shape it
+-- hands its module cards. Keeping both on one constant is what makes a
+-- start-menu card and a grid cell of the same width lay out the same way.
+function Kit.twoColMinWidth()
+    return require("device").screen:scaleBySize(300)
+end
+
+-- shape(width, avail_h) -> "wide" | "square" | "tall". Aspect bands for modules
+-- that want different LAYOUTS (not just font sizes) at different cell shapes.
+-- ratio = width/avail_h; >= 1.6 wide, <= 0.7 tall, else square.
+--
+-- nil/zero avail_h means "no height constraint" (the start menu, whose cards
+-- take their natural height). There is no aspect to band in that case, so the
+-- decision falls back to WIDTH alone via twoColMinWidth() -- a card wide enough
+-- for two columns reads "wide", a narrower one reads "square". Callers that
+-- know their own shape should pass ctx.shape instead of calling this.
+function Kit.shape(width, avail_h)
+    if not avail_h or avail_h <= 0 then
+        return (width or 0) >= Kit.twoColMinWidth() and "wide" or "square"
+    end
+    local r = (width or 0) / avail_h
+    if r >= 1.6 then return "wide" end
+    if r <= 0.7 then return "tall" end
+    return "square"
+end
+
+-- plugin(MODULE_DIR) -> the live instance of the plugin this module ships
+-- in, for a module in a pack (a .koplugin's bookshelf_modules/) that shows
+-- its own plugin's state. MODULE_DIR is the folder the module file is called
+-- with (`local MODULE_DIR = ...`). nil when the plugin is not running, or
+-- for a module outside any plugin (the drop-in folder).
+--   local pet = Kit.plugin(MODULE_DIR)
+--   if pet then ... pet.state ... end
+function Kit.plugin(dir)
+    return SM.pluginOf and SM.pluginOf(dir) or nil
+end
+
+-- onHomeShelf(key) -> true when the reader's home shelf (the first shelf on
+-- the chip strip that holds books) holds module `key`.
+-- setOnHomeShelf(key, on) -> puts module `key` first on the home shelf, at its
+-- starting width, or takes it off; true when that is where things now stand
+-- (false: no such module, or no home shelf). A shelf on screen redraws.
+-- Putting it on turns Modules > On the shelf on, if it was off.
+-- For a pack's own plugin, and only from something the reader chose (a tick
+-- in its settings or its welcome screen): the home shelf is theirs.
+function Kit.onHomeShelf(key)
+    local ok, on = pcall(function()
+        return require("lib/bookshelf_shelf_modules").onHome(key, require("lib/bookshelf_tab_model").load())
+    end)
+    return ok and on or false
+end
+
+function Kit.setOnHomeShelf(key, on)
+    local ShelfModules = require("lib/bookshelf_shelf_modules")
+    local TabModel = require("lib/bookshelf_tab_model")
+    -- Forced: with no module in use anywhere yet, Bookshelf loads none.
+    local def = SM.get(key, true)
+    if on and not def then return false end
+    local tabs = TabModel.load()
+    local changed, home, removed = ShelfModules.setOnHome(key, on and true or false, tabs,
+        ShelfModules.startWidth(def))
+    if not home then return false end
+    -- Modules > On the shelf off: the card would show nowhere. The reader
+    -- asked for it, so the switch comes on with it (maintainer).
+    local switched = false
+    if on then
+        local ok_s, Store = pcall(require, "lib/bookshelf_settings_store")
+        if ok_s and Store.microOnShelf and not Store.microOnShelf() then
+            Store.save("micro_on_shelf", true)
+            Store.flush()
+            switched = true
+        end
+    end
+    if changed or switched then
+        if changed then TabModel.save(tabs) end
+        for _i, m in ipairs(removed or {}) do SM.notifyRemoved(m) end
+        -- The shelf on screen redraws (BookshelfWidget:onBookshelfShelfModulesChanged).
+        local UIManager = require("ui/uimanager")
+        local Event = require("ui/event")
+        UIManager:broadcastEvent(Event:new("BookshelfShelfModulesChanged", home.id))
+    end
+    return true
+end
+
+-- Per-module SHARED store handle (caches, per-type defaults), backed by the
+-- separate bookshelf_micromodules.lua file (not the main bookshelf.lua).
+-- Namespaced by module key, so collisions across modules are impossible. Use
+-- for data shared by all instances of a module -- NOT per-instance config,
+-- which is `ctx.config`.
+--   local store = Kit.moduleStore("clock")
+--   store:get("format", "follow");  store:set("format", "24")
+function Kit.moduleStore(key)
+    local MM = require("lib/bookshelf_micromodule_store")
+    local prefix = "micromodule_" .. key .. "_"
+    local store = {}
+    function store:get(name, default) return MM.read(prefix .. name, default) end
+    function store:set(name, value) MM.save(prefix .. name, value) end
+    function store:delete(name) MM.delete(prefix .. name) end
+    return store
+end
+
+-- Per-instance config handle for ONE card, backed by fields on its entry +
+-- ctx.save (so config travels with the card and is removed with it). The clean
+-- replacement for hand-rolling ctx.entry / ctx.save. `save` is nil in render
+-- (config is read-only there); :set / :delete persist only when a save is
+-- supplied (i.e. in on_tap / show_settings).
+--   ctx.config:get("label", "");  ctx.config:set("date", "2026-12-25")
+function Kit.entryConfig(entry, save)
+    local cfg = {}
+    function cfg:get(name, default)
+        local v = entry and entry[name]
+        if v == nil then return default end
+        return v
+    end
+    function cfg:set(name, value)
+        if not entry then return end
+        entry[name] = value
+        if save then save() end
+    end
+    function cfg:delete(name)
+        if not entry then return end
+        entry[name] = nil
+        if save then save() end
+    end
+    return cfg
+end
+
+return Kit
