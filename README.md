@@ -58,6 +58,6 @@ ShelfTechUI is released under AGPL-3.0 (`LICENSE`). Unofficial; not affiliated w
 
 The source of the plugin is `shelftechui.koplugin/`; releases ship a pruned copy (comments stripped, line numbers kept) built by `tools/build.py`.
 
-1. Bump `version` in `shelftechui.koplugin/_meta.lua` (and `Page.VERSION` in `bos_settings_page.lua`), and add a `## <version>` section to `CHANGELOG.md`.
-2. Commit, then run `sh tools/publish.sh` (or `sh tools/publish.sh beta.1` for a pre-release). It runs the full local build and checks, tags `v<version>` and pushes.
-3. GitHub Actions (`.github/workflows/release.yml`) builds `shelftechui.koplugin.zip` and publishes the release with that version's notes. Storefront shows it as an update.
+1. Bump `version` in `shelftechui.koplugin/_meta.lua` (and `Page.VERSION` in `bos_settings_page.lua`); a version like `1.5.0-beta.1` is published as a pre-release. Add a `## <version>` section to `CHANGELOG.md`: it becomes the release notes.
+2. Commit, then run `sh tools/publish.sh`. It runs the full local build and checks and pushes `main`.
+3. GitHub Actions (`.github/workflows/release.yml`) sees the new version, builds `shelftechui.koplugin.zip` and publishes release `v<version>`. Storefront shows it as an update.

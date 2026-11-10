@@ -1,11 +1,15 @@
-# A tag v1.2.3 (or v1.2.3-beta.1, published as a pre-release) builds the
-# pruned plugin from the source and publishes it as a GitHub release, with
-# that version's notes from CHANGELOG.md. Storefront picks the release up.
+# When the version in _meta.lua changes on main (1.2.3, or 1.2.3-beta.1 for
+# a pre-release) and there is no release v<version> yet: build the pruned
+# plugin from the source and publish it as release v<version> (GitHub makes
+# the tag), with that version's notes from CHANGELOG.md. Storefront picks the
+# release up. Also runnable by hand (Actions → Release → Run workflow).
 name: Release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+    paths: ["shelftechui.koplugin/_meta.lua", ".github/workflows/release.yml"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -16,31 +20,40 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: The tag must match _meta.lua
+      - name: The version, and whether it's out already
+        id: ver
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           v=$(sed -n 's/.*version = "\([^"]*\)".*/\1/p' shelftechui.koplugin/_meta.lua)
-          if [ "v$v" != "$GITHUB_REF_NAME" ]; then
-            echo "Tag $GITHUB_REF_NAME, but _meta.lua says $v" >&2
-            exit 1
+          echo "tag=v$v" >> "$GITHUB_OUTPUT"
+          if gh release view "v$v" >/dev/null 2>&1; then
+            echo "v$v is already released."
+            echo "done=yes" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build the release copy
+        if: steps.ver.outputs.done != 'yes'
         run: |
           python3 tools/build.py shelftechui.koplugin dist/shelftechui.koplugin
           find dist -type d -empty -delete
           (cd dist && zip -qr -9 ../shelftechui.koplugin.zip shelftechui.koplugin)
 
       - name: Release notes
+        if: steps.ver.outputs.done != 'yes'
         run: |
-          v="${GITHUB_REF_NAME#v}"
+          tag="${{ steps.ver.outputs.tag }}"
+          v="${tag#v}"
           awk -v v="$v" 'index($0, "## " v) == 1 { f = 1; next } /^## / { f = 0 } f' CHANGELOG.md > notes.md
           [ -s notes.md ] || echo "ShelfTechUI $v" > notes.md
 
       - name: Publish
+        if: steps.ver.outputs.done != 'yes'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          tag="${{ steps.ver.outputs.tag }}"
           pre=""
-          case "$GITHUB_REF_NAME" in *-*) pre="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" shelftechui.koplugin.zip \
-            --title "ShelfTechUI ${GITHUB_REF_NAME#v}" --notes-file notes.md $pre
+          case "$tag" in *-*) pre="--prerelease" ;; esac
+          gh release create "$tag" shelftechui.koplugin.zip --target "$GITHUB_SHA" \
+            --title "ShelfTechUI ${tag#v}" --notes-file notes.md $pre
