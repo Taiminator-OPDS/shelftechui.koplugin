@@ -11,9 +11,11 @@ Wrapped: your year in books, as a story of full-screen cards.
 The cards, in order: the year, time read, books finished, the long haul (only
 when a book started in an earlier year was finished this one), the book of
 the year, authors and genres, when you read, your reader type, what you
-marked, and the year on one page (save it as a picture, or as your sleep
-screen). Tap the right of the screen for the next card, the left to go back;
-swipe down or ✕ to close. Each card is one full refresh, so nothing of the
+marked, the year on one page (save it as a picture, or as your sleep
+screen), and sharing: a QR code for your phone, either the picture (served
+from this device on the Wi-Fi, bos_wrapped_share) or the year as text.
+Tap the right of the screen for the next card, the left to go back; swipe
+down or ✕ to close. Each card is one full refresh, so nothing of the
 last one stays behind.
 
 Numbers: bos_wrapped_data (on the device only; nothing is sent anywhere).
@@ -421,10 +423,88 @@ function CARDS.summary(c, bb, x, y, w, h, for_picture)
     local ky = y + h - S(60)
     local gap = S(14)
     local kw = math.floor((w - gap - Look.SHADOW_SMALL) / 2)
-    local rect = Look.button(bb, x, ky, kw, S(52), _("Save as picture"), { size = 13, on = true })
+    local rect = Look.button(bb, x, ky, kw, S(52), _("Save as picture"), { size = 13 })
     c:hit(rect, function() M.savePicture(c) end)
-    rect = Look.button(bb, x + kw + gap, ky, kw, S(52), _("See it again"), { size = 13 })
+    rect = Look.button(bb, x + kw + gap, ky, kw, S(52), _("Share") .. " ›", { size = 13, on = true })
+    c:hit(rect, function() c:go(#c.cards) end)
+end
+
+-- The last card: a QR code for your phone. Picture: the phone opens the
+-- year on one page from this device (same Wi-Fi), to save or share. Text: the
+-- QR holds the year as text (no Wi-Fi needed).
+local qr = {}
+local function qrWidget(text, size)
+    if qr.text ~= text or qr.size ~= size then
+        if qr.widget then qr.widget:free() end
+        local ok, QRWidget = pcall(require, "ui/widget/qrwidget")
+        qr.widget = ok and QRWidget:new{ text = text, width = size, height = size } or nil
+        qr.text, qr.size = text, size
+    end
+    return qr.widget
+end
+M._freeQR = function() if qr.widget then qr.widget:free() end qr.widget, qr.text = nil, nil end
+
+function CARDS.share(c, bb, x, y, w, h)
+    local Share = require("bos_wrapped_share")
+    local cy = y + S(10)
+    local _bw, bh = big(bb, _("Share your year"), x, cy, 30)
+    cy = cy + bh + S(16)
+    -- Picture | Text
+    local gap = S(12)
+    local tw = math.floor((w - gap - Look.SHADOW_SMALL) / 2)
+    local mode = c.share_mode or "picture"
+    local rect = Look.button(bb, x, cy, tw, S(46), _("Picture"), { size = 12, on = mode == "picture" })
+    c:hit(rect, function() c:shareMode("picture") end)
+    rect = Look.button(bb, x + tw + gap, cy, tw, S(46), _("Text"), { size = 12, on = mode == "text" })
+    c:hit(rect, function() c:shareMode("text") end)
+    cy = cy + S(46) + S(22)
+    -- the QR card
+    local bw2 = w - Look.SHADOW
+    local q = math.min(S(330), bw2 - S(60))
+    local box_h = q + S(40)
+    Look.box(bb, x, cy, bw2, box_h, { shadow = Look.SHADOW })
+    local qx, qy = x + math.floor((bw2 - q) / 2), cy + S(20)
+    local lines = {}
+    if mode == "text" then
+        local wdg = qrWidget(Share.text(c.r), q)
+        if wdg then wdg:paintTo(bb, qx, qy) end
+        lines = { { _("Scan it with your phone's camera: your year as text, ready to paste anywhere."), serifI(17) },
+            { _("Works without Wi-Fi."), serifI(15) } }
+    elseif c.share_url then
+        local wdg = qrWidget(c.share_url, q)
+        if wdg then wdg:paintTo(bb, qx, qy) end
+        local opened = Share.state.opened or 0
+        lines = {
+            { _("Scan it with your phone's camera (same Wi-Fi). Your year opens on the phone: hold the picture to save or share it."), serifI(17) },
+            { c.share_url, Look.serif(14) },
+            { opened > 0 and T(opened == 1 and _("Opened on 1 phone · on for %1 more min") or _("Opened on %2 phones · on for %1 more min"),
+                Share.minutesLeft(), opened) or T(_("On for %1 min, on this Wi-Fi only"), Share.minutesLeft()), serifI(14) },
+        }
+    else
+        -- no Wi-Fi (or nothing could be served)
+        local why = c.share_err == "wifi" and _("Connect to Wi-Fi, then scan the code with your phone to get the picture.")
+            or _("The picture couldn't be served. Try Text instead.")
+        wrap(bb, why, serifI(18), x + S(30), qy + math.floor(q / 2) - S(60), bw2 - S(60), 3, S(28))
+        if c.share_err == "wifi" then
+            local kw = S(220)
+            local r2 = Look.button(bb, x + math.floor((bw2 - kw) / 2), qy + math.floor(q / 2) + S(30), kw, S(48), _("Turn on Wi-Fi"), { size = 12, on = true })
+            c:hit(r2, function()
+                local ok, NetworkMgr = pcall(require, "ui/network/manager")
+                if ok then NetworkMgr:runWhenConnected(function() c:shareMode("picture") end) end
+            end)
+        end
+    end
+    cy = cy + box_h + S(18)
+    for _i, l in ipairs(lines) do
+        cy = cy + wrap(bb, l[1], l[2], x, cy, w, 3, S(26)) + S(8)
+    end
+    -- keys
+    local ky = y + h - S(60)
+    local kw = math.floor((w - gap - Look.SHADOW_SMALL) / 2)
+    rect = Look.button(bb, x, ky, kw, S(52), _("See it again"), { size = 13 })
     c:hit(rect, function() c:go(1) end)
+    rect = Look.button(bb, x + kw + gap, ky, kw, S(52), _("Done"), { size = 13 })
+    c:hit(rect, function() c:onClose() end)
 end
 
 function CARDS.empty(c, bb, x, y, w, h)
@@ -458,6 +538,7 @@ function Story:init()
         table.insert(self.cards, "persona")
         if r.highlights > 0 or r.notes > 0 or (r.words or 0) > 0 then table.insert(self.cards, "highlights") end
         table.insert(self.cards, "summary")
+        table.insert(self.cards, "share")
     end
     self.i = 1
     local all = function() return self.dimen end
@@ -512,7 +593,7 @@ function Story:paintCard(bb, id, for_picture)
     local foot = for_picture and S(10) or S(34)
     local ok, err = pcall(CARDS[id], self, bb, x, y, w, H - y - foot, for_picture)
     if not ok then logger.warn("ShelfTechUI: Wrapped card", id, err) end
-    if not for_picture and id ~= "summary" then
+    if not for_picture and id ~= "share" then
         if self.i > 1 then Look.label(bb, _("‹ back"), x, H - S(30), w, S(22), 10, { color = dark and WHITE or Look.GRAY }) end
         Look.label(bb, self.i < #self.cards and _("tap for the next card ›") or "", x, H - S(30), w, S(22), 10,
             { align = "right", color = dark and WHITE or Look.GRAY })
@@ -526,7 +607,27 @@ end
 
 function Story:go(i)
     self.i = math.max(1, math.min(#self.cards, i))
+    if self.cards[self.i] == "share" and not self.share_mode then
+        self:shareMode(require("bos_wrapped_share").ip() and "picture" or "text", true)
+    end
     UIManager:setDirty(self, "full")
+end
+
+--- Picture: save it and serve it (once there's Wi-Fi); Text: nothing to start.
+function Story:shareMode(mode, quiet)
+    self.share_mode = mode
+    if mode == "picture" then
+        local Share = require("bos_wrapped_share")
+        local path = M.renderPicture(self)
+        if path then
+            self.share_url, self.share_err = Share.start(path, self.r, function()
+                if UIManager:isWidgetShown(self) and self.cards[self.i] == "share" then UIManager:setDirty(self, "ui") end
+            end)
+        else
+            self.share_url, self.share_err = nil, "picture"
+        end
+    end
+    if not quiet then UIManager:setDirty(self, "full") end
 end
 
 local function inside(p, r) return p and r and p.x >= r.x and p.x < r.x + r.w and p.y >= r.y and p.y < r.y + r.h end
@@ -553,14 +654,19 @@ function Story:onNext() if self.i < #self.cards then self:go(self.i + 1) end ret
 function Story:onPrev() if self.i > 1 then self:go(self.i - 1) end return true end
 
 function Story:onShow() UIManager:setDirty(self, "full") return true end
-function Story:onCloseWidget() UIManager:setDirty(nil, "full") end
+function Story:onCloseWidget()
+    pcall(function() require("bos_wrapped_share").stop() end)
+    M._freeQR()
+    UIManager:setDirty(nil, "full")
+end
 function Story:onClose() UIManager:close(self) return true end
 
 M.Story = Story
 
 -- ---------------------------------------------------------------- the picture
 
-function M.savePicture(story)
+--- The year on one page, as a PNG in the screenshots folder; returns its path.
+function M.renderPicture(story)
     local W, H = Screen:getWidth(), Screen:getHeight()
     local bb = Blitbuffer.new(W, H, Screen.bb:getType())
     local saved_i = story.i
@@ -576,6 +682,14 @@ function M.savePicture(story)
     story.i = saved_i
     if not ok then
         logger.warn("ShelfTechUI: Wrapped picture:", err)
+        return nil
+    end
+    return path
+end
+
+function M.savePicture(story)
+    local path = M.renderPicture(story)
+    if not path then
         UIManager:show(InfoMessage:new{ text = _("The picture couldn't be saved."), timeout = 3 })
         return
     end

@@ -2,6 +2,12 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.6.1
+
+- **Share your Wrapped.** A last card (or Share › on the year-on-one-page card) shows a QR code for your phone:
+  - **Picture**: scan it on the same Wi-Fi and your year opens on the phone, ready to hold and save or share, with a Copy key for the text. The device serves it itself, on this Wi-Fi only, at a link nobody could guess; it stops after 10 minutes or when you close Wrapped.
+  - **Text**: the QR code holds your year as a few lines of text, to paste anywhere. No Wi-Fi needed.
+
 ## 1.6.0
 
 - **Wrapped: your year in books.** A story of full-screen cards, drawn in your theme: the hours you read and each month's share, the books you finished (a wall of their covers), the book of your year, your top authors and genres, when you read (your hour, busiest day, longest streak), your reader type (one of 30), the lines you marked, and the year on one page, which you can save as a picture and use as your sleep screen. Tap the right of the screen for the next card, the left to go back; swipe down to close.
