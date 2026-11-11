@@ -276,7 +276,7 @@ function BookshelfOS:init()
     UIManager:nextTick(function() pcall(function()
         require("bos_recs").seed()
         require("bos_online").syncShelves()
-        require("bos_online").seedStore()
+        require("bos_online").forYouOnlineOnly()
     end) end)
     -- the Settings app in Bookshelf's start menu (once; Settings → Home to change)
     UIManager:nextTick(function() pcall(function() require("bos_startmenu").seed() end) end)
@@ -456,8 +456,7 @@ function BookshelfOS:onStuiHomeLayout()
 end
 
 function BookshelfOS:onStuiStore()
-    local bd = require("bos_online").bookdrop()
-    if bd then bd:showStoreHome() end
+    require("bos_store").open()
     return true
 end
 

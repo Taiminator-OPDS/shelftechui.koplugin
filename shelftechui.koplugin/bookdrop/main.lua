@@ -1,6 +1,4 @@
 local CoverCache = require("bookdrop_covercache")
-local CuratedHome = require("bookdrop_curated_home")
-local BookView = require("bookdrop_bookview")
 local ConfirmBox = require("ui/widget/confirmbox")
 local DataStorage = require("datastorage")
 local Dispatcher = require("dispatcher")
@@ -9,12 +7,9 @@ local InfoMessage = require("ui/widget/infomessage")
 local InputDialog = require("ui/widget/inputdialog")
 local Language = require("ui/language")
 local LuaSettings = require("luasettings")
-local LoadingView = require("bookdrop_loadingview")
 local NetworkMgr = require("ui/network/manager")
 local Provider = require("bookdrop_catalog_provider")
 local Zlibrary = require("bookdrop_zlibrary_provider")
-local StoreMenu = require("bookdrop_storemenu")
-local StoreHome = require("bookdrop_home")
 local Trapper = require("ui/trapper")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
@@ -23,25 +18,6 @@ local T = require("ffi/util").template
 
 local Bookdrop = WidgetContainer:extend{ name = "bookdrop", settings = nil }
 
---- A "working" window must never outlive the work: if the coroutine behind
---- it dies (an error is only logged there), the window is taken away and the
---- error shown. Call at the top of the wrapped function; the window closes
---- by itself whenever the coroutine is found dead or finished.
-local function closeOnError(loading)
-    local co = coroutine.running()
-    local function watch()
-        if loading._bookdrop_gone then return end
-        if not co or coroutine.status(co) == "dead" then
-            UIManager:close(loading)
-            if not loading.cancelled then
-                UIManager:show(InfoMessage:new{ text = _("Something went wrong in the store. Please try again.") })
-            end
-            return
-        end
-        UIManager:scheduleIn(1, watch)
-    end
-    UIManager:scheduleIn(1, watch)
-end
 local function showKeyboard(dialog)
     dialog.skip_first_show_keyboard = nil
     dialog:onShowKeyboard()
@@ -429,13 +405,6 @@ function Bookdrop:filterSummary(filters)
     return table.concat(labels, " · ")
 end
 
-function Bookdrop:refreshSettingsMenu()
-    local menu = self.bookdrop_settings_menu
-    if not menu then return end
-    menu:updateItems(menu.itemnumber or 1, true)
-    UIManager:setDirty(menu, "ui")
-end
-
 function Bookdrop:allFormatsEnabled()
     local formats = self:getFilters().formats
     for option_number, option in ipairs(format_options) do
@@ -616,114 +585,6 @@ function Bookdrop:optionMenu(key, options, on_select)
     return items
 end
 
-function Bookdrop:openShelf(title, content, sort)
-    local filters = {}
-    for key, value in pairs(self:getFilters()) do filters[key] = value end
-    filters.content = content
-    filters.sort = sort
-    self:runSearch("", 1, filters, title)
-end
-
-function Bookdrop:openFilteredShelf(title, overrides)
-    local filters = {}
-    for key, value in pairs(self:getFilters()) do filters[key] = value end
-    for key, value in pairs(overrides or {}) do filters[key] = value end
-    self:runSearch("", 1, filters, title)
-end
-
-function Bookdrop:homeCategoryDefinitions()
-    return {
-        {
-            key = "fiction",
-            title = _("Fiction & Literature"),
-            callback = function()
-                self:openShelf(_("Fiction"), "book_fiction", "")
-            end,
-        },
-        {
-            key = "nonfiction",
-            title = _("Non-fiction"),
-            callback = function()
-                self:openShelf(_("Non-fiction"), "book_nonfiction", "")
-            end,
-        },
-        {
-            key = "comics",
-            title = _("Comics & Graphic Novels"),
-            callback = function()
-                self:openShelf(_("Comics"), "book_comic", "")
-            end,
-        },
-        {
-            key = "magazines",
-            title = _("Magazines"),
-            callback = function()
-                self:openShelf(_("Magazines"), "magazine", "")
-            end,
-        },
-        {
-            key = "spanish",
-            title = _("Spanish Books"),
-            callback = function()
-                self:openFilteredShelf(_("Spanish Books"), {
-                    language = "es", content = "",
-                })
-            end,
-        },
-        {
-            key = "french",
-            title = _("French Books"),
-            callback = function()
-                self:openFilteredShelf(_("French Books"), {
-                    language = "fr", content = "",
-                })
-            end,
-        },
-    }
-end
-
-function Bookdrop:presentStoreHome(featured_books, shelf_books)
-    shelf_books = shelf_books or {}
-    local category_cards = {}
-    for _, definition in ipairs(self:homeCategoryDefinitions()) do
-        category_cards[#category_cards + 1] = {
-            title = definition.title,
-            books = shelf_books[definition.key] or {},
-            callback = definition.callback,
-        }
-    end
-
-    local home = StoreHome:new{
-        featured_books = featured_books,
-        category_cards = category_cards,
-        has_recent = #(self.settings:readSetting("recent_books", {})) > 0,
-        on_book = function(book) self:showBook(book) end,
-        on_search = function(home) self:showSearchDialog(home) end,
-        on_fiction = function() self:openShelf(_("Fiction"), "book_fiction", "") end,
-        on_nonfiction = function() self:openShelf(_("Non-fiction"), "book_nonfiction", "") end,
-        on_comics = function() self:openShelf(_("Comics"), "book_comic", "") end,
-        on_magazines = function() self:openShelf(_("Magazines"), "magazine", "") end,
-        on_new_arrivals = function() self:openShelf(_("New arrivals"), nil, "newest") end,
-        on_all_books = function() self:openShelf(_("All books"), nil, "") end,
-        on_recent = function() self:showRecentBooks() end,
-        on_manga = function() self:openManga() end,
-        settings_builder = function(home) return self:settingsDropdownEntries(home) end,
-    }
-    self._home = home
-    UIManager:show(home, "ui")
-    local all_home_books, seen = {}, {}
-    local function appendBooks(books)
-        for _, book in ipairs(books or {}) do
-            if book.id and not seen[book.id] then
-                all_home_books[#all_home_books + 1], seen[book.id] = book, true
-            end
-        end
-    end
-    appendBooks(featured_books)
-    for _, card in ipairs(category_cards) do appendBooks(card.books) end
-    self:loadCoversProgressively(all_home_books, home, #all_home_books)
-end
-
 local function safeFilename(value)
     value = tostring(value or "book"):gsub("[%z\1-\31/\\:*?\"<>|]", "-")
     value = value:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
@@ -831,19 +692,25 @@ function Bookdrop:downloadCover(book)
     end)
 end
 
-function Bookdrop:downloadBook(book, acquisition)
-    if not acquisition or not acquisition.url then
-        UIManager:show(InfoMessage:new{ text = _("No downloadable file is available.") })
-        return
-    end
+--- Where a book's file goes (and is, once downloaded).
+function Bookdrop:destinationFor(book, acquisition)
     local download_dir = G_reader_settings:readSetting("download_dir")
         or G_reader_settings:readSetting("home_dir")
         or G_reader_settings:readSetting("lastdir")
         or Device.home_dir
         or "."
-    local extension = acquisition.extension or "epub"
-    local destination = download_dir .. "/" .. safeFilename(book.title)
+    local extension = acquisition and acquisition.extension or "epub"
+    return download_dir .. "/" .. safeFilename(book.title)
         .. " - " .. safeFilename(book.author) .. "." .. extension
+end
+
+function Bookdrop:downloadBook(book, acquisition)
+    if not acquisition or not acquisition.url then
+        UIManager:show(InfoMessage:new{ text = _("No downloadable file is available.") })
+        return
+    end
+    local extension = acquisition.extension or "epub"
+    local destination = self:destinationFor(book, acquisition)
 
     local existing = io.open(destination, "rb")
     if existing then
@@ -992,9 +859,17 @@ function Bookdrop:startBookDownload(book, acquisition, destination)
             UIManager:show(InfoMessage:new{ text = _("Download cancelled.") })
         elseif result and result.success then
             if self.ui and self.ui.onRefresh then self.ui:onRefresh() end
-            UIManager:show(InfoMessage:new{
-                text = T(_("Downloaded successfully to:\n%1"), destination),
-            })
+            -- (the store offers to read it now)
+            local handled = false
+            if self.on_downloaded then
+                local ok_h, res = pcall(self.on_downloaded, destination, book)
+                handled = ok_h and res == true
+            end
+            if not handled then
+                UIManager:show(InfoMessage:new{
+                    text = T(_("Downloaded successfully to:\n%1"), destination),
+                })
+            end
         else
             UIManager:show(InfoMessage:new{
                 text = T(_("Download failed: %1"),
@@ -1003,222 +878,6 @@ function Bookdrop:startBookDownload(book, acquisition, destination)
         end
     end)
 end
-
-function Bookdrop:showStoreHome()
-    -- already open (under a list or a book): just come back to it
-    if self._home and not self._home._bookdrop_closed then
-        if self._results and not self._results._bookdrop_closed then UIManager:close(self._results) end
-        return
-    end
-    local filters = self:getFilters()
-    local home_catalog = CuratedHome.build(self.path, filters.formats)
-    self:presentStoreHome(home_catalog.featured, home_catalog.shelves)
-end
-
-local function selectedCount(values, options)
-    local count = 0
-    for _, option in ipairs(options) do
-        if values and values[option[1]] then count = count + 1 end
-    end
-    return count
-end
-
-function Bookdrop:choiceDropdownEntries(home, title, key, options)
-    local entries = {
-        { text = "‹  " .. title, bold = true,
-            callback = function() home:showSettings(self:settingsDropdownEntries(home)) end },
-    }
-    local selected_value = self:getFilters()[key] or ""
-    for option_number, option in ipairs(options) do
-        local value, label = option[1], _(option[2])
-        entries[#entries + 1] = {
-            text = (selected_value == value and CHECKED or UNCHECKED) .. "  " .. label,
-            callback = function()
-                self:setFilter(key, value)
-                home:showSettings(self:choiceDropdownEntries(home, title, key, options))
-            end,
-        }
-    end
-    return entries
-end
-
-function Bookdrop:formatDropdownEntries(home)
-    local entries = {
-        { text = "‹  " .. _("Format"), bold = true,
-            callback = function() home:showSettings(self:settingsDropdownEntries(home)) end },
-        { text = (self:allFormatsEnabled() and CHECKED or UNCHECKED)
-                .. "  " .. _("Select all formats"),
-            callback = function()
-                self:selectAllFormats()
-                home:showSettings(self:formatDropdownEntries(home))
-            end },
-    }
-    local formats = self:getFilters().formats
-    for option_number, option in ipairs(format_options) do
-        local value, label = option[1], _(option[2])
-        entries[#entries + 1] = {
-            text = (formats[value] and CHECKED or UNCHECKED) .. "  " .. label,
-            callback = function()
-                self:toggleFormat(value)
-                home:showSettings(self:formatDropdownEntries(home))
-            end,
-        }
-    end
-    return entries
-end
-
-function Bookdrop:libraryDropdownEntries(home)
-    local entries = {
-        { text = "‹  " .. _("Libraries"), bold = true,
-            callback = function() home:showSettings(self:settingsDropdownEntries(home)) end },
-        { text = (self:allLibrariesEnabled() and CHECKED or UNCHECKED)
-                .. "  " .. _("Select all libraries"),
-            callback = function()
-                self:selectAllLibraries()
-                home:showSettings(self:libraryDropdownEntries(home))
-            end },
-    }
-    local libraries = self:getFilters().libraries
-    for option_number, option in ipairs(library_options) do
-        local value, label = option[1], _(option[2])
-        entries[#entries + 1] = {
-            text = (libraries[value] and CHECKED or UNCHECKED) .. "  " .. label,
-            callback = function()
-                self:toggleLibrary(value)
-                home:showSettings(self:libraryDropdownEntries(home))
-            end,
-        }
-    end
-    return entries
-end
-
-function Bookdrop:uiLanguageDropdownEntries(home)
-    local entries = {
-        { text = "‹  " .. _("UI language"), bold = true,
-            callback = function() home:showSettings(self:settingsDropdownEntries(home)) end },
-    }
-    local current = G_reader_settings:readSetting("language") or "C"
-    for _, option in ipairs(ui_language_options) do
-        local locale, label = option[1], option[2]
-        entries[#entries + 1] = {
-            text = (current == locale and CHECKED or UNCHECKED) .. "  " .. label,
-            callback = function()
-                if (G_reader_settings:readSetting("language") or "C") ~= locale then
-                    Language:changeLanguage(locale)
-                end
-            end,
-        }
-    end
-    return entries
-end
-
-function Bookdrop:settingsDropdownEntries(home)
-    local filters = self:getFilters()
-    local format_count = selectedCount(filters.formats, format_options)
-    local library_count = selectedCount(filters.libraries, library_options)
-    local content = selectedOptionLabel(content_options, filters.content or "") or _("All content")
-    local language = selectedOptionLabel(language_options, filters.language or "") or _("All languages")
-    local sort = selectedOptionLabel(sort_options, filters.sort or "") or _("Best match")
-    local ui_locale = G_reader_settings:readSetting("language") or "C"
-    local ui_language = Language:getLanguageName(ui_locale)
-    local format_summary = format_count == #format_options and _("All")
-        or T(_("%1 selected"), format_count)
-    local library_summary = library_count == #library_options and _("All")
-        or T(_("%1 selected"), library_count)
-    return {
-        { text = _("Settings"), bold = true },
-        { text = _("Reset all filters"), callback = function()
-            self:resetFilters()
-            home:showSettings(self:settingsDropdownEntries(home))
-        end },
-        { text = _("UI language") .. "  ·  " .. ui_language .. "  ›", callback = function()
-            home:showSettings(self:uiLanguageDropdownEntries(home))
-        end },
-        { text = _("Content") .. "  ·  " .. content .. "  ›", callback = function()
-            home:showSettings(self:choiceDropdownEntries(
-                home, _("Content (best effort)"), "content", content_options))
-        end },
-        { text = _("Format") .. "  ·  " .. format_summary .. "  ›", callback = function()
-            home:showSettings(self:formatDropdownEntries(home))
-        end },
-        { text = _("Libraries") .. "  ·  " .. library_summary .. "  ›", callback = function()
-            home:showSettings(self:libraryDropdownEntries(home))
-        end },
-        { text = _("Language") .. "  ·  " .. language .. "  ›", callback = function()
-            home:showSettings(self:choiceDropdownEntries(
-                home, _("Language"), "language", language_options))
-        end },
-        { text = _("Sort order") .. "  ·  " .. sort .. "  ›", callback = function()
-            home:showSettings(self:choiceDropdownEntries(
-                home, _("Sort order"), "sort", sort_options))
-        end },
-        { text = _("Z-Library") .. (Zlibrary.isSignedIn() and "  ·  " .. _("signed in") or ""), bold = true, separator = true },
-        { text = _("Z-Library sign-in"), callback = function()
-            self:showZlibrarySignInDialog(home)
-        end },
-        { text = _("Z-Library base URL") .. "  ·  " .. Zlibrary.getBaseUrl() .. "  ›", callback = function()
-            self:showZlibraryBaseUrlDialog(home)
-        end },
-        { text = _("Z-Library sign out"), callback = function()
-            Zlibrary.signOut()
-            UIManager:show(InfoMessage:new{ text = _("Signed out of Z-Library.") })
-            if home then home:showSettings(self:settingsDropdownEntries(home)) end
-        end },
-        { text = _("Clear cover cache"), callback = function()
-            CoverCache:clear()
-            UIManager:show(InfoMessage:new{ text = _("Cached covers cleared.") })
-        end },
-    }
-end
-
-
-function Bookdrop:showSearchDialog(parent_widget, initial_query)
-    local dialog
-    local active_filters = self:filterSummary(self:getFilters())
-    local dialog_title = _("Find your next book")
-    if active_filters ~= "" then
-        dialog_title = T(_("Search · %1"), active_filters)
-    end
-    dialog = InputDialog:new{
-        title = dialog_title,
-        input = initial_query or "",
-        input_hint = _("Title, author, ISBN, or keyword"),
-        buttons = {{
-            { text = _("Cancel"), id = "close", callback = function()
-                UIManager:close(dialog)
-                if not parent_widget then self:showStoreHome() end
-            end },
-            { text = _("Search"), is_enter_default = true, callback = function()
-                local query = dialog:getInputText()
-                if query and query:match("%S") then
-                    UIManager:close(dialog)
-                    self:runSearch(query, 1, self:getFilters(), query)
-                end
-            end },
-        }},
-    }
-    pcall(function()
-        local Retro = require("bos_retro")
-        Retro.pinstripeTitleBar(dialog.title_bar)
-        local f = dialog.dialog_frame or (dialog.movable and dialog.movable[1])
-        if f then f.radius = 0 f.bordersize = Retro and math.max(2, require("device").screen:scaleBySize(2)) or f.bordersize end
-        if dialog.movable and dialog.movable[1] then dialog.movable[1] = Retro.Shadowed:new{ dialog.movable[1] } end
-    end)
-    UIManager:show(dialog)
-    showKeyboard(dialog)
-end
-
-local function appendUniqueBooks(target, additions, seen)
-    for _, book in ipairs(additions or {}) do
-        local key = tostring(book.provider or "") .. ":" .. tostring(book.provider_id or book.id)
-        if not seen[key] then
-            seen[key] = true
-            target[#target + 1] = book
-        end
-    end
-end
-
--- ------------------------------------------------------------ Z-Library settings
 
 function Bookdrop:showZlibraryBaseUrlDialog(home)
     local dialog
@@ -1308,110 +967,6 @@ function Bookdrop:performZlibraryLogin(home, email, password)
     end)
 end
 
-function Bookdrop:runSearch(query, page_number, filters, title, continuation)
-    NetworkMgr:runWhenConnected(function()
-        -- every library at once, each in its own process: the device stays
-        -- responsive, a slow library can't hold up the rest for long, and
-        -- CANCEL (or a tap anywhere) stops the lot
-        local loading = LoadingView:new{
-            text = T(_("Searching %1…"), title),
-            detail = _("Asking the libraries…"),
-            cancellable = true,
-        }
-        UIManager:show(loading)
-        UIManager:forceRePaint()
-        Trapper:wrap(function()
-            closeOnError(loading)
-            local page, err = Provider:search(query, page_number, filters, {
-                parallel = true,
-                timeout = 25,
-                cancelled = function() return loading.cancelled end,
-                on_progress = function(done, total)
-                    if total > 1 and not loading.cancelled then
-                        loading:setDetail(T(_("%1 of %2 libraries answered"), done, total))
-                    end
-                end,
-            })
-            UIManager:close(loading)
-            if not page then
-                if err ~= "cancelled" then
-                    UIManager:show(InfoMessage:new{ text = T(_("Catalog error: %1"), err) })
-                end
-                return
-            end
-            for _, book in ipairs(page.books) do
-                book.cover_path = CoverCache:get(book)
-            end
-            if continuation and continuation.books then
-                local merged, seen = {}, {}
-                appendUniqueBooks(merged, continuation.books, seen)
-                appendUniqueBooks(merged, page.books, seen)
-                page.books = merged
-                page.total = math.max(tonumber(page.total) or 0, #merged)
-                page.has_previous = false
-            end
-            self:showResults(query, filters, title, page, continuation and continuation.start_page)
-        end)
-    end)
-end
-
-function Bookdrop:showResults(query, filters, title, page, start_page)
-    local books = page.books or {}
-    local active_filters = self:filterSummary(filters)
-    local total = page.total or #books
-    local results_title = query and query:match("%S") and T(_("Results for \"%1\""), query) or title
-    local results_subtitle = T(_("%1 of %2 titles"), #books, total)
-    if active_filters ~= "" then
-        results_subtitle = T(_("%1 · %2"), results_subtitle, active_filters)
-    end
-    if page.source_errors and #page.source_errors > 0 then
-        results_subtitle = T(_("%1 · %2 libraries unavailable"), results_subtitle, #page.source_errors)
-    end
-    local sort_value = filters.sort or ""
-    local results = StoreMenu:new{
-        title = results_title,
-        subtitle = results_subtitle,
-        query = query,
-        books = books,
-        view_mode = self.settings:readSetting("results_view", "list"),
-        sort_value = sort_value,
-        sort_label = selectedOptionLabel(sort_options, sort_value) or _("Best match"),
-        sort_options = sort_options,
-        has_more = page.has_next and true or false,
-        start_page = start_page or 1,
-        on_close = function()
-            -- back to home (it's still underneath, unless it was closed)
-            if not (self._home and not self._home._bookdrop_closed) then self:showStoreHome() end
-        end,
-        on_search = function(widget) self:showSearchDialog(widget, query) end,
-        on_book = function(book) self:showBook(book) end,
-        on_covers = function(page_books, widget) self:loadCoversProgressively(page_books, widget, #page_books) end,
-        on_load_more = function(next_page)
-            if page.has_next then
-                self:runSearch(query, (page.page or 1) + 1, filters, title, {
-                    books = books, start_page = next_page,
-                })
-            end
-        end,
-        on_view = function(mode)
-            self.settings:saveSetting("results_view", mode)
-            self.settings:flush()
-        end,
-        on_sort = function(value)
-            self:setFilter("sort", value)
-            self:runSearch(query, 1, self:getFilters(), title)
-        end,
-    }
-    -- one list at a time: the new one replaces the old (home stays under it)
-    local old = self._results
-    self._results = results
-    UIManager:show(results, "ui")
-    if old and not old._bookdrop_closed then
-        old.on_close = nil
-        UIManager:close(old)
-    end
-end
-
 function Bookdrop:rememberBook(book)
     local recent, stored = self.settings:readSetting("recent_books", {}), {}
     for key, value in pairs(book) do
@@ -1437,60 +992,104 @@ function Bookdrop:rememberBook(book)
     self.settings:flush()
 end
 
-function Bookdrop:showRecentBooks()
-    local books = self.settings:readSetting("recent_books", {})
-    for _, book in ipairs(books) do book.cover_path = CoverCache:get(book) end
-    self:showResults("", {}, _("Recently viewed"), {
-        books = books, page = 1, last_page = 1, has_previous = false, has_next = false,
-    })
-end
+-- ---------------------------------------------------------------------------
+-- The screens are ShelfTechUI's store (bos_store): Bookdrop keeps the
+-- libraries, the filters, the cover cache and the downloads.
+-- ---------------------------------------------------------------------------
 
-function Bookdrop:showBook(book)
-    self:rememberBook(book)
-    if self._home and not self._home._bookdrop_closed and self._home.enableRecent then
-        self._home:enableRecent()
+function Bookdrop:refreshSettingsMenu() end -- (the Settings app redraws its own rows)
+
+function Bookdrop:showStoreHome() require("bos_store").open() end
+function Bookdrop:showSearchDialog(_parent, query)
+    if query and query:match("%S") then require("bos_store").open{ query = query }
+    else require("bos_store").open{ search = true } end
+end
+function Bookdrop:runSearch(query) require("bos_store").open{ query = query } end
+function Bookdrop:showBook(book) require("bos_store").open{ book = book } end
+
+--- The store's settings, as rows for the Settings app.
+function Bookdrop:settingsItems()
+    local function summary(values, options)
+        local n = 0
+        for _i, o in ipairs(options) do if values[o[1]] then n = n + 1 end end
+        return n == #options and _("All") or T(_("%1 of %2"), n, #options)
     end
-    NetworkMgr:runWhenConnected(function()
-        local loading = LoadingView:new{
-            text = _("Opening the book…"),
-            detail = book.title,
-            cancellable = true,
-        }
-        UIManager:show(loading)
-        UIManager:forceRePaint()
-        Trapper:wrap(function()
-            closeOnError(loading)
-            -- details and cover in one go, in the background, cancellable
-            local Jobs = require("bookdrop_jobs")
-            local results, cancelled = Jobs.run({
-                { key = "book", fn = function()
-                    local hydrated, err = Provider:hydrate(book)
-                    if hydrated and not (CoverCache:get(hydrated)) then
-                        pcall(function() CoverCache:fetch(hydrated) end)
-                    end
-                    return hydrated, err
-                end },
-            }, { timeout = 30, cancelled = function() return loading.cancelled end })
-            UIManager:close(loading)
-            if cancelled then return end
-            local r = results.book
-            local hydrated, err = r and r.ok and r[1], r and (r.ok and r[2] or r.err)
-            if not hydrated then
-                UIManager:show(InfoMessage:new{ text = T(_("Could not load book: %1"), err or _("no answer")) })
-                return
-            end
-            hydrated.cover_path = CoverCache:get(hydrated) or book.cover_path
-            UIManager:show(BookView:new{
-                book = hydrated,
-                download_callback = hydrated.acquisitions and hydrated.acquisitions[1] and function(acquisition)
-                    self:downloadBook(hydrated, acquisition)
-                end or nil,
-                cover_download_callback = function()
-                    self:downloadCover(hydrated)
-                end,
-            })
-        end)
-    end)
+    local function checks(options, key, toggle)
+        local items = {}
+        for _i, o in ipairs(options) do
+            local value, label = o[1], o[2]
+            items[#items + 1] = {
+                text = _(label), keep_menu_open = true,
+                checked_func = function() return self:getFilters()[key][value] == true end,
+                callback = function() toggle(self, value) end,
+            }
+        end
+        return items
+    end
+    local function radios(options, key)
+        local items = {}
+        for _i, o in ipairs(options) do
+            local value, label = o[1], o[2]
+            items[#items + 1] = {
+                text = _(label), radio = true, keep_menu_open = true,
+                checked_func = function() return (self:getFilters()[key] or "") == value end,
+                callback = function() self:setFilter(key, value) end,
+            }
+        end
+        return items
+    end
+    return {
+        {
+            text = _("Libraries"),
+            description = _("Which libraries the store asks. Each is asked on its own, so a slow one doesn't hold up the rest."),
+            mandatory_func = function() return summary(self:getFilters().libraries, library_options) end,
+            sub_item_table_func = function() return checks(library_options, "libraries", self.toggleLibrary) end,
+        },
+        {
+            text = _("Formats"),
+            description = _("The kinds of file to offer."),
+            mandatory_func = function() return summary(self:getFilters().formats, format_options) end,
+            sub_item_table_func = function() return checks(format_options, "formats", self.toggleFormat) end,
+        },
+        {
+            text = _("Language of the books"),
+            mandatory_func = function() return _(selectedOptionLabel(language_options, self:getFilters().language or "") or "All languages") end,
+            sub_item_table_func = function() return radios(language_options, "language") end,
+        },
+        {
+            text = _("Order of results"),
+            mandatory_func = function() return _(selectedOptionLabel(sort_options, self:getFilters().sort or "") or "Best match") end,
+            sub_item_table_func = function() return radios(sort_options, "sort") end,
+        },
+        {
+            text = _("Z-Library"),
+            description = _("An account of your own, for the Z-Library library."),
+            mandatory_func = function() return Zlibrary.isSignedIn() and _("Signed in") or _("Not signed in") end,
+            sub_item_table_func = function()
+                return {
+                    { text = _("Sign in…"), callback = function() self:showZlibrarySignInDialog() end },
+                    { text = _("Address…"), mandatory_func = function() return Zlibrary.getBaseUrl() end,
+                        callback = function() self:showZlibraryBaseUrlDialog() end },
+                    { text = _("Sign out"), enabled_func = function() return Zlibrary.isSignedIn() end, callback = function()
+                        Zlibrary.signOut()
+                        UIManager:show(InfoMessage:new{ text = _("Signed out of Z-Library.") })
+                    end },
+                }
+            end,
+        },
+        {
+            text = _("Reset the store's choices"),
+            description = _("Every library but Z-Library, every format, every language."),
+            callback = function() self:resetFilters() UIManager:show(InfoMessage:new{ text = _("Reset."), timeout = 2 }) end,
+        },
+        {
+            text = _("Clear the store's covers"),
+            callback = function()
+                CoverCache:clear()
+                UIManager:show(InfoMessage:new{ text = _("Cached covers cleared.") })
+            end,
+        },
+    }
 end
 
 return Bookdrop

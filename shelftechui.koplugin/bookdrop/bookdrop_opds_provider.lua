@@ -705,4 +705,8 @@ function OPDS:hydrate(book)
     return book
 end
 
+-- (for ShelfTechUI's own libraries, added by address: bos_store_libs)
+OPDS._requestXml, OPDS._requestPayload, OPDS._feedInfo, OPDS._pagedFeed = requestXml, requestPayload, feedInfo, pagedFeed
+OPDS._absolute, OPDS._children, OPDS._child, OPDS._nodeText, OPDS._parseXml = absolute, children, child, nodeText, parseXml
+
 return OPDS

@@ -2,6 +2,16 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.7.0
+
+- **A new store**, drawn in your theme like the rest of ShelfTechUI, in place of Bookdrop's own screens (Bookdrop still does the fetching and downloading underneath).
+  - **Search as you type.** The search field is always at the top. After three letters and a short pause the list under it follows what you've typed; each library is asked on its own in the background, and results appear as each one answers. A library that is slow or down no longer holds up the others, and if none can be reached the store says which and why.
+  - **The storefront**: Recommended for you, Recently viewed, shelves of covers, and categories to browse.
+  - **A book's page**: cover, title, author, where it's from, one Download key, other formats, the description, more by the author, and + Want.
+- **FOR YOU on home is recommendations from the internet**, from what you read (Open Library): more in your series, more by authors you read, popular in your genres, and Want to read. Tapping one opens its page in the store, where the libraries are asked for it. (The lists from your own library are rows on the Read and Dash layouts.) On by default; Settings → Connect → Recommendations.
+- **Add your own libraries by address.** Settings → Connect → Your libraries, or ⚙ in the store: give the address of any catalogue that speaks OPDS (your own Calibre, Calibre-Web, Kavita or Komga server, or a library's or publisher's feed). It's then asked when you search, and gets a shelf under Browse. For a catalogue with a password: https://name:password@address.
+- Removed: Bookdrop's old home, results, book and menu screens (about 2,000 lines).
+
 ## 1.6.5
 
 - **Coming home from a book is lighter.** When you leave a book, Bookshelf keeps it open under home for a moment, and closes it properly before the start menu or Settings opens. Most of that close was KOReader rebuilding the file browser's list of your whole home folder, which sits hidden under Bookshelf's home. That list is now built only when the file browser is actually shown. Closing a book takes about half the time it did (more with a big library), so the start menu after a book opens sooner.

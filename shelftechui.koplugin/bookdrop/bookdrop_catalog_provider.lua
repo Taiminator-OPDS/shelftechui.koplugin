@@ -121,6 +121,9 @@ local function matchesQuery(book, query)
     return fieldMatchesTerms(book.subjects, terms, false)
 end
 
+-- (ShelfTechUI's store filters each library's answer as it arrives)
+CatalogProvider.matchesQuery = matchesQuery
+
 local function containsAll(haystack, needles)
     haystack = " " .. normalize(haystack) .. " "
     for _, needle in ipairs(needles) do
@@ -261,30 +264,9 @@ function CatalogProvider:search(query, page, filters, opts)
             if enabled(filters, source_id) then sources[#sources + 1] = source_id end
         end
         local answers = {}
-        if opts.parallel then
-            local Jobs = require("bookdrop_jobs")
-            local tasks = {}
-            for _, source_id in ipairs(sources) do
-                tasks[#tasks + 1] = { key = source_id, fn = function()
-                    return self:searchSource(source_id, query, page, filters)
-                end }
-            end
-            local results, cancelled = Jobs.run(tasks, { timeout = opts.timeout or 25,
-                cancelled = opts.cancelled, on_progress = opts.on_progress })
-            if cancelled then return nil, "cancelled" end
-            for _, source_id in ipairs(sources) do
-                local r = results[source_id]
-                if r and r.ok then
-                    answers[source_id] = { r[1], r[2] }
-                else
-                    answers[source_id] = { nil, r and r.err or "no answer" }
-                end
-            end
-        else
-            for _, source_id in ipairs(sources) do
-                local ok, result, err = pcall(self.searchSource, self, source_id, query, page, filters)
-                answers[source_id] = ok and { result, err } or { nil, tostring(result) }
-            end
+        for _, source_id in ipairs(sources) do
+            local ok, result, err = pcall(self.searchSource, self, source_id, query, page, filters)
+            answers[source_id] = ok and { result, err } or { nil, tostring(result) }
         end
         local books, errors, total, has_next = {}, {}, 0, false
         local successful_sources = 0

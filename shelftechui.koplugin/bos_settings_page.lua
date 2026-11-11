@@ -30,7 +30,7 @@ local S = UI.S
 
 local Page = {}
 
-Page.VERSION = "1.6.5"
+Page.VERSION = "1.7.0"
 
 -- Dispatcher's sub-menus edit tables in place and flag `caller.updated`.
 local saver = setmetatable({}, { __newindex = function() Store.save() end })
@@ -830,20 +830,42 @@ function Page.sections(plugin)
         },
         { heading = _("Store") },
         {
-            text = _("Bookdrop store"),
-            description = _("Browse and download books (and manga). Also the first shelf in FOR YOU on home."),
+            text = _("Open the store"),
+            description = _("Search the libraries as you type, browse their shelves, and download. Recommendations from what you read are its first row."),
             enabled_func = function() return require("bos_online").bookdrop() ~= nil end,
-            callback = function()
-                local bd = require("bos_online").bookdrop()
-                if bd then bd:showStoreHome() end
-            end,
+            callback = function() require("bos_store").open() end,
         },
     } }
+    do
+        -- which libraries, formats and language the store asks for
+        local bd = require("bos_online").bookdrop()
+        local okB, rows = pcall(function() return bd and bd.settingsItems and bd:settingsItems() or {} end)
+        for _i, it in ipairs(okB and rows or {}) do
+            table.insert(connect.items, it)
+            if _i == 1 then
+                -- right after the built-in libraries: yours
+                table.insert(connect.items, {
+                    text = _("Your libraries"),
+                    description = _("Libraries you've added by the address of their catalogue (OPDS). They're asked when you search, and each has a shelf in the store."),
+                    mandatory_func = function()
+                        local n = #require("bos_store_libs").list()
+                        return n == 0 and _("None") or tostring(n)
+                    end,
+                    sub_item_table_func = function() return require("bos_store").libraryItems() end,
+                })
+            end
+        end
+        if bd and bd.openManga then
+            table.insert(connect.items, { text = _("Manga"), description = _("Bookdrop's manga reader."),
+                callback = function() bd:openManga() end })
+        end
+        table.insert(connect.items, { heading = _("Recommendations") })
+    end
     do
         -- online picks, lifted out of For you so they're one tap from here
         local fy = by[_("For you")]
         local sub = fy and fy.sub_item_table_func and fy.sub_item_table_func() or {}
-        local lifted = { [_("Online picks")] = true, [_("Show online picks")] = true, [_("Want to read")] = true }
+        local lifted = { [_("Recommendations")] = true, [_("Get new recommendations now")] = true, [_("Want to read")] = true }
         for _i, it in ipairs(sub) do
             if lifted[it.text] then table.insert(connect.items, it) end
         end
@@ -977,18 +999,19 @@ function Page.items()
                     toggle("book_page", _("ShelfTechUI book page"),
                         _("Holding a book (or its details) opens the retro book page: stars, status, the description, genres, the series, Similar and More by the author, and ‹ › to the books beside it. Bookshelf's own book window is under its ⋯.")),
                     {
-                        text = _("Online picks"),
-                        description = _("Books you don't have yet: missing from your series, more by authors you finish, popular in your genres, as three shelves in FOR YOU on home. From Open Library, over Wi-Fi only, fetched at most once a day in the background, no account. Off by default."),
-                        checked_func = function() return Store.get("online_picks") == true end,
+                        text = _("Recommendations"),
+                        description = _("Books you don't have yet, from what you read: more in your series, more by authors you read, popular in your genres. They fill FOR YOU on home and the first row of the store; tapping one opens its page in the store. From Open Library, over Wi-Fi only, fetched at most once a day in the background, no account."),
+                        checked_func = function() return require("bos_online").enabled() end,
                         callback = function()
-                            require("bos_online").setEnabled(not (Store.get("online_picks") == true))
+                            require("bos_online").setEnabled(not require("bos_online").enabled())
                             refreshHome()
                         end,
                     },
                     {
-                        text = _("Show online picks"),
-                        enabled_func = function() return Store.get("online_picks") == true end,
-                        callback = function() require("bos_online").showPicks() end,
+                        text = _("Get new recommendations now"),
+                        enabled_func = function() return require("bos_online").enabled() end,
+                        keep_menu_open = true,
+                        callback = function() require("bos_online").setup() end,
                     },
                     {
                         text = _("Want to read"),
@@ -996,15 +1019,13 @@ function Page.items()
                     },
                     {
                         text = _("Add the For you shelf to home again"),
-                        description = _("If you removed it: a FOR YOU shelf of shelves with Because you read, Up next in series, Pick back up, More by authors you finish, your top genres, Discover, the online picks (while they're on) and Want to read."),
+                        description = _("If you removed it: a FOR YOU shelf of shelves with the recommendations (more in your series, more by authors you read, popular in your genres) and Want to read."),
                         keep_menu_open = true,
                         callback = function()
                             Store.set("foryou_seeded", nil)
                             Store.set("foryou_online_seeded", nil)
-                            Store.set("foryou_store_seeded", nil)
                             require("bos_recs").seed()
                             require("bos_online").syncShelves()
-                            require("bos_online").seedStore()
                             refreshHome()
                             UIManager:show(InfoMessage:new{ text = _("Added to home."), timeout = 2 })
                         end,

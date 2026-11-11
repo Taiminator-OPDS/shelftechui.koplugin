@@ -1,26 +1,22 @@
 --[[
-Online picks (Aleph ideas A4, A5, C6), from Open Library: opt-in (Settings →
-For you → Online picks), over Wi-Fi only, fetched at most once a day, with no
+Recommendations from the internet, from what you read (Open Library): over
+Wi-Fi only, fetched at most once a day in a background process, with no
 account and nothing about you sent but the authors, series and genres asked
-about.
+about. On unless turned off (Settings → Connect → Recommendations).
 
-  Missing from your series      books in series you've started that aren't
+  More in your series           books in series you've started that aren't
                                 on the device
-  More by authors you finish    their other works
+  More by authors you read      their other works
   Popular in <your top genre>   Open Library's subject lists
 
-Each pick opens a sheet with its description: FIND hands the title to
-Bookdrop's search (its OPDS and Internet Archive sources); + WANT keeps it on
-the Want to read shelf (a Bookshelf shelf, "stui_want").
+FOR YOU on home is these three shelves ("stui_online": series, authors,
+genres) and Want to read ("stui_want"). A pick opens its page in the store
+(bos_store): the libraries are asked for it, and it downloads from there.
++ WANT keeps it on the Want to read shelf.
 
-The store itself is Bookdrop (bundled in bookdrop/): a Store shelf, first in
-FOR YOU ("stui_store"), has a tile for its home, its search, each of its
-categories and its manga reader.
-
-On home, the picks are three shelves inside FOR YOU ("stui_online": series,
-authors, genres), shown while online picks are on. They're filled from what
-was fetched; the day's fetch runs in a background process when a shelf is
-drawn (or you pull down to refresh), and the shelves redraw when it's done.
+The shelves are filled from what was fetched; the day's fetch runs when a
+shelf is drawn (or you pull down to refresh), and the shelves redraw when
+it's done.
 
 Author pages get the author's portrait from Open Library too.
 
@@ -45,7 +41,7 @@ local M = {}
 local OL = "https://openlibrary.org"
 local COVERS = "https://covers.openlibrary.org"
 
-function M.enabled() return Store.get("online_picks") == true end
+function M.enabled() return Store.get("online_picks") ~= false end
 
 local function cacheDir()
     local DataStorage = require("datastorage")
@@ -248,8 +244,8 @@ end
 --- The online shelves inside FOR YOU: added once, then shown only while
 --- online picks are on.
 M.SHELVES = {
-    { id = "stui_fy_online_series", which = "series", label = _("Missing from your series") },
-    { id = "stui_fy_online_authors", which = "authors", label = _("More by authors you finish") },
+    { id = "stui_fy_online_series", which = "series", label = _("More in your series") },
+    { id = "stui_fy_online_authors", which = "authors", label = _("More by authors you read") },
     { id = "stui_fy_online_genres", which = "genres", label = _("Popular in your genres") },
 }
 
@@ -483,11 +479,11 @@ function M.registerSource()
             return out, #list
         end,
         open = function(book)
-            M.showSheet(book.stui_want or { title = book.title, author = book.author })
+            M.showSheet(book.stui_want or { title = book.title, author = book.author, online = true })
             return true
         end,
         info = function(book)
-            M.showSheet(book.stui_want or { title = book.title, author = book.author })
+            M.showSheet(book.stui_want or { title = book.title, author = book.author, online = true })
         end,
     })
     if not ok then logger.warn("ShelfTechUI: Want to read shelf not registered:", err) end
@@ -504,6 +500,11 @@ function M.registerSource()
             M.refreshInBackground(false)
             local list = M.rowItems(source and source.which or "genres")
             local out = {}
+            -- nothing fetched yet: one card on the first shelf saying how
+            if #list == 0 and (source and source.which) == "series" and #M.rows() == 0 then
+                return { { filepath = "stuionline://_setup", title = _("Recommendations"),
+                    authors = { _("Turn on Wi-Fi") }, author = _("Turn on Wi-Fi"), stui_setup = true } }, 1
+            end
             for i = (offset or 0) + 1, math.min(#list, (offset or 0) + (limit or 20)) do
                 local p = list[i]
                 local path = p.cover_i and (cacheDir() .. "/c" .. p.cover_i .. "M.jpg")
@@ -530,34 +531,17 @@ function M.registerSource()
             require("bos_ui").openList(items, nil, function() end)
         end,
         open = function(book)
-            M.showSheet(book.stui_pick or { title = book.title, author = book.author })
+            if book.stui_setup then M.setup() return true end
+            M.showSheet(book.stui_pick or { title = book.title, author = book.author, online = true })
             return true
         end,
         info = function(book)
-            M.showSheet(book.stui_pick or { title = book.title, author = book.author })
+            if book.stui_setup then M.setup() return end
+            M.showSheet(book.stui_pick or { title = book.title, author = book.author, online = true })
         end,
     })
     if not ok then logger.warn("ShelfTechUI: online picks shelf not registered:", err) end
 
-    ok, err = Sources.register("stui_store", {
-        api = 1,
-        label = function() return _("Store (Bookdrop)") end,
-        available = function() return true end,
-        remote_prefix = "stuistore://",
-        fetch = function(_source, _drill, offset, limit)
-            local list = M.storeTiles()
-            local out = {}
-            for i = (offset or 0) + 1, math.min(#list, (offset or 0) + (limit or 20)) do
-                local tile = list[i]
-                out[#out + 1] = { filepath = "stuistore://" .. tile.id, title = tile.title,
-                    authors = { tile.sub }, author = tile.sub }
-            end
-            return out, #list
-        end,
-        open = function(book) return M.runStoreTile(book) end,
-        info = function(book) M.runStoreTile(book) end,
-    })
-    if not ok then logger.warn("ShelfTechUI: Store shelf not registered:", err) end
 end
 
 -- ---------------------------------------------------------------- finding it
@@ -565,249 +549,97 @@ end
 --- FIND: Bookdrop's search for the title and author.
 --- Bookdrop (bundled), of the UI on screen.
 function M.bookdrop()
-    local bd
-    pcall(function()
-        local FM = require("apps/filemanager/filemanager").instance
-        bd = FM and FM.bookdrop
-        if not bd then
-            local RU = require("apps/reader/readerui").instance
-            bd = RU and RU.bookdrop
-        end
-    end)
+    local FM = package.loaded["apps/filemanager/filemanager"]
+    local bd = FM and FM.instance and FM.instance.bookdrop
+    if not bd then
+        local RU = package.loaded["apps/reader/readerui"]
+        bd = RU and RU.instance and RU.instance.bookdrop
+    end
     return bd
 end
 
--- ---------------------------------------------------------------- the store (Bookdrop)
+-- ---------------------------------------------------------------- FOR YOU, recommendations only
 
---- The Store shelf's tiles: Bookdrop's home, its search, its categories, manga.
-function M.storeTiles()
-    local bd = M.bookdrop()
-    if not bd then return {} end
-    local out = {
-        { id = "home", title = _("Bookdrop store"), sub = _("Browse the catalogue"),
-            run = function() bd:showStoreHome() end },
-        { id = "search", title = _("Search the store"), sub = _("Title, author or ISBN"),
-            run = function() bd:showSearchDialog() end },
-    }
-    local ok, cats = pcall(function() return bd:homeCategoryDefinitions() end)
-    for _i, c in ipairs(ok and cats or {}) do
-        table.insert(out, { id = "cat_" .. tostring(c.key), title = c.title, sub = _("Store shelf"), run = c.callback })
-    end
-    if bd.openManga then
-        table.insert(out, { id = "manga", title = _("Manga"), sub = _("Bookdrop's manga reader"),
-            run = function() bd:openManga() end })
-    end
-    return out
-end
-
-function M.runStoreTile(book)
-    local id = tostring(book.filepath or ""):match("^stuistore://(.*)$")
-    for _i, tile in ipairs(M.storeTiles()) do
-        if tile.id == id then
-            local ok, err = pcall(tile.run)
-            if not ok then logger.warn("ShelfTechUI: store tile failed:", err) end
-            return true
-        end
-    end
-    return true
-end
-
---- Once: a Store shelf, first in FOR YOU.
-function M.seedStore()
-    if Store.get("foryou_store_seeded") then return end
+--- Once (1.7.0): FOR YOU holds the recommendations (and Want to read)
+--- only. The lists from your own library (Because you read, Up next…) and
+--- the Store tiles leave it; recommendations are turned on.
+function M.forYouOnlineOnly()
+    if Store.get("foryou_online_only") then return end
     local okT, TabModel = pcall(require, "lib/bookshelf_tab_model")
     if not okT then return end
+    if Store.get("online_picks") == nil then Store.set("online_picks", true) end
     local ok, err = pcall(function()
         local tabs = TabModel.load()
-        local parent_at
-        for i, t in ipairs(tabs) do
-            if t.id == "stui_fy_store" then return end
-            if t.id == "stui_foryou" then parent_at = i end
+        local changed = false
+        for _i, id in ipairs{ "stui_fy_because", "stui_fy_upnext", "stui_fy_pickup", "stui_fy_authors", "stui_fy_genres",
+                "stui_fy_discover", "stui_fy_store" } do
+            for k = #tabs, 1, -1 do
+                if tabs[k].id == id then
+                    if TabModel.removeTree then TabModel.removeTree(tabs, id) else table.remove(tabs, k) end
+                    changed = true
+                    break
+                end
+            end
         end
-        if not parent_at then return end
-        local t = { id = "stui_fy_store", label = _("Store"), source = { kind = "stui_store" },
-            filter = {}, sort_priority = {}, view_mode = "covers", enabled = true }
-        TabModel.insertChild(tabs, "stui_foryou", t)
-        for i, x in ipairs(tabs) do
-            if x == t then table.remove(tabs, i) break end
+        local by = {}
+        for _i, s in ipairs(M.SHELVES) do by[s.id] = s end
+        for _i, t in ipairs(tabs) do
+            if by[t.id] and t.label ~= by[t.id].label then t.label = by[t.id].label changed = true end
         end
-        table.insert(tabs, parent_at + 1, t)
-        TabModel.save(tabs)
+        if changed then TabModel.save(tabs) end
     end)
-    if not ok then logger.warn("ShelfTechUI: Store shelf not added:", err) end
-    Store.set("foryou_store_seeded", true)
+    if not ok then logger.warn("ShelfTechUI: For you not updated:", err) end
+    Store.set("foryou_online_only", true)
+    Store.set("foryou_online_seeded", nil) -- (add the three shelves if they were never added)
+    M.syncShelves()
+    pcall(function() require("lib/bookshelf_sources").changed("stui_online") end)
 end
 
+--- The card shown before anything was fetched: Wi-Fi, then the fetch.
+function M.setup()
+    local InfoMessage = require("ui/widget/infomessage")
+    pcall(function()
+        require("ui/network/manager"):runWhenConnected(function()
+            if M.refreshInBackground(true) or M._fetching then
+                UIManager:show(InfoMessage:new{ text = _("Getting recommendations from what you've read: they'll be here in a minute."), timeout = 4 })
+            else
+                UIManager:show(InfoMessage:new{ text = _("Read or finish a book or two first: recommendations come from your series, authors and genres."), timeout = 5 })
+            end
+        end)
+    end)
+end
+
+-- ---------------------------------------------------------------- in the store
+
+--- A pick's page in the store (the libraries are asked for it there).
+function M.showSheet(item)
+    require("bos_store").openBook(item)
+end
+
+--- Search the store for a pick.
 function M.find(item)
     local query = item.title or ""
     if item.author then query = query .. " " .. item.author end
-    local bd = M.bookdrop()
-    if bd and bd.runSearch then
-        local ok, err = pcall(function() bd:runSearch(query, 1, bd.getFilters and bd:getFilters() or nil, query) end)
-        if ok then return true end
-        logger.warn("ShelfTechUI: Bookdrop search failed:", err)
-    end
-    local InfoMessage = require("ui/widget/infomessage")
-    UIManager:show(InfoMessage:new{ text = T(_("Bookdrop isn't installed. Search for this book in your OPDS catalogues:\n\n%1"), query) })
+    require("bos_store").open{ query = query }
 end
 
--- ---------------------------------------------------------------- the sheet
-
-local Page = require("bos_page")
-
---- A pick's details at the foot of the screen: cover, title, author, year,
---- description, FIND IN BOOKDROP and + WANT.
-function M.showSheet(item)
-    local InputContainer = require("ui/widget/container/inputcontainer")
-    local GestureRange = require("ui/gesturerange")
-    local Sheet = InputContainer:extend{ name = "stui_online_sheet" }
-    local W, H = Screen:getWidth(), Screen:getHeight()
-    local sh = math.floor(H * 0.42)
-    local rect = Geom:new{ x = S(10), y = H - sh - S(10), w = W - S(20) - Look.SHADOW, h = sh }
-    function Sheet:init()
-        self.dimen = Geom:new{ x = 0, y = 0, w = W, h = H }
-        self.ges_events = { SheetTap = { GestureRange:new{ ges = "tap", range = self.dimen } } }
-        if Device:hasKeys() then self.key_events = { Close = { { Device.input.group.Back } } } end
-        self.desc = M.description(item)
-        self.cover = M.coverPath(item, "M")
-    end
-    function Sheet:paintTo(bb)
-        self.rects = {}
-        local x, y, w, h = rect.x, rect.y, rect.w, rect.h
-        Look.box(bb, x, y, w, h, { shadow = Look.SHADOW })
-        local strip = S(26)
-        Look.stripes(bb, x + Look.LINE, y + Look.LINE + S(2), w - 2 * Look.LINE, strip - S(4))
-        bb:paintRect(x, y + strip, w, Look.LINE, BLACK)
-        local cap = require("bos_look").case((item.series and item.series or (item.author or _("Online pick"))))
-        local cw = math.min(w - S(80), Look.textWidth(cap, 9) + S(14))
-        Look.box(bb, x + S(8), y + S(4), cw, strip - S(8))
-        Look.label(bb, cap, x + S(8), y + S(4), cw, strip - S(8), 9, { align = "center" })
-        Look.box(bb, x + w - S(36), y + S(4), S(28), strip - S(8))
-        Look.label(bb, "\u{00D7}", x + w - S(36), y + S(4), S(28), strip - S(8), 12, { align = "center" })
-        self.rects.close = Geom:new{ x = x + w - S(48), y = y, w = S(48), h = strip + S(8) }
-        local cy = y + strip + S(14)
-        local cvw, cvh = S(80), S(120)
-        local _r = Page.coverRow(bb, { { dashed = true, cover_path = self.cover, title = item.title } }, x + S(6), cy, cvw + S(20), cvw,
-            { no_shelf = true })
-        local tx = x + S(14) + cvw + S(18)
-        local tw = x + w - S(14) - tx
-        local ty = cy
-        ty = ty + Page.wrap(bb, item.title or "", Page.serif(16, true), tx, ty, tw, 2, S(24))
-        local by = (item.author or "") .. (item.year and (" · " .. item.year) or "")
-        Look.label(bb, by, tx, ty, tw, S(20), 11, { keep_case = true, bold = false })
-        ty = ty + S(26)
-        local bh = S(38)
-        local lines = math.max(1, math.floor((y + h - S(14) - bh - S(14) - ty) / S(20)))
-        if self.desc then
-            Page.wrap(bb, self.desc, Page.serif(13), tx, ty, tw, lines, S(20))
-        elseif not (M.enabled() and connected()) then
-            Look.label(bb, _("Connect to Wi-Fi for the description."), tx, ty, tw, S(20), 9, { color = Look.GRAY })
-        end
-        local fy = y + h - S(14) - bh
-        local fl = _("Find in Bookdrop")
-        local fw = Look.textWidth(require("bos_look").case(fl), 11) + S(24)
-        self.rects.find = Look.button(bb, tx, fy, fw, bh, fl, { on = true, size = 11 })
-        local wl = M.isWanted(item) and _("\u{2713} Want") or _("+ Want")
-        local ww = Look.textWidth(require("bos_look").case(wl), 11) + S(24)
-        self.rects.want = Look.button(bb, tx + fw + S(14), fy, ww, bh, wl, { size = 11 })
-    end
-    function Sheet:onSheetTap(_, ges)
-        local pos = ges.pos
-        local r = self.rects or {}
-        if Page.inside(pos, r.close) or not Page.inside(pos, rect) then UIManager:close(self)
-        elseif Page.inside(pos, r.find) then UIManager:close(self) M.find(item)
-        elseif Page.inside(pos, r.want) then
-            M.toggleWant(item)
-            UIManager:setDirty(self, "ui", rect)
-        end
-        return true
-    end
-    function Sheet:onClose() UIManager:close(self) return true end
-    function Sheet:onShow() UIManager:setDirty(self, "ui", Geom:new{ x = 0, y = rect.y, w = W, h = H - rect.y }) return true end
-    function Sheet:onCloseWidget() UIManager:setDirty(nil, "ui", Geom:new{ x = 0, y = rect.y, w = W, h = H - rect.y }) end
-    UIManager:show(Sheet:new{})
-end
-
--- ---------------------------------------------------------------- the page
-
---- FOR YOU · ONLINE: the picks as store rows.
+--- The store, where the recommendations are its first row.
 function M.showPicks(force)
-    if not M.enabled() then
-        local InfoMessage = require("ui/widget/infomessage")
-        UIManager:show(InfoMessage:new{ text = _("Online picks are off. Turn them on in Settings → For you → Online picks (Wi-Fi only, fetched once a day from Open Library).") })
-        return
-    end
-    M.withPicks(function(rows)
-        local function draw(self, bb, y, w)
-            local x = self.pad
-            local W, H = Screen:getWidth(), Screen:getHeight()
-            local day = store():readSetting("day")
-            local info = day and T(_("Open Library · updated %1"), day) or _("Open Library · not fetched yet")
-            Look.label(bb, info, x, y - S(6), w - S(150), S(20), 9, { color = Look.GRAY })
-            Look.label(bb, _("Dashed = not on device"), x, y - S(6), w, S(20), 9, { color = Look.GRAY, align = "right" })
-            y = y + S(22)
-            if #rows == 0 then
-                local msg = connected() and _("Nothing found yet: read and finish a few books, then pull down to refresh.")
-                    or _("Connect to Wi-Fi, then pull down to fetch picks.")
-                Page.wrap(bb, msg, Page.serif(15, false, true), x, y + S(20), w, 4, S(24))
-                return
-            end
-            local cw = S(60)
-            for _i, row in ipairs(rows) do
-                if y + S(22) + cw * 1.5 + S(30) > H then break end
-                Page.heading(bb, row.title, x, y, w)
-                y = y + S(28)
-                local items = {}
-                for _j, p in ipairs(row.items) do
-                    p.dashed = true
-                    p.cover_path = M.coverPath(p)
-                    table.insert(items, p)
-                end
-                local rects, rh = Page.coverRow(bb, items, x, y, w, cw)
-                for j, r in ipairs(rects) do
-                    local p = items[j]
-                    self:hit(r, function() M.showSheet(p) end)
-                end
-                y = y + rh + S(10)
-            end
-        end
-        Page:new{ caption = _("For you · Online"), draw = draw,
-            on_more = function(self, rect)
-                require("bos_ui").openList({
-                    { text = _("Refresh now"), callback = function() self:onClose() M.showPicks(true) end },
-                    { text = _("Want to read"), callback = function() M.showWant() end },
-                }, rect)
-            end }:show()
-    end, force)
+    if force then M.refreshInBackground(true) end
+    require("bos_store").open()
 end
 
+--- Want to read, as a list in the store.
 function M.showWant()
-    local function draw(self, bb, y, w)
-        local list = M.wantList()
-        if #list == 0 then
-            Page.wrap(bb, _("Nothing yet. Tap + WANT on an online pick to keep it here."), Page.serif(15, false, true),
-                self.pad, y + S(10), w, 3, S(24))
-            return
-        end
-        local items = {}
-        for _i, it in ipairs(list) do
-            local p = { online = true, key = it.key, title = it.title, author = it.author, year = it.year,
-                cover_i = it.cover_i, series = it.series, dashed = true }
-            p.cover_path = M.coverPath(p)
-            table.insert(items, p)
-        end
-        local cw = S(70)
-        local per = math.max(1, math.floor((w + S(14)) / (cw + S(14))))
-        for r0 = 1, #items, per do
-            local row = {}
-            for i = r0, math.min(#items, r0 + per - 1) do table.insert(row, items[i]) end
-            local rects, rh = Page.coverRow(bb, row, self.pad, y, w, cw)
-            for j, r in ipairs(rects) do self:hit(r, function() M.showSheet(row[j]) end) end
-            y = y + rh + S(14)
-            if y > Screen:getHeight() - S(120) then break end
-        end
+    local books = {}
+    for _i, it in ipairs(M.wantList()) do
+        local p = { online = true, key = it.key, title = it.title, author = it.author, year = it.year,
+            cover_i = it.cover_i, series = it.series }
+        table.insert(books, { title = p.title, author = p.author, year = p.year, pick = p,
+            cover_path = M.cachedCoverPath(p, "M") })
     end
-    Page:new{ caption = _("Want to read"), draw = draw }:show()
+    require("bos_store").open{ list = { title = _("Want to read"), books = books,
+        empty = _("Nothing yet. Tap + WANT on a book's page to keep it here.") } }
 end
 
 return M
