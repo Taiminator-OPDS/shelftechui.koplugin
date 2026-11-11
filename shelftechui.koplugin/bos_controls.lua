@@ -138,10 +138,20 @@ local CATALOGUE = {
     {
         id = "search", name = _("Search"), glyph = UI.GLYPH.search,
         available = function() return true end,
-        home = { tap = event("ShowFileSearch") },
+        -- one search for home: your books first, then the store's libraries
+        home = { tap = function() require("bos_store").open{ search = true } end },
+        hold = { home = event("ShowFileSearch"), name_home = _("KOReader's search by file name") },
         qs = { tap = event("ShowFulltextSearchInput"), closes = true },
-        says = { home = _("Searches your books by file name."),
+        says = { home = _("One search: your own books as you type, then the store's libraries."),
                  qs = _("Searches the text of this book.") },
+    },
+    {
+        -- the store (bos_store): a tap opens the storefront
+        id = "store", name = _("Store"), glyph = UI.GLYPH.cart,
+        available = function() return require("bos_online").bookdrop() ~= nil end,
+        home = { tap = function() require("bos_store").open() end },
+        hold = { home = function() require("bos_store").open{ search = true } end, name_home = _("straight to its search") },
+        says = { home = _("The store: recommendations from what you read, shelves to browse, and search across your libraries.") },
     },
     {
         id = "dictionary", name = _("Dictionary"), glyph = UI.GLYPH.dictionary,
@@ -581,7 +591,7 @@ end
 
 
 Controls.DEFAULTS = {
-    home = { "light", "wifi", "settings" },
+    home = { "store", "light", "wifi", "settings" },
     qs = { "wifi", "night", "rotate", "refresh" },
 }
 

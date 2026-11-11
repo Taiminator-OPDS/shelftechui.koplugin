@@ -302,6 +302,18 @@ function BookshelfOS:init()
     if not self.ui.document then
         UIManager:scheduleIn(8, function() BookshelfOS.wrappedNote() end)
     end
+    -- the store on home (1.7.1): its chip first on the home bar, once; it's
+    -- yours to move or remove (Settings → Home → Status bar)
+    pcall(function()
+        local St = require("bos_settings_store")
+        if St.get("store_chip_seeded") then return end
+        St.set("store_chip_seeded", true)
+        local Controls = require("bos_controls")
+        if type(St.get("home_controls")) ~= "table" or Controls.isOn("home", "store") then return end
+        local ids = { "store" }
+        for _i, id in ipairs(Controls.ids("home")) do table.insert(ids, id) end
+        Controls.setIds("home", ids)
+    end)
     -- home layouts (Shelf, Read, Dash): after the edge swipes, so theirs pass through
     pcall(function() require("bos_layouts").install() end)
     -- 1.4.0 put the Layout chip on the home bar unasked; it's now yours to add

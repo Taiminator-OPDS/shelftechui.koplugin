@@ -2,6 +2,13 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.7.1
+
+- **The store is part of home.**
+  - **One search field at the top of Read and Dash** (where the magnifier key was): tap it and type. Your own books that match show at once, from the second letter and without Wi-Fi, each with a Read key; under them, the store's libraries fill in as they answer. Hold the field for KOReader's search by file name.
+  - **A Store chip on the home bar**, on every layout (Shelf too): tap for the storefront, hold to go straight to its search. It's added once, first on the bar; move or remove it in Settings → Home → Status bar.
+  - The Search chip, if you use it, is now this same search (hold it for the search by file name).
+
 ## 1.7.0
 
 - **A new store**, drawn in your theme like the rest of ShelfTechUI, in place of Bookdrop's own screens (Bookdrop still does the fetching and downloading underneath).

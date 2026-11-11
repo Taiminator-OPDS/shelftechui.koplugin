@@ -361,6 +361,7 @@ M.GLYPH = {
     list = "\u{F03A}", grid = "\u{F00A}", grid_large = "\u{F009}", info = "\u{F05A}",
     wifi = "\u{F1EB}", calendar = "\u{F073}", refresh = "\u{F021}", cloud = "\u{F0C2}",
     globe = "\u{F0AC}", heart = "\u{F004}", folder = "\u{F07B}", book = "\u{F02D}",
+    cart = "\u{F07A}",
     home = "\u{F015}", bars = "\u{F0C9}", power = "\u{F011}", font = "\u{F031}",
     thermometer = "\u{F2C9}", files = "\u{F0C5}", sliders = "\u{F1DE}", chart = "\u{F080}",
     star = "\u{F005}", tags = "\u{F02C}", clock = "\u{F017}", cog = "\u{F013}", rotate = "\u{F01E}",

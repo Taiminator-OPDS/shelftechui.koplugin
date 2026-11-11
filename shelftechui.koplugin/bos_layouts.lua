@@ -307,13 +307,39 @@ local function drawTop(bw, bb, W, pad)
     local menu_key = r
     hit(r, function() M.openStartMenu(bw, menu_key) end, nil, { no_flash = true })
     x = x + kw + gap + Look.SHADOW_SMALL
-    r = glyphButton(bb, x, y, kw, bh, UI.GLYPH.search)
-    hit(r, function() UIManager:sendEvent(Event:new("ShowFileSearch")) end)
-    x = x + kw + gap + Look.SHADOW_SMALL
-    -- your home chips (bos_statusbar), right-aligned in what's left
+    -- one search field, as on a Kindle's or a Kobo's home: your own books as
+    -- you type, then the store's libraries (bos_store). It takes the room
+    -- the home chips leave (at least 40% of the width).
+    local chips = {}
+    if Store.get("home_status_bar") ~= false then
+        local okC, list = pcall(function() return require("bos_controls").shown("home") end)
+        chips = okC and list or {}
+    end
+    local rest = W - pad - x
+    local chips_w = #chips > 0 and math.min(math.floor(rest * 0.6), #chips * S(62)) or 0
+    local fw = rest - chips_w - (chips_w > 0 and gap or 0) - Look.SHADOW_SMALL
+    Look.box(bb, x, y, fw, bh, { shadow = Look.SHADOW_SMALL })
+    do
+        local tw = TextWidget:new{ text = UI.GLYPH.search, face = UI.symbolFace(UI.ptForPx(math.floor(bh * 0.38))), fgcolor = Look.INK }
+        local sz = tw:getSize()
+        tw:paintTo(bb, x + S(12), y + math.floor((bh - sz.h) / 2))
+        tw:free()
+        local lx = x + S(12) + sz.w + S(10)
+        local hint = fw > S(300) and _("Search your books and the store")
+            or fw > S(190) and _("Books and the store") or _("Search")
+        local t2 = TextWidget:new{ text = hint, face = tface(13), fgcolor = Look.GRAY, max_width = fw - (lx - x) - S(8) }
+        local s2 = t2:getSize()
+        t2:paintTo(bb, lx, y + math.floor((bh - s2.h) / 2))
+        t2:free()
+    end
+    hit(Geom:new{ x = x, y = y - S(4), w = fw + Look.SHADOW_SMALL, h = bh + S(8) },
+        function() require("bos_store").open{ search = true } end,
+        function() UIManager:sendEvent(Event:new("ShowFileSearch")) end, { no_flash = true })
+    x = x + fw + Look.SHADOW_SMALL + gap
+    -- your home chips (bos_statusbar) in what's left
     local bar_w = W - pad - x
     local bar_h = bh
-    if bar_w > S(60) and Store.get("home_status_bar") ~= false then
+    if bar_w > S(60) and #chips > 0 then
         if not st.bar or st.bar.width ~= bar_w then
             local ok, bar = pcall(function()
                 local chips = require("bos_controls").shown("home")

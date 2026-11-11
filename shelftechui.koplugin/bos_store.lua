@@ -370,7 +370,7 @@ function Store:init()
     self.field_x = self.pad + key_w + S(10)
     self.field_w = W - self.pad - self.field_x - key_w - S(10) - Look.SHADOW_SMALL
     self.input = InputText:new{
-        text = "", hint = _("Search the store"),
+        text = "", hint = _("Search your books and the store"),
         width = self.field_w - S(40) - S(8), face = tface(15),
         bordersize = 0, margin = 0, padding = S(4),
         parent = self, focused = false,
@@ -594,6 +594,8 @@ function Store:onTyped()
     v.query = text
     if self.typing_timer then UIManager:unschedule(self.typing_timer) end
     local q = text:gsub("^%s+", ""):gsub("%s+$", "")
+    -- your own books first: at once, from the second letter, no Wi-Fi needed
+    v.mine = M.mine(q)
     if #q < 3 then
         Search.cancel(v.session)
         v.session, v.books, v.waiting, v.note = nil, {}, false, nil
@@ -808,6 +810,30 @@ function Store:download(v, acq)
         return true
     end
     bd:downloadBook(book, acq)
+end
+
+--- Your own books matching what's typed (every word in the title, the
+--- author or the series), the ones you're reading first. At most `max`.
+function M.mine(q, max)
+    local words = {}
+    for w in tostring(q or ""):lower():gmatch("%S+") do words[#words + 1] = w end
+    if #words == 0 or #table.concat(words) < 2 then return {} end
+    local ok, L = pcall(function() return require("bos_recs").library() end)
+    if not ok or not L or not L.books then return {} end
+    local out = {}
+    for _i, b in ipairs(L.books) do
+        local hay = (tostring(b.title or "") .. " " .. table.concat(b.authors or {}, " ") .. " " .. tostring(b.series or "")):lower()
+        local all = true
+        for _j, w in ipairs(words) do if not hay:find(w, 1, true) then all = false break end end
+        if all then out[#out + 1] = b end
+    end
+    table.sort(out, function(a, b)
+        local ra, rb = a.rank or 1e9, b.rank or 1e9
+        if ra ~= rb then return ra < rb end
+        return tostring(a.title or "") < tostring(b.title or "")
+    end)
+    while #out > (max or 12) do table.remove(out) end
+    return out
 end
 
 function Store:read(path)
@@ -1058,6 +1084,38 @@ function Store:paintResults(bb, v, bottom)
     local typing = self:keyboardUp()
     local rh = S(108)
     local foot = typing and 0 or S(60)
+    -- on this device: your own books that match, above the store's (the
+    -- first page of a typed search)
+    local mine = v.typed and v.mine or {}
+    if #mine > 0 and (v.page or 1) == 1 then
+        local n = math.min(#mine, typing and 2 or 3)
+        local mh = S(66)
+        Look.label(bb, T(#mine == 1 and _("On this device · %1 book") or _("On this device · %1 books"), #mine), x, y - S(4), w, S(18), 9, {})
+        y = y + S(18)
+        local mcw, mch = S(36), S(54)
+        for k = 1, n do
+            local b = mine[k]
+            local ry = y + (k - 1) * mh
+            local okc = pcall(function()
+                require("bos_cover").paint(bb, b.filepath, x, ry, mcw, mch, { shadow = Look.SHADOW_SMALL, title = b.title })
+            end)
+            if not okc then Look.box(bb, x, ry, mcw, mch, {}) end
+            local tx = x + mcw + S(18)
+            local tw = w - (tx - x) - S(110)
+            Page.wrap(bb, b.title or "", tface(14, true), tx, ry + S(2), tw, 1, S(22))
+            local who = b.authors and b.authors[1] or ""
+            if who ~= "" then Page.wrap(bb, who, Look.serif(12, false, true), tx, ry + S(26), tw, 1, S(18)) end
+            local state = (b.status == "complete" and _("Finished")) or (b.pct and b.pct > 0 and T(_("%1% read"), math.floor(b.pct * 100 + 0.5))) or _("Not started")
+            Look.button(bb, x + w - S(96) - Look.SHADOW_SMALL, ry + S(8), S(96), S(38), _("Read") .. " \u{203A}", { size = 11 })
+            Look.label(bb, state, tx, ry + mch - S(10), tw, S(16), 9, { color = Look.GRAY })
+            self:hit(Geom:new{ x = 0, y = ry - S(4), w = W, h = mh }, function() self:read(b.filepath) end)
+        end
+        y = y + n * mh + S(4)
+        bb:paintRect(x, y, w, Look.LINE, Look.INK)
+        y = y + S(14)
+        Look.label(bb, _("In the store"), x, y - S(4), w, S(18), 9, {})
+        y = y + S(18)
+    end
     local per = math.max(1, math.floor((bottom - y - foot) / rh))
     if #v.books == 0 then
         local msg
