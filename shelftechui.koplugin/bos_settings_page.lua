@@ -30,7 +30,7 @@ local S = UI.S
 
 local Page = {}
 
-Page.VERSION = "1.5.1"
+Page.VERSION = "1.5.2"
 
 -- Dispatcher's sub-menus edit tables in place and flag `caller.updated`.
 local saver = setmetatable({}, { __newindex = function() Store.save() end })
@@ -778,8 +778,21 @@ function Page.sections(plugin)
         end
     end
 
-    local home = { id = "stui_home", name = _("Home"), icon = "home", items = { { heading = _("Home screen") } } }
-    pick(home.items, { _("Home layout"), _("Status bar"), _("Swipe down on home"), _("Reading summary"), _("Insights in the reading summary"),
+    local home = { id = "stui_home", name = _("Home"), icon = "home", items = { { heading = _("Home layout") } } }
+    -- one tap each: what home shows
+    do
+        local L = require("bos_layouts")
+        for _i, id in ipairs(L.ORDER) do
+            table.insert(home.items, {
+                text = L.NAMES[id], radio = true,
+                description = L.DESC[id] .. " " .. _("(To switch from home itself, add the Layout chip to the home bar: Status bar, below.)"),
+                checked_func = function() return L.id() == id end,
+                callback = function() L.set(id) end,
+            })
+        end
+    end
+    table.insert(home.items, { heading = _("Home screen") })
+    pick(home.items, { _("Status bar"), _("Swipe down on home"), _("Reading summary"), _("Insights in the reading summary"),
         _("Edge swipes on home"), _("Start menu entries"), _("Settings in the start menu") })
     table.insert(home.items, { heading = _("Library") })
     pick(home.items, { _("Library"), _("For you") })
@@ -899,13 +912,15 @@ function Page.sections(plugin)
             end
         end
     end
-    table.insert(system.items, { heading = _("Updates") })
-    for _i, it in ipairs(require("bos_update").settingsItems()) do table.insert(system.items, it) end
+    -- Updates at the top of System: ShelfTechUI's first, then KOReader's
+    local upd = { { heading = _("Updates") } }
+    for _i, it in ipairs(require("bos_update").settingsItems()) do table.insert(upd, it) end
     if ko_update then
         local k = renamed(ko_update, _("KOReader updates"))
         k.description = _("KOReader itself (not ShelfTechUI): KOReader's own updater, for a new KOReader version.")
-        table.insert(system.items, k)
+        table.insert(upd, k)
     end
+    for i = #upd, 1, -1 do table.insert(system.items, 1, upd[i]) end
     table.insert(system.items, { heading = _("ShelfTechUI") })
     pick(system.items, { _("About ShelfTechUI"), _("Reset all ShelfTechUI settings") })
 
@@ -1014,26 +1029,6 @@ function Page.items()
                         callback = function() Dev.setSize(p) end })
                 end
                 return sub
-            end,
-        },
-        {
-            text = _("Home layout"),
-            description = _("What home shows: Shelf (Bookshelf's home), Read (a row for each shelf) or Dash (cards and one row of covers). Also the Layout chip on the home bar, and the ▦ key at the top of Read and Dash."),
-            mandatory_func = function()
-                local L = require("bos_layouts")
-                return L.NAMES[L.id()]
-            end,
-            sub_item_table_func = function()
-                local L = require("bos_layouts")
-                local items = {}
-                for _i, id in ipairs(L.ORDER) do
-                    table.insert(items, {
-                        text = L.NAMES[id], description = L.DESC[id], radio = true,
-                        checked_func = function() return L.id() == id end,
-                        callback = function() L.set(id) end,
-                    })
-                end
-                return items
             end,
         },
         {

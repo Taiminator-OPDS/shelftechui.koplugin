@@ -284,17 +284,17 @@ function BookshelfOS:init()
     end
     -- home layouts (Shelf, Read, Dash): after the edge swipes, so theirs pass through
     pcall(function() require("bos_layouts").install() end)
-    -- the Layout chip on the home bar, once, so Read and Dash are a tap away
+    -- 1.4.0 put the Layout chip on the home bar unasked; it's now yours to add
+    -- (Settings → Home → Status bar), so take that one back off, once
     local LStore = require("bos_settings_store")
-    if not LStore.get("layout_chip_seeded") then
+    if LStore.get("layout_chip_seeded") and not LStore.get("layout_chip_unseeded") then
         pcall(function()
             local Controls = require("bos_controls")
-            local ids = { unpack(Controls.ids("home")) }
-            local has = false
-            for _i, id in ipairs(ids) do if id == "layout" then has = true end end
-            if not has then table.insert(ids, 1, "layout") Controls.setIds("home", ids) end
+            local ids = {}
+            for _i, id in ipairs(Controls.ids("home")) do if id ~= "layout" then table.insert(ids, id) end end
+            Controls.setIds("home", ids)
         end)
-        LStore.set("layout_chip_seeded", true)
+        LStore.set("layout_chip_unseeded", true)
     end
     self:warnReplaced()
 end

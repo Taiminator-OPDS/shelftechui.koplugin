@@ -249,6 +249,27 @@ local function hit(rect, fn, hold, opts)
     table.insert(st.hits, { rect = rect, fn = fn, hold = hold, flash = not (opts and opts.no_flash) })
 end
 
+--- Bookshelf's start menu, opening down from the ☰ key at the top of Read
+--- and Dash (Bookshelf's own key is at the bottom of the shelf, and its menu
+--- grew up from there, across the screen from the key that was tapped).
+--- A tap on the key while the menu is open lands on the menu's window, which
+--- closes it, as with Bookshelf's own key.
+function M.openStartMenu(bw, key)
+    local Park = package.loaded["lib/bookshelf_reader_park"]
+    if Park and Park.isParked and Park.isParked() then
+        -- a book is parked under home: Bookshelf closes it first (its own path)
+        return pcall(bw._openStartMenu, bw, true)
+    end
+    local okS, StartMenu = pcall(require, "lib/bookshelf_start_menu")
+    if not (okS and StartMenu and StartMenu.open) then return pcall(bw._openStartMenu, bw, true) end
+    local inset = key.y + key.h + S(6)
+    local ok, err = pcall(StartMenu.open, bw, inset, key, "library", nil, true, "left")
+    if not ok then
+        logger.warn("ShelfTechUI: start menu from the top:", err)
+        pcall(bw._openStartMenu, bw, true)
+    end
+end
+
 --- Choose a layout from a list under `anchor`.
 function M.choose(anchor)
     local items = {}
@@ -277,14 +298,11 @@ local function drawTop(bw, bb, W, pad)
     local bh, kw, gap = S(40), S(46), S(10)
     local x = pad
     local r = glyphButton(bb, x, y, kw, bh, UI.GLYPH.bars)
-    hit(r, function() pcall(bw._openStartMenu, bw, true) end)
+    local menu_key = r
+    hit(r, function() M.openStartMenu(bw, menu_key) end, nil, { no_flash = true })
     x = x + kw + gap + Look.SHADOW_SMALL
     r = glyphButton(bb, x, y, kw, bh, UI.GLYPH.search)
     hit(r, function() UIManager:sendEvent(Event:new("ShowFileSearch")) end)
-    x = x + kw + gap + Look.SHADOW_SMALL
-    r = glyphButton(bb, x, y, kw, bh, UI.GLYPH.grid_large)
-    local anchor = r
-    hit(r, function() M.choose(anchor) end)
     x = x + kw + gap + Look.SHADOW_SMALL
     -- your home chips (bos_statusbar), right-aligned in what's left
     local bar_w = W - pad - x
@@ -292,11 +310,7 @@ local function drawTop(bw, bb, W, pad)
     if bar_w > S(60) and Store.get("home_status_bar") ~= false then
         if not st.bar or st.bar.width ~= bar_w then
             local ok, bar = pcall(function()
-                -- (not the Layout chip: the ▦ key is right there)
-                local chips = {}
-                for _i, c in ipairs(require("bos_controls").shown("home")) do
-                    if c.id ~= "layout" then table.insert(chips, c) end
-                end
+                local chips = require("bos_controls").shown("home")
                 if #chips == 0 then return nil end
                 return require("bos_statusbar"):new{ width = bar_w, chips = chips }
             end)

@@ -2,6 +2,12 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.5.2
+
+- **Updates are at the top of Settings → System**: Check for ShelfTechUI updates first, then KOReader's own updater (named KOReader updates).
+- **The start menu on Read and Dash** opens down from the ☰ key at the top, where you tapped, instead of growing up from the bottom of the screen.
+- **Switching layouts moved to the Settings app**: Settings → Home now starts with Shelf, Read and Dash, one tap each. The layout key is gone from the top of Read and Dash, and the Layout chip is off the home bar; add it back yourself if you want it (Settings → Home → Status bar). Hold it for the next layout.
+
 ## 1.5.1
 
 - Settings → System → Updates: **Check for ShelfTechUI updates** comes first. KOReader's own updater (it updates KOReader, not ShelfTechUI) is moved there too, as **KOReader updates**, instead of an "Update" row among the shortcuts.
