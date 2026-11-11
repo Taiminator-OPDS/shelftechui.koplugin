@@ -277,6 +277,11 @@ function BookshelfOS:init()
     if okH and Home.install() then
         UIManager:nextTick(function() Home.refresh() end)
     end
+    -- updates from GitHub: once a day, on Wi-Fi (Settings → System → Updates)
+    if not self.ui.document and not BookshelfOS._update_scheduled then
+        BookshelfOS._update_scheduled = true
+        UIManager:scheduleIn(20, function() pcall(function() require("bos_update").autoCheck() end) end)
+    end
     -- home layouts (Shelf, Read, Dash): after the edge swipes, so theirs pass through
     pcall(function() require("bos_layouts").install() end)
     -- the Layout chip on the home bar, once, so Read and Dash are a tap away
@@ -395,6 +400,10 @@ end
 function BookshelfOS:onStuiTransferToggle()
     require("bos_transfer").toggle()
     return true
+end
+
+function BookshelfOS:onNetworkConnected()
+    UIManager:scheduleIn(10, function() pcall(function() require("bos_update").autoCheck() end) end)
 end
 
 function BookshelfOS:onStuiHomeLayout()

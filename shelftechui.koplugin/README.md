@@ -2,7 +2,7 @@
 
 A complete retro-tech interface for KOReader, with **Bookshelf**, **Glimpse** and **Bookdrop** built in.
 
-ShelfTechUI is Bookshelf OS and AndyHazz's Bookshelf home screen merged into one plugin, in one design language: square boxes with a 2px outline and a hard black shadow, pinstriped title strips, monospaced bold capitals for chrome, pinstriped tracks with square handles.
+ShelfTechUI is a fork of AndyHazz's Bookshelf home screen
 
 ## What's in it
 
@@ -31,12 +31,12 @@ ShelfTechUI is Bookshelf OS and AndyHazz's Bookshelf home screen merged into one
 
 ## Install
 
-**With Storefront** (recommended: you get updates): in Storefront, search for *ShelfTechUI* and install it. New releases then show up in Storefront's Updates. Before the first install, do step 1 below.
+**Updates** come from inside ShelfTechUI: Settings → System → Updates checks this repository's releases (once a day on Wi-Fi, or when you tap Check for updates), shows what's new, installs, and keeps the previous version so you can go back. Storefront can also install and update it (search for *shelftechui*).
 
 **By hand:**
 
 1. **Delete** `bookshelf.koplugin` and `bookshelfos.koplugin` from `koreader/plugins` (ShelfTechUI includes both; with them still there it only asks you to remove them). Delete `glimpse.koplugin`, `bookdrop.koplugin` and `filebrowserplus.koplugin` too: all three are built in now (start ShelfTechUI once before deleting FilebrowserPlus, so its password is taken over). Also delete the older `shortcutstoolbar`, `kobotoolbar` and `settingshub` plugins if you still have them.
-2. Download `shelftechui.koplugin.zip` from the [latest release](https://github.com/Taiminator-OPDS/Koreader-UI-shell/releases/latest) and unzip it into `koreader/plugins` (you get `koreader/plugins/shelftechui.koplugin`).
+2. Download `shelftechui.koplugin.zip` from the [latest release](https://github.com/Taiminator-OPDS/shelftechui.koplugin/releases/latest) and unzip it into `koreader/plugins` (you get `koreader/plugins/shelftechui.koplugin`).
 3. Restart KOReader.
 
 Your Bookshelf settings (shelves, chips, start menu, themes) and your Bookshelf OS settings carry over.

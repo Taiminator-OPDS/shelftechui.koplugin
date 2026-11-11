@@ -30,7 +30,7 @@ local S = UI.S
 
 local Page = {}
 
-Page.VERSION = "1.4.1"
+Page.VERSION = "1.5.0"
 
 -- Dispatcher's sub-menus edit tables in place and flag `caller.updated`.
 local saver = setmetatable({}, { __newindex = function() Store.save() end })
@@ -884,6 +884,8 @@ function Page.sections(plugin)
             break
         end
     end
+    table.insert(system.items, { heading = _("Updates") })
+    for _i, it in ipairs(require("bos_update").settingsItems()) do table.insert(system.items, it) end
     table.insert(system.items, { heading = _("ShelfTechUI") })
     pick(system.items, { _("About ShelfTechUI"), _("Reset all ShelfTechUI settings") })
 
