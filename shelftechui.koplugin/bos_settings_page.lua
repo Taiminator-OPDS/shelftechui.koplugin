@@ -30,7 +30,7 @@ local S = UI.S
 
 local Page = {}
 
-Page.VERSION = "1.5.4"
+Page.VERSION = "1.6.0"
 
 -- Dispatcher's sub-menus edit tables in place and flag `caller.updated`.
 local saver = setmetatable({}, { __newindex = function() Store.save() end })
@@ -806,6 +806,8 @@ function Page.sections(plugin)
         _("ShelfTechUI text sheet"), _("Glimpse") })
     fold(reading, "navi", _("Navigation"))
     fold(reading, "typeset", _("Typesetting"))
+    table.insert(reading.items, { heading = _("Wrapped: your year in books") })
+    for _i, it in ipairs(require("bos_wrapped").settingsItems()) do table.insert(reading.items, it) end
 
     local look = { id = "stui_look", name = _("Look"), icon = "appbar.contrast", items = Page.themeItems() }
     -- (the note at the end of the themes moves under the fine-tuning)

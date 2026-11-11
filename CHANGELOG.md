@@ -2,6 +2,12 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.6.0
+
+- **Wrapped: your year in books.** A story of full-screen cards, drawn in your theme: the hours you read and each month's share, the books you finished (a wall of their covers), the book of your year, your top authors and genres, when you read (your hour, busiest day, longest streak), your reader type (one of 30), the lines you marked, and the year on one page, which you can save as a picture and use as your sleep screen. Tap the right of the screen for the next card, the left to go back; swipe down to close.
+- **The long haul**: a card that shows only when you finished a book this year that you started in an earlier one, with how many days it took.
+- From 1 December a card on home tells you your year is ready (once, never over a book); if you haven't opened it by New Year, it reminds you once in January. Open it any time from Settings → Reading → Wrapped (this year so far, or last year), or give it a gesture (ShelfTechUI: Wrapped). Everything is worked out on the device from Reading statistics and your books' highlights; nothing is sent anywhere.
+
 ## 1.5.4
 
 - **Faster start.** Home no longer waits for parts only a book or the store needs: the manga reader (and the whole reader it pulled in), the text sheet, and the hooks for the skim bar, pins, highlight handles and book search now load with the first book or the first visit to the store. About 10% less work before home appears.

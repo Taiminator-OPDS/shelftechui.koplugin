@@ -284,6 +284,10 @@ function BookshelfOS:init()
         BookshelfOS._update_scheduled = true
         UIManager:scheduleIn(20, function() pcall(function() require("bos_update").autoCheck() end) end)
     end
+    -- Wrapped: from 1 December, a card on home (once), and in January once more
+    if not self.ui.document then
+        UIManager:scheduleIn(8, function() BookshelfOS.wrappedNote() end)
+    end
     -- home layouts (Shelf, Read, Dash): after the edge swipes, so theirs pass through
     pcall(function() require("bos_layouts").install() end)
     -- 1.4.0 put the Layout chip on the home bar unasked; it's now yours to add
@@ -337,6 +341,9 @@ function BookshelfOS:onDispatcherRegisterActions()
     })
     Dispatcher:registerAction("stui_home_layout", {
         category = "none", event = "StuiHomeLayout", title = _("ShelfTechUI: next home layout"), general = true,
+    })
+    Dispatcher:registerAction("stui_wrapped", {
+        category = "none", event = "StuiWrapped", title = _("ShelfTechUI: Wrapped (your year in books)"), general = true,
     })
     Dispatcher:registerAction("stui_store", {
         category = "none", event = "StuiStore", title = _("ShelfTechUI: Store"), general = true,
@@ -406,6 +413,27 @@ end
 
 function BookshelfOS:onNetworkConnected()
     UIManager:scheduleIn(10, function() pcall(function() require("bos_update").autoCheck() end) end)
+end
+
+--- Wrapped's card, only over home itself (not a book, not a dialog).
+function BookshelfOS.wrappedNote()
+    pcall(function()
+        local W = require("bos_wrapped")
+        local stack = UIManager._window_stack
+        local top = stack and stack[#stack] and stack[#stack].widget
+        local okS, Shelf = pcall(require, "bos_shelf")
+        local home = okS and Shelf.shelfWidget and Shelf.shelfWidget()
+        if home and top == home then W.maybeNotify() end
+    end)
+end
+
+function BookshelfOS:onResume()
+    if not self.ui.document then UIManager:scheduleIn(3, function() BookshelfOS.wrappedNote() end) end
+end
+
+function BookshelfOS:onStuiWrapped()
+    require("bos_wrapped").open()
+    return true
 end
 
 function BookshelfOS:onStuiHomeLayout()
