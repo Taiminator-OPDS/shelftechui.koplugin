@@ -31,7 +31,7 @@ ShelfTechUI is a fork of AndyHazz's Bookshelf home screen
 
 ## Install
 
-**Updates** come from inside ShelfTechUI: Settings → System → Updates checks this repository's releases (once a day on Wi-Fi, or when you tap Check for updates), shows what's new, installs, and keeps the previous version so you can go back. Storefront can also install and update it (search for *shelftechui*).
+**Updates** come from inside ShelfTechUI: Settings → System → Updates checks this repository's releases (once a day on Wi-Fi, or when you tap Check for ShelfTechUI updates), shows what's new, installs, and keeps the previous version so you can go back. Storefront can also install and update it (search for *shelftechui*).
 
 **By hand:**
 

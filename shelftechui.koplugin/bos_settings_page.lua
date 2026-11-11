@@ -30,7 +30,7 @@ local S = UI.S
 
 local Page = {}
 
-Page.VERSION = "1.5.0"
+Page.VERSION = "1.5.1"
 
 -- Dispatcher's sub-menus edit tables in place and flag `caller.updated`.
 local saver = setmetatable({}, { __newindex = function() Store.save() end })
@@ -884,8 +884,28 @@ function Page.sections(plugin)
             break
         end
     end
+    -- KOReader's own "Update" (its OTA menu) sits in its main tab: it updates
+    -- KOReader, not ShelfTechUI. Taken out of the shortcuts and put under
+    -- Updates, after ShelfTechUI's, named for what it updates.
+    local ko_update
+    do
+        local C_ = _.pgettext or function(_ctx, t) return _(t) end
+        local names = { [C_("Application update | Menu", "Update")] = true, [_("Update")] = true }
+        for i = #system.items, 1, -1 do
+            local it = system.items[i]
+            if not it.heading and names[it.text] then
+                ko_update = table.remove(system.items, i)
+                break
+            end
+        end
+    end
     table.insert(system.items, { heading = _("Updates") })
     for _i, it in ipairs(require("bos_update").settingsItems()) do table.insert(system.items, it) end
+    if ko_update then
+        local k = renamed(ko_update, _("KOReader updates"))
+        k.description = _("KOReader itself (not ShelfTechUI): KOReader's own updater, for a new KOReader version.")
+        table.insert(system.items, k)
+    end
     table.insert(system.items, { heading = _("ShelfTechUI") })
     pick(system.items, { _("About ShelfTechUI"), _("Reset all ShelfTechUI settings") })
 

@@ -482,7 +482,7 @@ end
 function M.settingsItems()
     return {
         {
-            text = _("Check for updates"),
+            text = _("Check for ShelfTechUI updates"),
             description = _("Asks GitHub for a newer ShelfTechUI (Wi-Fi). If there is one, it shows what's new, then downloads it, checks it and restarts KOReader. Nothing changes if anything goes wrong."),
             mandatory_func = function()
                 local rel = M.available()

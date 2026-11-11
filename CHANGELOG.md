@@ -2,6 +2,10 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.5.1
+
+- Settings → System → Updates: **Check for ShelfTechUI updates** comes first. KOReader's own updater (it updates KOReader, not ShelfTechUI) is moved there too, as **KOReader updates**, instead of an "Update" row among the shortcuts.
+
 ## 1.5.0
 
 - **Updates from inside ShelfTechUI.** Settings → System → Updates: Check for updates shows what's new and installs it (KOReader restarts). It also checks once a day on Wi-Fi and offers a new version on home, never over a book. A download is checked before anything changes, and the previous version is kept: "Go back to …" puts it back. Beta versions are opt-in.
