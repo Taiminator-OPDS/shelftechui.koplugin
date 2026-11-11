@@ -2,6 +2,10 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.5.3
+
+- The Parchment theme is gone: its torn edges and grey paper didn't show well on e-ink. If you were using it, ShelfTechUI is back on Retro; pick another theme in Settings → Look. (Its three IM Fell fonts are removed too: the plugin is about 250 KB smaller.)
+
 ## 1.5.2
 
 - **Updates are at the top of Settings → System**: Check for ShelfTechUI updates first, then KOReader's own updater (named KOReader updates).

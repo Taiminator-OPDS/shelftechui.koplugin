@@ -30,7 +30,7 @@ local S = UI.S
 
 local Page = {}
 
-Page.VERSION = "1.5.2"
+Page.VERSION = "1.5.3"
 
 -- Dispatcher's sub-menus edit tables in place and flag `caller.updated`.
 local saver = setmetatable({}, { __newindex = function() Store.save() end })
@@ -684,7 +684,7 @@ local function toolbarItems()
     }
 end
 
---- Themes: the whole interface in one of seven looks. Takes effect after a
+--- Themes: the whole interface in one of six looks. Takes effect after a
 --- restart (the theme is read once, at start), which it offers at once.
 function Page.themeItems()
     local Theme = require("bos_theme")
@@ -1123,7 +1123,7 @@ function Page.items()
             callback = function()
                 UIManager:show(InfoMessage:new{
                     text = _("ShelfTechUI") .. " " .. Page.VERSION .. "\n\n"
-                        .. _("A complete retro-tech interface for KOReader: home, reading toolbar, Quick Settings, text sheet, Contents, Notebook, Pages, pinned pages, seven themes and a Settings app.") .. "\n\n"
+                        .. _("A complete retro-tech interface for KOReader: home, reading toolbar, Quick Settings, text sheet, Contents, Notebook, Pages, pinned pages, six themes and a Settings app.") .. "\n\n"
                         .. _("Includes Bookshelf by AndyHazz, Glimpse by Erik Fanki and the Bookdrop store with RakuYomi (all AGPL-3.0), in ShelfTechUI's themes; Bookshelf's own settings are under its tab. The reading toolbar is based on the Kobo-style toolbar by Lina (nessnos, MIT). Inspired by Shortcuts Toolbar by xusoo and KoboUI by nessnos, and by ideas from Aleph (BookOrbit); no Aleph code is used."),
                 })
             end,

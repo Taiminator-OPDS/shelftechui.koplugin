@@ -190,28 +190,6 @@ local function outline(bb, x, y, w, h, t, c)
 end
 L.outline = outline
 
---- A small deterministic "random" (torn edges look the same on every redraw).
-local function jag(n, amp)
-    n = (n * 1103515245 + 12345) % 2147483648
-    return math.floor(n / 65536) % (amp + 1)
-end
-
---- Erases ragged bites (to white) along the edges of x,y,w,h.
-local function tear(bb, x, y, w, h, amp)
-    local step = math.max(2, S(3))
-    local seed = x * 7 + y * 13
-    for i = 0, w - 1, step do
-        local sw = math.min(step, w - i)
-        bb:paintRect(x + i, y, sw, jag(seed + i, amp), WHITE)
-        bb:paintRect(x + i, y + h - jag(seed + i * 3 + 1, amp), sw, amp + 1, WHITE)
-    end
-    for i = 0, h - 1, step do
-        local sh = math.min(step, h - i)
-        bb:paintRect(x, y + i, jag(seed + i * 5 + 2, amp), sh, WHITE)
-        bb:paintRect(x + w - jag(seed + i * 7 + 3, amp), y + i, amp + 1, sh, WHITE)
-    end
-end
-
 local function dashedH(bb, x, y, w, t, c)
     local d, g = S(4), S(3)
     for xx = x, x + w - 1, d + g do bb:paintRect(xx, y, math.min(d, x + w - xx), t, c) end
@@ -335,12 +313,6 @@ function L.box(bb, x, y, w, h, opts)
         end
         return
     end
-    if f == "torn" then
-        bb:paintRect(x, y, w, h, fill)
-        if b > 0 and opts.color then outline(bb, x, y, w, h, 1, c) end
-        tear(bb, x, y, w, h, math.max(1, math.min(S(3), math.floor(math.min(w, h) / 8))))
-        return
-    end
     if b > 0 then
         bb:paintRect(x, y, w, h, c)
         bb:paintRect(x + b, y + b, w - 2 * b, h - 2 * b, fill)
@@ -362,7 +334,7 @@ end
 
 --- Over a frame KOReader drew itself (a plain outline, `b` thick): the
 --- theme's details (Fantasy's double rule, Sci-fi's corner brackets,
---- Rustic's stitching, Parchment's torn edge).
+--- Rustic's stitching).
 function L.decorate(bb, x, y, w, h, b)
     b = b or L.LINE
     local f = th.frame
@@ -381,8 +353,6 @@ function L.decorate(bb, x, y, w, h, b)
         dashedH(bb, x + i + S(3), y + h - i - 1, w - 2 * i - S(6), 1, L.MID)
         dashedV(bb, x + i, y + i + S(3), h - 2 * i - S(6), 1, L.MID)
         dashedV(bb, x + w - i - 1, y + i + S(3), h - 2 * i - S(6), 1, L.MID)
-    elseif f == "torn" then
-        tear(bb, x, y, w, h, math.max(1, math.min(S(3), math.floor(math.min(w, h) / 8))))
     end
 end
 
@@ -425,20 +395,6 @@ function L.edge(bb, x, y, w, dir, sh)
     local t = th.frame == "double" and 1 or L.LINE
     local c = th.ink
     local s = th.shadow
-    if th.frame == "torn" then
-        -- a ripped edge: the panel's paper, bitten
-        local amp = S(6)
-        local step = math.max(2, S(3))
-        for i = 0, w - 1, step do
-            local d = jag(x + i * 11 + y, amp)
-            if dir > 0 then
-                bb:paintRect(x + i, y, math.min(step, w - i), d, th.paper)
-            else
-                bb:paintRect(x + i, y - d, math.min(step, w - i), d, th.paper)
-            end
-        end
-        return
-    end
     local ry = dir > 0 and (y - t) or y
     bb:paintRect(x, ry, w, t, c)
     if th.frame == "double" then
@@ -472,11 +428,6 @@ local function knobShape(bb, cx, cy, held, big)
     elseif k == "bar" then
         local h = big and S(30) or S(24)
         bb:paintRect(cx - S(2), cy - math.floor(h / 2), S(4), h, held and L.GRAY or BLACK)
-    elseif k == "seal" then
-        local r = big and S(13) or S(11)
-        disc(bb, cx, cy, r + S(2), L.MID)
-        disc(bb, cx, cy, r, held and BLACK or Blitbuffer.COLOR_GRAY_3)
-        disc(bb, cx, cy, math.floor(r / 2), Blitbuffer.COLOR_GRAY_5)
     elseif k == "ribbon" then
         local w, h = S(12), big and S(32) or S(28)
         local x0, y0 = cx - math.floor(w / 2), cy - S(6)

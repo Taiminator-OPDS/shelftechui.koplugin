@@ -1,5 +1,5 @@
 --[[
-ShelfTechUI's themes: the whole interface in one of seven looks. A theme is a
+ShelfTechUI's themes: the whole interface in one of six looks. A theme is a
 table of design decisions that bos_look (and the few screens that draw for
 themselves) read instead of fixed values, so a theme costs nothing extra to
 draw. The book's own page is never themed: it keeps your reading font.
@@ -9,7 +9,6 @@ draw. The book's own page is never themed: it keeps your reading font.
   fantasy    double rules with a hairline frame, Roman capitals, a diamond handle
   scifi      hairline frames with corner brackets, segmented meters, terminal type
   rustic     stitched seams, worn corners, grey shadows, slab serif
-  parchment  flat scraps of paper with torn edges, a wax-seal handle
   book       pages with the page block at their edge, dog-ears, a ribbon handle
 
 The theme is read once, when KOReader starts (Settings → Themes asks to
@@ -23,7 +22,7 @@ Fields:
   text       the reading-UI face (lists, rows, Bookshelf's home, dialogs), same
              shape (nil: Bookshelf's chosen font, as without themes)
   line       outline width (unscaled px)
-  frame      square | round | double | brackets | stitched | torn | page
+  frame      square | round | double | brackets | stitched | page
   radius     corner radius (round, stitched)
   shadow     hard | soft | none | pages
   shade      the shadow's colour
@@ -31,7 +30,7 @@ Fields:
   band       title-strip decoration: stripes | none | double | ticks | dashed | rule
   fill       a bar's empty part: stripes | solid | segments | hatch
   track      stripes | pill | line | segments | groove | ribbon
-  knob       square | round | diamond | bar | seal | ribbon
+  knob       square | round | diamond | bar | ribbon
   glyph      icon stroke weight (1 = retro)
 --]]
 
@@ -42,7 +41,7 @@ local B, W = Blitbuffer.COLOR_BLACK, Blitbuffer.COLOR_WHITE
 
 local M = {}
 
-M.ORDER = { "retro", "modern", "fantasy", "scifi", "rustic", "parchment", "book" }
+M.ORDER = { "retro", "modern", "fantasy", "scifi", "rustic", "book" }
 
 M.THEMES = {
     retro = {
@@ -100,18 +99,6 @@ M.THEMES = {
         line = 2, frame = "stitched", radius = 7, shadow = "hard", shade = Blitbuffer.COLOR_GRAY_9,
         ink = Blitbuffer.COLOR_GRAY_3, paper = W, press = Blitbuffer.COLOR_GRAY_4,
         band = "dashed", fill = "hatch", track = "groove", knob = "round", glyph = 0.9,
-    },
-    parchment = {
-        name = _("Parchment"),
-        desc = _("Scrap paper: every panel, key and cover a flat torn-off scrap, no grain; the old printing-press type of IM Fell, a wax-seal handle."),
-        chrome = "stui-IMFellEnglishSC.ttf", synth = false, upper = false,
-        text = { regular = "stui-IMFellEnglish-Regular.ttf", bold = "stui-IMFellEnglishSC.ttf",
-            italic = "stui-IMFellEnglish-Italic.ttf", bolditalic = "stui-IMFellEnglish-Italic.ttf" },
-        serif = { regular = "stui-IMFellEnglish-Italic.ttf", bold = "stui-IMFellEnglish-Italic.ttf",
-            italic = "stui-IMFellEnglish-Italic.ttf", bolditalic = "stui-IMFellEnglish-Italic.ttf" },
-        line = 0, frame = "torn", radius = 0, shadow = "none", shade = B,
-        ink = Blitbuffer.COLOR_GRAY_5, paper = Blitbuffer.COLOR_GRAY_E, press = Blitbuffer.COLOR_GRAY_3,
-        band = "rule", fill = "solid", track = "groove", knob = "seal", glyph = 0.8,
     },
     book = {
         name = _("Book"),

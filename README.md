@@ -26,7 +26,7 @@ ShelfTechUI is a fork of AndyHazz's Bookshelf home screen
 | **Pinned pages** | PIN on the toolbar, or PIN PAGE on a selection | A badge on the page opens a drawer with your pins |
 | **Quick Settings** | Swipe down in a book | Tiles (X-Ray when it's installed), the Wi-Fi network name, light sliders |
 | **Text sheet (Aa)** | Swipe up, or the menu | KOReader's text options as a sheet |
-| **Themes** | Settings → Themes | Seven looks for the whole interface: Retro, Modern, Fantasy, Sci-fi, Rustic, Parchment, Book (frames, shadows, type, tracks, handles, shelves), across ShelfTechUI's screens, Bookshelf's home, the restyled KOReader screens (text sheet, dictionary, search, dialogs, lists), Glimpse and the store. KOReader restarts to apply one. The book's own page keeps your reading font |
+| **Themes** | Settings → Themes | Six looks for the whole interface: Retro, Modern, Fantasy, Sci-fi, Rustic, Book (frames, shadows, type, tracks, handles, shelves), across ShelfTechUI's screens, Bookshelf's home, the restyled KOReader screens (text sheet, dictionary, search, dialogs, lists), Glimpse and the store. KOReader restarts to apply one. The book's own page keeps your reading font |
 | **Settings app** | ⚙, start menu, the pull-down | One app, by what things are for: HOME · READING · LOOK · CONNECT · DEVICE · TOOLS · SYSTEM. KOReader's and Bookshelf's own menus are folded into the section they belong to, each row with a line of explanation |
 
 ## Install
@@ -49,7 +49,7 @@ Your Bookshelf settings (shelves, chips, start menu, themes) and your Bookshelf 
 - **Transfer** — takes over from **FilebrowserPlus** by Neeraj Patel (derived from KOReader's filebrowser.koplugin, AGPL-3.0) and runs the **File Browser** server (Apache-2.0, `transfer/NOTICE`). The bundled server is for 32-bit ARM e-readers (Kobo, Kindle, PocketBook).
 - **Kobo-style toolbar** by Lina (nessnos) — MIT, see `THIRD_PARTY_NOTICES.md`.
 - Inspired by **Shortcuts Toolbar** (xusoo) and **KoboUI** (nessnos), and by ideas from **Aleph** (BookOrbit): ShelfTechUI's versions are its own, written from the ideas; no Aleph code is used.
-- Theme fonts: **Cinzel**, **EB Garamond**, **Share Tech Mono**, **Orbitron**, **Zilla Slab**, **IM Fell English**, **Cormorant SC**, **Libre Caslon Text**: SIL OFL 1.1, see `fonts/CREDITS.md` and `fonts/OFL-themes.txt`.
+- Theme fonts: **Cinzel**, **EB Garamond**, **Share Tech Mono**, **Orbitron**, **Zilla Slab**, **Cormorant SC**, **Libre Caslon Text**: SIL OFL 1.1, see `fonts/CREDITS.md` and `fonts/OFL-themes.txt`.
 - Online picks use the **Open Library** API (openlibrary.org, Internet Archive); covers from covers.openlibrary.org.
 
 ShelfTechUI is released under AGPL-3.0 (`LICENSE`). Unofficial; not affiliated with AndyHazz, Erik Fanki, KOReader, Kobo or Amazon.

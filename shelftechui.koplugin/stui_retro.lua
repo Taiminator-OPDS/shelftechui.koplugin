@@ -64,8 +64,6 @@ function M.paintShelf(bb, x, top, w, surf, fh)
         end
         bb:paintRect(x, gy, w, Look.LINE, th.ink)
         bb:paintRect(x, gy + fh + S(2), w, Look.LINE, th.ink)
-    elseif id == "parchment" then
-        Look.box(bb, x, front_y - S(2), w, math.max(S(8), fh))
     elseif id == "book" then
         for k = 0, math.min(fh, S(7)) - 1 do
             bb:paintRect(x, front_y + k, w, 1, k % 2 == 0 and th.shade or WHITE)

@@ -27,7 +27,6 @@ The themes (Settings → Themes) use these, all under the SIL Open Font License 
 | Fantasy | `stui-Cinzel-Bold.ttf`, `stui-EBGaramond-Regular.ttf`, `stui-EBGaramond-SemiBold.ttf`, `stui-EBGaramond-SemiBoldItalic.ttf`, `stui-EBGaramond-Italic.ttf` | Cinzel, EB Garamond (Google Fonts) |
 | Sci-fi | `ShareTechMono-Regular.ttf`, `Orbitron-Variable.ttf` | Share Tech Mono, Orbitron (Google Fonts), **unmodified** (both have Reserved Font Names) |
 | Rustic | `stui-ZillaSlab-Regular.ttf`, `stui-ZillaSlab-SemiBold.ttf`, `stui-ZillaSlab-Bold.ttf`, `stui-ZillaSlab-Italic.ttf` | Zilla Slab (Mozilla) |
-| Parchment | `stui-IMFellEnglish-Regular.ttf`, `stui-IMFellEnglishSC.ttf`, `stui-IMFellEnglish-Italic.ttf` | IM Fell English (Igino Marini) |
 | Book | `stui-CormorantSC-Bold.ttf`, `stui-LibreCaslonText-Regular.ttf`, `stui-LibreCaslonText-Italic.ttf`, `stui-LibreCaslonText-Bold.ttf` | Cormorant SC, Libre Caslon Text (Google Fonts) |
 
 **Modification note:** the `stui-` files are modified versions: variable fonts instantiated at one weight, then subset to Latin (Basic, Latin-1, Extended-A) plus common punctuation and symbols, with hinting removed. None of those families declares a Reserved Font Name. Modern uses KOReader's own Noto Sans and the Inter ExtraBold above.
