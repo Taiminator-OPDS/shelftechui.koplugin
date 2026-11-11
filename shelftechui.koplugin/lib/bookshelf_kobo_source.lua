@@ -38,7 +38,7 @@ local function virtualLibrary()
     local ok_fm, FileManager = pcall(require, "apps/filemanager/filemanager")
     if ok_fm and FileManager and FileManager.instance then ui = FileManager.instance; src = "FileManager" end
     if not ui then
-        local ok_r, ReaderUI = pcall(require, "apps/reader/readerui")
+        local ok_r, ReaderUI = package.loaded["apps/reader/readerui"] ~= nil, package.loaded["apps/reader/readerui"]
         if ok_r and ReaderUI and ReaderUI.instance then ui = ReaderUI.instance; src = "ReaderUI" end
     end
     if not ui then

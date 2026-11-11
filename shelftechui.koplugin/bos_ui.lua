@@ -59,7 +59,7 @@ end
 
 --- The Bookshelf plugin instance of the current UI (reader or file manager).
 function M.bookshelfPlugin()
-    local ok, ReaderUI = pcall(require, "apps/reader/readerui")
+    local ok, ReaderUI = package.loaded["apps/reader/readerui"] ~= nil, package.loaded["apps/reader/readerui"]
     local ui = ok and ReaderUI.instance
     if not (ui and not ui.tearing_down) then
         local okf, FM = pcall(require, "apps/filemanager/filemanager")

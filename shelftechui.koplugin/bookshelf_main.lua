@@ -3286,7 +3286,7 @@ function Bookshelf:_evictHomescreenOverlay()
         -- shelf, so it cannot touch the reader - keep the eviction (#77
         -- SimpleUI defence) working while parked. The bail stays for an
         -- ACTIVE reader (on top of the shelf), the #82 hazard.
-        local ok_rui, ReaderUI = pcall(require, "apps/reader/readerui")
+        local ok_rui, ReaderUI = package.loaded["apps/reader/readerui"] ~= nil, package.loaded["apps/reader/readerui"]
         if ok_rui and ReaderUI and ReaderUI.instance
                 and not require("lib/bookshelf_reader_park").isParked() then
             return

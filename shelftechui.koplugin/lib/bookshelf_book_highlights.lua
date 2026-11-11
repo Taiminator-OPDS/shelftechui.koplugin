@@ -36,7 +36,7 @@ end
 function M.parentUI()
     local ok_fm, FileManager = pcall(require, "apps/filemanager/filemanager")
     if ok_fm and FileManager and FileManager.instance then return FileManager.instance end
-    local ok_r, ReaderUI = pcall(require, "apps/reader/readerui")
+    local ok_r, ReaderUI = package.loaded["apps/reader/readerui"] ~= nil, package.loaded["apps/reader/readerui"]
     if ok_r and ReaderUI and ReaderUI.instance then return ReaderUI.instance end
     return nil
 end

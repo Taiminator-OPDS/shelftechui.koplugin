@@ -1,6 +1,4 @@
 local rapidjson = require("rapidjson")
-local ChapterListing = require("ChapterListing")
-local LibraryView = require("LibraryView")
 local Backend = require("Backend")
 local Trapper = require("ui/trapper")
 
@@ -107,6 +105,9 @@ function Shared:openChapterListingFromFile(filepath, hideTopClose)
   local focus_manga_id = origin.manga_id.manga_id
   local focus_manga_source_id = origin.manga_id.source_id
 
+  -- (ShelfTechUI: loaded here, when used, not when this module loads)
+  local ChapterListing = require("ChapterListing")
+  local LibraryView = require("LibraryView")
   Trapper:wrap(function()
     ChapterListing:fetchAndShow(manga, function()
       LibraryView:fetchAndShow(nil, nil, {

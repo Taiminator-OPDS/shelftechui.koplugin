@@ -112,7 +112,7 @@ end
 -- data at the old path.
 function FileOps.inUsePaths()
     local set = {}
-    local ok, ReaderUI = pcall(require, "apps/reader/readerui")
+    local ok, ReaderUI = package.loaded["apps/reader/readerui"] ~= nil, package.loaded["apps/reader/readerui"]
     local rui = ok and ReaderUI and ReaderUI.instance or nil
     if rui and rui.document and rui.document.file then
         set[rui.document.file] = true

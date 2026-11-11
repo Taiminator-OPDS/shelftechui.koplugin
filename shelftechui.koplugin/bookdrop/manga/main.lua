@@ -8,8 +8,10 @@ local OfflineAlertDialog = require("OfflineAlertDialog")
 local Backend = require("Backend")
 local CbzDocument = require("extensions/CbzDocument")
 local ErrorDialog = require("ErrorDialog")
-local LibraryView = require("LibraryView")
-local MangaReader = require("MangaReader")
+-- ShelfTechUI: loaded when first used, not at start (they pull in the
+-- whole reader and chapter list: ~15 ms on a desktop, far more on an e-reader)
+local function LibraryView() return require("LibraryView") end
+local function MangaReader() return require("MangaReader") end
 local Testing = require("testing")
 
 require("RakuyomiShared")
@@ -28,7 +30,7 @@ local Rakuyomi = InputContainer:extend({
 -- so we should register to the menu accordingly
 function Rakuyomi:init()
   if self.ui.name == "ReaderUI" then
-    MangaReader:initializeFromReaderUI(self.ui)
+    MangaReader():initializeFromReaderUI(self.ui)
   else
     self.ui.menu:registerToMainMenu(self)
   end
@@ -49,7 +51,7 @@ end
 
 function Rakuyomi:onStartLibraryView()
   if self.ui.name == "ReaderUI" then
-    MangaReader:initializeFromReaderUI(self.ui)
+    MangaReader():initializeFromReaderUI(self.ui)
   else
     self:openLibraryView()
   end
@@ -85,7 +87,7 @@ function Rakuyomi:openLibraryView(options)
     return
   end
 
-  LibraryView:fetchAndShow(nil, nil, options)
+  LibraryView():fetchAndShow(nil, nil, options)
   OfflineAlertDialog:showIfOffline()
 end
 

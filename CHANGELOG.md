@@ -2,6 +2,11 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.5.4
+
+- **Faster start.** Home no longer waits for parts only a book or the store needs: the manga reader (and the whole reader it pulled in), the text sheet, and the hooks for the skim bar, pins, highlight handles and book search now load with the first book or the first visit to the store. About 10% less work before home appears.
+- **Read and Dash come back from a book quicker**: the book you just read moves to the front with its new progress, instead of the whole library being read again.
+
 ## 1.5.3
 
 - The Parchment theme is gone: its torn edges and grey paper didn't show well on e-ink. If you were using it, ShelfTechUI is back on Retro; pick another theme in Settings → Look. (Its three IM Fell fonts are removed too: the plugin is about 250 KB smaller.)

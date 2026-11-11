@@ -118,6 +118,31 @@ end
 
 function M.invalidate() lib = { gen = nil } end
 
+--- After reading: the order you opened books in (from the history), and
+--- `fp`'s progress, brought up to date without rebuilding the library (a
+--- rebuild reads every book's record: ~0.1 s per 300 books on an e-reader).
+function M.touch(fp)
+    if not lib.books then return end
+    local opened = {}
+    pcall(function()
+        for i, e in ipairs(require("readhistory").hist or {}) do
+            if e.file and not opened[e.file] then opened[e.file] = { time = e.time, rank = i } end
+        end
+    end)
+    local Repo = repo()
+    for _i, b in ipairs(lib.books) do
+        local o = opened[b.filepath]
+        b.opened, b.rank = o and o.time, o and o.rank
+        if fp and b.filepath == fp and Repo then
+            local okP, pct, status, rating = pcall(Repo.readProgress, fp)
+            if okP then
+                b.pct, b.status, b.rating = pct, status, tonumber(rating)
+                b.state = stateOf(b)
+            end
+        end
+    end
+end
+
 --- How well an unread book fits what you read.
 local function score(L, b)
     local s = 0

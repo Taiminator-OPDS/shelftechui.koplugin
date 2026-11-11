@@ -107,38 +107,35 @@ do
     if not ok then logger.warn("ShelfTechUI: retro shelf not applied:", err) end
 end
 
--- the text sheet patches KOReader's ConfigDialog class, once
-do
-    local ok, err = pcall(require, "bos_textsheet")
-    if not ok then logger.warn("ShelfTechUI: text sheet not applied:", err) end
-end
 
--- KOReader's skim bar opens ShelfTechUI's PAGES instead (when on)
-do
-    local ok, err = pcall(function() require("bos_nav").installSkim() end)
-    if not ok then logger.warn("ShelfTechUI: PAGES not hooked to the skim bar:", err) end
-end
 
--- the pins badge, highlight handles: class-level hooks, once
-do
-    local ok, err = pcall(function()
-        require("bos_pins").install()
-        require("bos_handles").install()
-    end)
-    if not ok then logger.warn("ShelfTechUI: pins badge / handles not installed:", err) end
-end
 
--- the search within a book, retro
-do
-    local ok, err = pcall(function() require("bos_search").install() end)
-    if not ok then logger.warn("ShelfTechUI: retro book search not installed:", err) end
-end
 
 -- Bookshelf look for KOReader's own screens (lists, dictionary, skim bar,
 -- search, toasts): class-level hooks, once
 do
     local ok, err = pcall(function() require("bos_skin").install() end)
     if not ok then logger.warn("ShelfTechUI: KOReader screens keep their look:", err) end
+end
+
+-- Hooks on KOReader's reader modules (the skim bar opens PAGES, the pins
+-- badge, highlight handles, the book search): installed with the first book,
+-- not at start, so home comes up without loading the reader's modules.
+-- Class methods are looked up when called, so hooking after the reader's
+-- modules exist is enough.
+local reader_hooks_done = false
+local function installReaderHooks()
+    if reader_hooks_done then return end
+    reader_hooks_done = true
+    for _i, step in ipairs{
+        { "PAGES not hooked to the skim bar", function() require("bos_nav").installSkim() end },
+        { "pins badge not installed", function() require("bos_pins").install() end },
+        { "highlight handles not installed", function() require("bos_handles").install() end },
+        { "retro book search not installed", function() require("bos_search").install() end },
+    } do
+        local ok, err = pcall(step[2])
+        if not ok then logger.warn("ShelfTechUI: " .. step[1] .. ":", err) end
+    end
 end
 
 local Settings = require("bos_settings")
@@ -270,6 +267,11 @@ function BookshelfOS:init()
     -- the Settings app in Bookshelf's start menu (once; Settings → Home to change)
     UIManager:nextTick(function() pcall(function() require("bos_startmenu").seed() end) end)
     if self.ui.document then
+        -- the text sheet patches KOReader's ConfigDialog class, once: only a
+        -- book has one, so it loads with the first book, not at start
+        installReaderHooks()
+        local okT, errT = pcall(require, "bos_textsheet")
+        if not okT then logger.warn("ShelfTechUI: text sheet not applied:", errT) end
         self.toolbar = require("bos_toolbar").new(self.ui)
     end
     -- Bookshelf home's status bar (Bookshelf's widget class, installed once)

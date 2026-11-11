@@ -16357,7 +16357,7 @@ function BookshelfWidget:_filePollTick()
         -- mtime baseline - re-arming via _startFilePoll re-baselines, which
         -- silently swallows any file that arrived while covered.
         local FilePoll = require("lib/bookshelf_file_poll")
-        local ok_rui, ReaderUI = pcall(require, "apps/reader/readerui")
+        local ok_rui, ReaderUI = package.loaded["apps/reader/readerui"] ~= nil, package.loaded["apps/reader/readerui"]
         local ok_park, Park = pcall(require, "lib/bookshelf_reader_park")
         local decision = FilePoll.coveredDecision{
             shelf_on_stack = UIManager:isWidgetShown(self) == true,

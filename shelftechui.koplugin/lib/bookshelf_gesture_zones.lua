@@ -263,7 +263,7 @@ local function _liveHost(open_book)
     local ok_fm, FM = pcall(require, "apps/filemanager/filemanager")
     local fm = ok_fm and FM and FM.instance
     if fm then return fm, false end
-    local ok_r, RUI = pcall(require, "apps/reader/readerui")
+    local ok_r, RUI = package.loaded["apps/reader/readerui"] ~= nil, package.loaded["apps/reader/readerui"]
     local rui = ok_r and RUI and RUI.instance
     if not rui then return nil end
     local ok_p, Park = pcall(require, "lib/bookshelf_reader_park")

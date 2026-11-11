@@ -220,7 +220,7 @@ end
 -- start menu is open in (#211). When in the reader we do NOT fall back to a
 -- parked FileManager menu -- that would capture/replay the wrong view's items.
 function MenuShortcut.buildMenuTree()
-    local ok_r, ReaderUI = pcall(require, "apps/reader/readerui")
+    local ok_r, ReaderUI = package.loaded["apps/reader/readerui"] ~= nil, package.loaded["apps/reader/readerui"]
     if ok_r and ReaderUI and ReaderUI.instance then
         return treeFromMenu(ReaderUI.instance.menu)
     end

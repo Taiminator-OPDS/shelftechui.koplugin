@@ -83,8 +83,14 @@ local data = { at = 0 }
 function M.invalidate()
     data = { at = 0 }
     st.bar = nil
+    -- the book just read moves up and shows its progress (not a library rebuild)
     local Recs = package.loaded["bos_recs"]
-    if Recs and Recs.invalidate then pcall(Recs.invalidate) end
+    if Recs and Recs.touch then
+        pcall(function()
+            local h = require("readhistory").hist
+            Recs.touch(h and h[1] and h[1].file)
+        end)
+    end
 end
 
 local function bookOf(b)

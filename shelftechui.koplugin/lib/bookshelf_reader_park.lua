@@ -75,7 +75,7 @@ function Park.enabled()
 end
 
 local function _readerInstance()
-    local ok, ReaderUI = pcall(require, "apps/reader/readerui")
+    local ok, ReaderUI = package.loaded["apps/reader/readerui"] ~= nil, package.loaded["apps/reader/readerui"]
     if ok and ReaderUI then return ReaderUI.instance end
     return nil
 end

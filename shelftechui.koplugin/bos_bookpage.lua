@@ -52,7 +52,7 @@ local function repo()
 end
 
 local function readerUI(fp)
-    local ok, ReaderUI = pcall(require, "apps/reader/readerui")
+    local ok, ReaderUI = package.loaded["apps/reader/readerui"] ~= nil, package.loaded["apps/reader/readerui"]
     local ui = ok and ReaderUI.instance
     if ui and ui.document and (not fp or ui.document.file == fp) then return ui end
 end
