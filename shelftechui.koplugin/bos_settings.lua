@@ -306,6 +306,20 @@ end
 
 --- Open the Settings app of the UI on screen.
 function Settings.open()
+    -- At home with a book still kept open under it (Bookshelf's parking),
+    -- the UI in charge is the book's: its Settings would be the reader's.
+    -- Finish closing the book first (as Bookshelf does for its own menus),
+    -- then open home's.
+    local Park = package.loaded["lib/bookshelf_reader_park"]
+    if type(Park) == "table" and Park.isParked and Park.isParked() and not Settings._finishing then
+        Settings._finishing = true
+        local ok = pcall(Park.runInFileManager, function() end)
+        Settings._finishing = false
+        if ok then
+            UIManager:nextTick(function() Settings.open() end)
+            return
+        end
+    end
     local s = Settings.top()
     if not s then
         logger.warn("ShelfTechUI: no UI to open the Settings app in")

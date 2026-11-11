@@ -2,6 +2,12 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.6.5
+
+- **Coming home from a book is lighter.** When you leave a book, Bookshelf keeps it open under home for a moment, and closes it properly before the start menu or Settings opens. Most of that close was KOReader rebuilding the file browser's list of your whole home folder, which sits hidden under Bookshelf's home. That list is now built only when the file browser is actually shown. Closing a book takes about half the time it did (more with a big library), so the start menu after a book opens sooner.
+- **Settings at home is home's.** Opened from home while the last book is still being kept open, Settings now closes the book first (as the start menu does) and shows home's settings, not the book's.
+- Clears the lists of Settings rows 1.6.3 saved (about 40 KB that KOReader wrote out every time a book closed).
+
 ## 1.6.4
 
 - Back to 1.6.2: 1.6.3's changes to the start menu and Settings are undone while their slowdown is looked into.

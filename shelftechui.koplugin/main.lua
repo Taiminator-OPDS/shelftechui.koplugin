@@ -199,6 +199,20 @@ function BookshelfOS:startBookdrop()
 end
 
 function BookshelfOS:init()
+    -- the file browser's list under home is built when it's seen (bos_fmlazy)
+    pcall(function() require("bos_fmlazy").install() end)
+    -- 1.6.3 kept two big lists of Settings rows in KOReader's settings file
+    -- (about 40 KB, written out each time a book closes): gone
+    if not BookshelfOS._rows_cleared then
+        BookshelfOS._rows_cleared = true
+        pcall(function()
+            local St = require("bos_settings_store")
+            if St.raw().settings_rows_fm ~= nil or St.raw().settings_rows_reader ~= nil then
+                St.set("settings_rows_fm", nil)
+                St.set("settings_rows_reader", nil)
+            end
+        end)
+    end
     self:startBookshelf()
     self:startGlimpse()
     self:startBookdrop()
