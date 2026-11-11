@@ -384,31 +384,6 @@ local function itemEnabled(item)
     return enabled ~= false
 end
 
---- Open section `sec_id` at the row called `name` (its stable part: the
---- value after a colon may have changed): marked, and opened if it's a menu.
-function HubScreen:openRow(sec_id, name)
-    local key = require("bos_settings_away").key
-    for idx, sec in ipairs(self.sections or {}) do
-        if sec.id == sec_id then
-            self:openSection(idx, true)
-            for _j, it in ipairs(sec.items or {}) do
-                if type(it) == "table" and not it.heading and not it.stui_away and key(itemText(it)) == key(name) then
-                    local sub = self:subTable(it)
-                    if sub and #sub > 0 then
-                        self:activate(it)
-                    else
-                        self.stack[#self.stack].target_item = it
-                        self:render()
-                    end
-                    return true
-                end
-            end
-            return false
-        end
-    end
-    return false
-end
-
 function HubScreen:subTable(item)
     return item.sub_item_table_func and item.sub_item_table_func() or item.sub_item_table
 end

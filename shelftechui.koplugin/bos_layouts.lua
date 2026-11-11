@@ -261,10 +261,11 @@ end
 --- A tap on the key while the menu is open lands on the menu's window, which
 --- closes it, as with Bookshelf's own key.
 function M.openStartMenu(bw, key)
-    -- (with a book parked under home too: it opens at once, and an entry
-    -- that needs the file browser finishes closing the book when tapped,
-    -- bos_shelf.installStartMenu)
-    pcall(function() require("bos_shelf").installStartMenu() end)
+    local Park = package.loaded["lib/bookshelf_reader_park"]
+    if Park and Park.isParked and Park.isParked() then
+        -- a book is parked under home: Bookshelf closes it first (its own path)
+        return pcall(bw._openStartMenu, bw, true)
+    end
     local okS, StartMenu = pcall(require, "lib/bookshelf_start_menu")
     if not (okS and StartMenu and StartMenu.open) then return pcall(bw._openStartMenu, bw, true) end
     local inset = key.y + key.h + S(6)
