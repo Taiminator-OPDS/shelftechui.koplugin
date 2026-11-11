@@ -2,6 +2,10 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.6.2
+
+- **Share the whole Wrapped**, not just the summary: Pictures now sends every card to your phone, in order, each as its own picture (hold one to save or share it, or Save all). The cards are also kept on the device, in your screenshots folder under wrapped-<year>.
+
 ## 1.6.1
 
 - **Share your Wrapped.** A last card (or Share › on the year-on-one-page card) shows a QR code for your phone:

@@ -3,11 +3,12 @@ Wrapped's sharing: your year on a phone, by a QR code.
 
   M.text(r)            the year as a few lines of text (the Text QR: needs
                        nothing, the phone reads the text straight from it)
-  M.start(png, r)      a small web server for the picture, on this Wi-Fi
-                       only, at a link with a random part nobody can guess;
-                       returns the link (nil without Wi-Fi). The page shows
-                       the picture (hold it to save or share it) and the
-                       text with a Copy key. It stops by itself after 10
+  M.start(files, r)    a small web server for the cards' pictures
+                       ({ { name, path }, … }), on this Wi-Fi only, at a link
+                       with a random part nobody can guess; returns the link
+                       (nil without Wi-Fi). The page shows every card in
+                       order (hold one to save or share it), Save all, and
+                       the text with a Copy key. It stops by itself after 10
                        minutes, and when Wrapped closes.
   M.stop()
   M.state              { url, opened = phones that opened the page }
@@ -56,7 +57,14 @@ local function esc(s)
     return (tostring(s or ""):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"):gsub('"', "&quot;"))
 end
 
-local function page(r, text)
+local function page(r, text, files)
+    local imgs, names = {}, {}
+    for i, f in ipairs(files) do
+        table.insert(imgs, '<figure><img src="' .. esc(f.name) .. '" alt="' .. esc(T(_("Card %1"), i)) .. '" loading="lazy">'
+            .. '<a class="w" href="' .. esc(f.name) .. '" download="wrapped-' .. r.year .. '-' .. esc(f.name) .. '">'
+            .. esc(T(_("Save card %1"), i)) .. "</a></figure>")
+        table.insert(names, '"' .. f.name .. '"')
+    end
     return table.concat({
         '<!doctype html><html lang="en"><head><meta charset="utf-8">',
         '<meta name="viewport" content="width=device-width,initial-scale=1">',
@@ -68,17 +76,20 @@ local function page(r, text)
         "font:inherit;border:2px solid #000;padding:8px;resize:vertical}",
         "a,button{display:inline-block;border:2px solid #000;background:#000;color:#fff;font:inherit;",
         "text-transform:uppercase;font-size:14px;padding:10px 16px;margin:6px 8px 6px 0;text-decoration:none;cursor:pointer}",
-        "a.w{background:#fff;color:#000}</style></head><body><main>",
+        "a.w{background:#fff;color:#000}figure{margin:0 0 22px}</style></head><body><main>",
         "<h1>", esc(T(_("My %1 in books"), r.year)), "</h1>",
-        '<img src="wrapped.png" alt="', esc(T(_("My %1 in books"), r.year)), '">',
-        "<p>", esc(_("Hold the picture to save or share it.")), "</p>",
-        '<a class="w" href="wrapped.png" download="wrapped-', r.year, '.png">', esc(_("Download")), "</a>",
+        "<p>", esc(T(_("%1 cards. Hold one to save or share it, or save them all."), #files)), "</p>",
+        '<button id="all">', esc(_("Save all")), "</button>",
+        table.concat(imgs),
         '<textarea id="t" readonly>', esc(text), "</textarea>",
         '<button id="c">', esc(_("Copy the text")), "</button>",
         "<script>document.getElementById('c').onclick=function(){var t=document.getElementById('t');",
         "t.select();t.setSelectionRange(0,99999);try{document.execCommand('copy');this.textContent='",
-        esc(_("Copied")), "'}catch(e){}};</script>",
-        "</main></body></html>",
+        esc(_("Copied")), "'}catch(e){}};",
+        "document.getElementById('all').onclick=function(){var n=[", table.concat(names, ","), "],i=0;",
+        "(function next(){if(i>=n.length)return;var a=document.createElement('a');a.href=n[i];",
+        "a.download='wrapped-", r.year, "-'+n[i];document.body.appendChild(a);a.click();a.remove();i++;setTimeout(next,600)})()};",
+        "</script></main></body></html>",
     })
 end
 
@@ -136,8 +147,8 @@ local function serve(c)
         s.opened = (s.opened or 0) + 1
         reply(c, "200 OK", "text/html; charset=utf-8", s.html)
         if s.on_open then pcall(s.on_open) end
-    elseif path == base .. "wrapped.png" then
-        reply(c, "200 OK", "image/png", s.png)
+    elseif s.files[path:sub(#base + 1)] then
+        reply(c, "200 OK", "image/png", s.files[path:sub(#base + 1)])
     else
         reply(c, "404 Not Found", "text/plain", "Not found")
     end
@@ -157,19 +168,26 @@ local function poll()
     UIManager:scheduleIn(0.25, poll)
 end
 
---- Serve the picture at png_path (with r's text); returns the link, or nil
---- and why.
-function M.start(png_path, r, on_open)
+--- Serve the cards' pictures (with r's text); returns the link, or nil and
+--- why.
+function M.start(list, r, on_open)
     local ip = M.ip()
     if not ip then return nil, "wifi" end
     local s = M.state
-    local f = io.open(png_path, "rb")
-    if not f then return nil, "picture" end
-    local png = f:read("*a")
-    f:close()
+    local files, served = {}, {}
+    for _i, f in ipairs(list) do
+        local fh = io.open(f.path, "rb")
+        if fh then
+            files[f.name] = fh:read("*a")
+            fh:close()
+            table.insert(served, f)
+        end
+    end
+    if #served == 0 then return nil, "picture" end
+    local html = page(r, M.text(r), served)
     if s.server then
-        -- already on: the new picture and text, same link
-        s.png, s.html, s.on_open, s.until_t = png, page(r, M.text(r)), on_open, os.time() + LIFETIME
+        -- already on: the new pictures and text, same link
+        s.files, s.html, s.on_open, s.until_t = files, html, on_open, os.time() + LIFETIME
         s.url = T("http://%1:%2/%3/", ip, s.port, s.token)
         return s.url
     end
@@ -184,7 +202,7 @@ function M.start(png_path, r, on_open)
     if not server then return nil, "port" end
     server:settimeout(0)
     firewall(port, true)
-    M.state = { server = server, port = port, token = token(), png = png, html = page(r, M.text(r)),
+    M.state = { server = server, port = port, token = token(), files = files, html = html,
         until_t = os.time() + LIFETIME, opened = 0, on_open = on_open }
     M.state.url = T("http://%1:%2/%3/", ip, port, M.state.token)
     UIManager:scheduleIn(0.25, poll)

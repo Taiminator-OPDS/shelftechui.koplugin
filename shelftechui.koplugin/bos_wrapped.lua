@@ -429,8 +429,8 @@ function CARDS.summary(c, bb, x, y, w, h, for_picture)
     c:hit(rect, function() c:go(#c.cards) end)
 end
 
--- The last card: a QR code for your phone. Picture: the phone opens the
--- year on one page from this device (same Wi-Fi), to save or share. Text: the
+-- The last card: a QR code for your phone. Pictures: the phone opens every
+-- card from this device (same Wi-Fi), to save or share. Text: the
 -- QR holds the year as text (no Wi-Fi needed).
 local qr = {}
 local function qrWidget(text, size)
@@ -453,7 +453,7 @@ function CARDS.share(c, bb, x, y, w, h)
     local gap = S(12)
     local tw = math.floor((w - gap - Look.SHADOW_SMALL) / 2)
     local mode = c.share_mode or "picture"
-    local rect = Look.button(bb, x, cy, tw, S(46), _("Picture"), { size = 12, on = mode == "picture" })
+    local rect = Look.button(bb, x, cy, tw, S(46), _("Pictures"), { size = 12, on = mode == "picture" })
     c:hit(rect, function() c:shareMode("picture") end)
     rect = Look.button(bb, x + tw + gap, cy, tw, S(46), _("Text"), { size = 12, on = mode == "text" })
     c:hit(rect, function() c:shareMode("text") end)
@@ -475,15 +475,15 @@ function CARDS.share(c, bb, x, y, w, h)
         if wdg then wdg:paintTo(bb, qx, qy) end
         local opened = Share.state.opened or 0
         lines = {
-            { _("Scan it with your phone's camera (same Wi-Fi). Your year opens on the phone: hold the picture to save or share it."), serifI(17) },
+            { T(_("Scan it with your phone's camera (same Wi-Fi). All %1 cards open on the phone: hold one to save or share it, or save them all."), #(c.share_files or {})), serifI(17) },
             { c.share_url, Look.serif(14) },
             { opened > 0 and T(opened == 1 and _("Opened on 1 phone · on for %1 more min") or _("Opened on %2 phones · on for %1 more min"),
                 Share.minutesLeft(), opened) or T(_("On for %1 min, on this Wi-Fi only"), Share.minutesLeft()), serifI(14) },
         }
     else
         -- no Wi-Fi (or nothing could be served)
-        local why = c.share_err == "wifi" and _("Connect to Wi-Fi, then scan the code with your phone to get the picture.")
-            or _("The picture couldn't be served. Try Text instead.")
+        local why = c.share_err == "wifi" and _("Connect to Wi-Fi, then scan the code with your phone to get every card as a picture.")
+            or _("The cards couldn't be served. Try Text instead.")
         wrap(bb, why, serifI(18), x + S(30), qy + math.floor(q / 2) - S(60), bw2 - S(60), 3, S(28))
         if c.share_err == "wifi" then
             local kw = S(220)
@@ -618,9 +618,15 @@ function Story:shareMode(mode, quiet)
     self.share_mode = mode
     if mode == "picture" then
         local Share = require("bos_wrapped_share")
-        local path = M.renderPicture(self)
-        if path then
-            self.share_url, self.share_err = Share.start(path, self.r, function()
+        if not self.share_files then
+            local msg = InfoMessage:new{ text = _("Getting your cards ready…") }
+            UIManager:show(msg)
+            UIManager:forceRePaint()
+            self.share_files = M.renderAll(self)
+            UIManager:close(msg)
+        end
+        if #self.share_files > 0 then
+            self.share_url, self.share_err = Share.start(self.share_files, self.r, function()
                 if UIManager:isWidgetShown(self) and self.cards[self.i] == "share" then UIManager:setDirty(self, "ui") end
             end)
         else
@@ -666,25 +672,48 @@ M.Story = Story
 -- ---------------------------------------------------------------- the picture
 
 --- The year on one page, as a PNG in the screenshots folder; returns its path.
-function M.renderPicture(story)
-    local W, H = Screen:getWidth(), Screen:getHeight()
-    local bb = Blitbuffer.new(W, H, Screen.bb:getType())
-    local saved_i = story.i
-    local ok, err = pcall(function() story:paintCard(bb, "summary", true) end)
-    story.hits = {}
+local function shotDir()
     local dir
     pcall(function() dir = require("ui/widget/screenshoter"):getScreenshotDir() end)
-    dir = dir or (require("datastorage"):getFullDataDir() .. "/screenshots")
-    require("util").makePath(dir)
-    local path = T("%1/wrapped-%2.png", dir, story.r.year)
+    return dir or (require("datastorage"):getFullDataDir() .. "/screenshots")
+end
+
+--- One card as a PNG (without the bars, ✕ and hints); true if written.
+local function writeCard(story, id, path)
+    local W, H = Screen:getWidth(), Screen:getHeight()
+    local bb = Blitbuffer.new(W, H, Screen.bb:getType())
+    local saved_hits = story.hits
+    story.hits = {}
+    local ok, err = pcall(function() story:paintCard(bb, id, true) end)
+    story.hits = saved_hits
     if ok then ok, err = pcall(function() bb:writePNG(path) end) end
     bb:free()
-    story.i = saved_i
-    if not ok then
-        logger.warn("ShelfTechUI: Wrapped picture:", err)
-        return nil
+    if not ok then logger.warn("ShelfTechUI: Wrapped picture:", id, err) end
+    return ok
+end
+
+--- The year on one page, as a PNG in the screenshots folder; returns its path.
+function M.renderPicture(story)
+    local dir = shotDir()
+    require("util").makePath(dir)
+    local path = T("%1/wrapped-%2.png", dir, story.r.year)
+    return writeCard(story, "summary", path) and path or nil
+end
+
+--- Every card of the story (all but the share card), in order, as PNGs in
+--- screenshots/wrapped-<year>/; returns { { name, path }, … }.
+function M.renderAll(story)
+    local dir = T("%1/wrapped-%2", shotDir(), story.r.year)
+    require("util").makePath(dir)
+    local files = {}
+    for _i, id in ipairs(story.cards) do
+        if id ~= "share" then
+            local name = string.format("%02d-%s.png", #files + 1, id:gsub("_", "-"))
+            local path = dir .. "/" .. name
+            if writeCard(story, id, path) then table.insert(files, { name = name, path = path }) end
+        end
     end
-    return path
+    return files
 end
 
 function M.savePicture(story)
