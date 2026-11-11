@@ -69,18 +69,31 @@ function M.install(ui)
     end
     -- Bookshelf's start menu, opened while a book is kept open under the
     -- shelf: Bookshelf closes the book first (its shortcuts need the file
-    -- browser), with the message; do it quietly, in the background
+    -- browser), a second or more on a Kindle before the menu shows. Instead
+    -- the menu opens at once; the book finishes closing only when an entry
+    -- that needs the file browser is tapped (see installStartMenu).
     local okW, BW = pcall(require, "lib/bookshelf_widget")
     if okW and type(BW) == "table" and type(BW._openStartMenu) == "function" and not BW._bos_quiet then
         BW._bos_quiet = true
         local orig_sm = BW._openStartMenu
-        BW._openStartMenu = function(...)
-            local a = table.pack(...)
+        BW._openStartMenu = function(self, force, ...)
+            if M.parked() and not (not force and self._startMenuPosition and self:_startMenuPosition() == "off") then
+                local okS, StartMenu = pcall(require, "lib/bookshelf_start_menu")
+                if okS and StartMenu and StartMenu.open then
+                    local Screen = require("device").screen
+                    local okO, err = pcall(StartMenu.open, self, self._footer_h_last or Screen:scaleBySize(40),
+                        self._burger_dimen, "library")
+                    if okO then return end
+                    logger.warn("ShelfTechUI: start menu over a parked book:", err)
+                end
+            end
+            local a = table.pack(self, force, ...)
             local r
             quietly(function() r = table.pack(orig_sm(unpack(a, 1, a.n))) end)
             return unpack(r, 1, r.n)
         end
     end
+    M.installStartMenu()
     local ok, Park = pcall(require, "lib/bookshelf_reader_park")
     if ok and type(Park) == "table" and not Park._bos_quiet then
         Park._bos_quiet = true
@@ -94,6 +107,61 @@ function M.install(ui)
                     return unpack(r, 1, r.n)
                 end
             end
+        end
+    end
+end
+
+--- Is a book parked under home?
+function M.parked()
+    local Park = package.loaded["lib/bookshelf_reader_park"]
+    return type(Park) == "table" and Park.isParked and Park.isParked() or false
+end
+
+--- Entries of the start menu that can run with the book still parked: our
+--- own actions (Settings, Transfer, the store…) and Bookshelf's own (its
+--- settings, closing it). Anything else (a KOReader menu shortcut, a plugin,
+--- a KOReader action) finishes closing the book first, then runs in the file
+--- browser, as Bookshelf did before the menu opened.
+local function runsParked(entry)
+    if type(entry) ~= "table" then return true end
+    if entry.internal then return true end
+    if type(entry.action) == "table" then
+        for k in pairs(entry.action) do
+            if not (tostring(k):match("^bookshelfos_") or tostring(k):match("^stui_")) then return false end
+        end
+        return next(entry.action) ~= nil
+    end
+    return false
+end
+
+function M.installStartMenu()
+    local okE, Exec = pcall(require, "lib/bookshelf_action_exec")
+    if okE and type(Exec) == "table" and type(Exec.dispatch) == "function" and not Exec._bos_parked then
+        Exec._bos_parked = true
+        local orig = Exec.dispatch
+        Exec.dispatch = function(entry, bw)
+            if M.parked() and not runsParked(entry) then
+                local Park = require("lib/bookshelf_reader_park")
+                Park.runInFileManager(function()
+                    local okW, BW = pcall(require, "lib/bookshelf_widget")
+                    local live = okW and type(BW) == "table" and BW.live or bw
+                    local ok, err = pcall(orig, entry, live)
+                    if not ok then logger.warn("ShelfTechUI: start menu entry after closing the book:", err) end
+                end)
+                return
+            end
+            return orig(entry, bw)
+        end
+    end
+    -- KOReader menu shortcuts in the menu are shown where they work: while
+    -- parked that's judged by home's menu (where they'll run), not the book's
+    local okM, MS = pcall(require, "lib/bookshelf_menu_shortcut")
+    if okM and type(MS) == "table" and type(MS.isAvailable) == "function" and not MS._bos_parked then
+        MS._bos_parked = true
+        local orig = MS.isAvailable
+        MS.isAvailable = function(...)
+            if M.parked() then return true end
+            return orig(...)
         end
     end
 end

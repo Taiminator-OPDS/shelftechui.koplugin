@@ -2,6 +2,11 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.6.3
+
+- **The start menu opens at once after leaving a book.** Bookshelf keeps the book open under home for a while, and used to finish closing it before showing the start menu (a second or more on a Kindle). Now the menu shows straight away; only an entry that needs the file browser (a KOReader menu shortcut or another plugin) finishes closing the book when you tap it. Settings, Transfer, the store and Bookshelf's own entries don't wait.
+- **Settings shows everything, wherever you open it.** Home's settings (sorting, display mode, file browser and Bookshelf settings) now also appear while a book is open or kept under home, and the reading settings (font, style, typesetting) also appear at home, each in its usual place and marked *home ›* or *in a book ›*. Tapping one takes you there and opens Settings on that row: a book row at home opens your last book. Actions on a particular book (table of contents, go to page…) stay with the book.
+
 ## 1.6.2
 
 - **Share the whole Wrapped**, not just the summary: Pictures now sends every card to your phone, in order, each as its own picture (hold one to save or share it, or Save all). The cards are also kept on the device, in your screenshots folder under wrapped-<year>.

@@ -19,6 +19,7 @@ local Device = require("device")
 local Dispatcher = require("dispatcher")
 local Geom = require("ui/geometry")
 local InfoMessage = require("ui/widget/infomessage")
+local logger = require("logger")
 local UIManager = require("ui/uimanager")
 local T = require("ffi/util").template
 local _ = require("gettext")
@@ -30,7 +31,7 @@ local S = UI.S
 
 local Page = {}
 
-Page.VERSION = "1.6.2"
+Page.VERSION = "1.6.3"
 
 -- Dispatcher's sub-menus edit tables in place and flag `caller.updated`.
 local saver = setmetatable({}, { __newindex = function() Store.save() end })
@@ -938,6 +939,11 @@ function Page.sections(plugin)
             table.insert(sections, { id = tostring(tab.id), name = plugin:tabName(tab), icon = tab.icon, items = tab })
         end
     end
+    -- the rows only home (or only a book) has, in their places, wherever
+    -- the app is opened (bos_settings_away)
+    local okA, merged = pcall(function() return require("bos_settings_away").merge(plugin, sections) end)
+    if okA and merged then return merged end
+    logger.warn("ShelfTechUI: settings, adding the other side's rows:", merged)
     return sections
 end
 
