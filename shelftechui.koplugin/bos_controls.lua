@@ -34,6 +34,14 @@ local function readerUI()
 end
 
 local function wifiOn()
+    -- (while it's turning on or off: where it's going, so the chip or tile
+    -- answers the tap at once)
+    local okS, busy, ph = pcall(function()
+        local Status = require("bos_status")
+        if Status.wifiBusy() then return true, Status.wifiPhase() end
+        return false
+    end)
+    if okS and busy then return ph ~= "turning_off" end
     local ok, on = pcall(function() return require("ui/network/manager"):isWifiOn() end)
     return ok and on
 end

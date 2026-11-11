@@ -1120,7 +1120,10 @@ function Store:paintResults(bb, v, bottom)
     if #v.books == 0 then
         local msg
         local q = (v.query or ""):gsub("^%s+", ""):gsub("%s+$", "")
-        if v.offline then msg = _("Wi-Fi is off. Turn it on to search the libraries.")
+        local wifi_busy = false
+        if v.offline then pcall(function() wifi_busy = require("bos_status").wifiBusy() end) end
+        if v.offline and wifi_busy then msg = require("bos_status").wifiText()
+        elseif v.offline then msg = _("Wi-Fi is off. Turn it on to search the libraries.")
         elseif v.waiting then msg = _("Looking…")
         elseif v.typed and #q < 3 then msg = _("Type a title, an author or an ISBN: the list follows as you type.")
         elseif v.errors and #v.errors > 0 and (v.answered or 0) >= (v.libraries or 1) and #v.errors >= (v.libraries or 1) then
@@ -1128,10 +1131,15 @@ function Store:paintResults(bb, v, bottom)
         elseif v.empty then msg = v.empty
         else msg = _("Nothing found. Try fewer words, or another spelling.") end
         Page.wrap(bb, msg, Look.serif(15, false, true), x, y + S(10), w, 8, S(24), Look.GRAY)
-        if v.offline then
+        if v.offline and not wifi_busy then
             local r = Look.button(bb, x, y + S(70), S(220), S(46), _("Turn on Wi-Fi"), { size = 12, on = true })
             self:hit(r, function()
                 pcall(function()
+                    -- Turning on… → Connecting…, in place of the key, as it happens
+                    local Status = require("bos_status")
+                    Status.wifiAsked(true)
+                    self:redraw("ui")
+                    Status.watchWifi(function() self:redraw("ui") end, function() return not self.closed and self:view() == v end)
                     require("ui/network/manager"):runWhenConnected(function()
                         if not self.closed then self:runSearch(v, (v.query or ""):gsub("^%s+", ""):gsub("%s+$", "")) end
                     end)
@@ -1324,7 +1332,10 @@ function Store:onSTap(_, ges)
     for k = #self.hits, 1, -1 do
         local h = self.hits[k]
         if inside(pos, h.rect) then
-            h.fn()
+            -- the key or row answers the touch first, then does its thing
+            UI.press(h.press or h.rect, h.fn, function(r)
+                if not self.closed then self:redraw("ui", r) end
+            end)
             return true
         end
     end

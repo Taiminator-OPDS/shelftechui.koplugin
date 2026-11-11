@@ -170,16 +170,26 @@ function TileGrid:after(c)
         self:repaint(c._qs_rect)
     end
     again()
-    if c.slow then
+    if c.id == "wifi" then
+        -- Turning on… → Connecting… → the network's name, each as it happens
+        -- (bos_status.watchWifi: every second until it settles, then stops)
+        if self._wifi_stop then self._wifi_stop() end
+        self._wifi_stop = Status.watchWifi(again, function() return QuickSettingsLive(self.panel) end)
+    elseif c.slow then
         UIManager:scheduleIn(2, again)
-        -- joining a network takes a while: show its name once connected
-        if c.id == "wifi" then UIManager:scheduleIn(7, again) end
     end
 end
 
 function TileGrid:onTapTile(_, ges)
     local c = self:tileAt(ges.pos)
     if not c then return false end
+    if c.id == "wifi" then
+        -- say where it's going before it gets there
+        pcall(function()
+            local on = require("ui/network/manager"):isWifiOn()
+            require("bos_status").wifiAsked(not on)
+        end)
+    end
     self:flash(c)
     UIManager:nextTick(function()
         Controls.tap("qs", c, self:ctx())

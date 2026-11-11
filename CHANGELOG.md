@@ -2,6 +2,14 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.7.2
+
+Things answer when you touch them, and say what they're doing while they do it.
+
+- **Wi-Fi tells you what it's doing.** In the Wi-Fi card on the home bar, the switch flips the moment you tap it and the line under it follows along: Turning on… → Connecting… → Connected to your network (or Turning off…). The card keeps itself up to date while it's open, so there's no closing and reopening it to see whether it joined. The Wi-Fi chip, and the Wi-Fi tile in Quick Settings (its second line), follow the same steps. It checks once a second only while Wi-Fi is in between, and stops when it settles.
+- **Turn on Wi-Fi keys** (the store when you're offline, sharing your Wrapped) are replaced by the same Turning on… / Connecting… while it happens, then carry on by themselves.
+- **Keys and rows in the store, in Wrapped and on its December card flash under your finger** before they act, like the home chips and Quick Settings tiles already did: a fast refresh of just that spot, then the action.
+
 ## 1.7.1
 
 - **The store is part of home.**

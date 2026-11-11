@@ -76,9 +76,85 @@ end
 
 function M.invalidate() _net.t = 0 end
 
+-- Wi-Fi in between: turning on takes a few seconds and joining a network a
+-- few more, and until it's done the device only says "on, not connected".
+-- So what was asked for is remembered for a while, and shown as it happens
+-- (as a phone does): Turning on… → Connecting… → the network's name.
+local _want = nil -- { on = bool, at = time }
+local SETTLE = 40
+
+--- Wi-Fi was just asked to go on (true) or off (false).
+function M.wifiAsked(on)
+    _want = { on = on and true or false, at = os.time() }
+    _net.t = 0
+end
+
+--- "off" | "turning_on" | "connecting" | "connected" | "idle" (on, not
+--- connected, nothing asked) | "turning_off", and the network's name.
+function M.wifiPhase()
+    if _want and os.time() - _want.at > SETTLE then _want = nil end
+    -- asked afresh only while it's in between (asking can be slow on a
+    -- Kindle; otherwise what was learnt in the last few seconds will do)
+    if _want then _net.t = 0 end
+    local st = M.state()
+    if _want then
+        if _want.on then
+            if st.connected then _want = nil return "connected", st.ssid end
+            return st.wifi_on and "connecting" or "turning_on"
+        else
+            if not st.wifi_on then _want = nil return "off" end
+            return "turning_off"
+        end
+    end
+    if not st.wifi_on then return "off" end
+    if st.connected then return "connected", st.ssid end
+    return "idle"
+end
+
+function M.wifiBusy()
+    local ph = M.wifiPhase()
+    return ph == "turning_on" or ph == "connecting" or ph == "turning_off"
+end
+
+--- The phase in words.
+function M.wifiText()
+    local _ = require("gettext")
+    local ph, ssid = M.wifiPhase()
+    if ph == "off" then return _("Off") end
+    if ph == "turning_on" then return _("Turning on…") end
+    if ph == "connecting" then return _("Connecting…") end
+    if ph == "turning_off" then return _("Turning off…") end
+    if ph == "connected" then return ssid or _("Connected") end
+    return _("Not connected")
+end
+
+--- Call `fn` each time the phase changes, every second while Wi-Fi is in
+--- between (and once when it settles); stops by itself, or when `alive()`
+--- says no. Returns a function that stops it.
+function M.watchWifi(fn, alive)
+    local UIManager = require("ui/uimanager")
+    local last = M.wifiPhase()
+    local stopped = false
+    local tick
+    tick = function()
+        if stopped or (alive and not alive()) then return end
+        local ph = M.wifiPhase()
+        if ph ~= last then
+            last = ph
+            pcall(fn, ph)
+        end
+        if ph == "turning_on" or ph == "connecting" or ph == "turning_off" then
+            UIManager:scheduleIn(1, tick)
+        end
+    end
+    UIManager:scheduleIn(0.5, tick)
+    return function() stopped = true UIManager:unschedule(tick) end
+end
+
 --- What the Wi-Fi tile says under its name, as Android does: the network
 --- you're on, "Not connected", or "Off".
 function M.wifiLine()
+    if _want then return M.wifiText() end
     local st = M.state()
     if not st.wifi_on then return require("gettext")("Off") end
     if not st.connected then return require("gettext")("Not connected") end

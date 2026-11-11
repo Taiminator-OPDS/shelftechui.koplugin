@@ -684,6 +684,7 @@ function InfoRow:getSize() return Geom:new{ w = self.width, h = self.height } en
 function InfoRow:paintTo(bb, x, y)
     self.dimen = Geom:new{ x = x, y = y, w = self.width, h = self.height }
     local text = type(self.text) == "function" and self.text() or self.text
+    bb:paintRect(x, y, self.width, self.height, WHITE) -- (it's redrawn in place when what it says changes)
     M.drawText(bb, text or "", self.f, x, y, self.height, DARK, self.width)
 end
 
@@ -841,24 +842,62 @@ end
 
 function Menus.wifi(menu, w)
     local NetworkMgr = require("ui/network/manager")
+    local Status = require("bos_status")
     local rows = {}
+    -- what Wi-Fi is doing, in words, as it happens (the card stays up to date
+    -- while it's open: no need to close and reopen it to see if it joined)
     local function status()
-        if not NetworkMgr:isWifiOn() then return _("Wi-Fi is off") end
-        local ok, net = pcall(function() return NetworkMgr:getCurrentNetwork() end)
-        local ssid = ok and type(net) == "table" and net.ssid or nil
-        if NetworkMgr:isConnected() then
-            return ssid and T(_("Connected to %1"), ssid) or _("Connected")
-        end
+        local ph, ssid = Status.wifiPhase()
+        if ph == "off" then return _("Wi-Fi is off") end
+        if ph == "turning_on" then return _("Turning on…") end
+        if ph == "connecting" then return _("Connecting…") end
+        if ph == "turning_off" then return _("Turning off…") end
+        if ph == "connected" then return ssid and T(_("Connected to %1"), ssid) or _("Connected") end
         return _("Not connected")
     end
+    local check, info
+    local function redraw()
+        for _i, r in ipairs{ check, info } do
+            if r and r.dimen and r.dimen.x then
+                UIManager:widgetRepaint(r, r.dimen.x, r.dimen.y)
+                UIManager:setDirty(nil, "ui", r.dimen)
+            end
+        end
+    end
+    local function shown()
+        for _i, e in ipairs(UIManager._window_stack or {}) do if e.widget == menu then return true end end
+        return false
+    end
+    local stop
+    local function watch()
+        if stop then stop() end
+        stop = Status.watchWifi(redraw, shown)
+    end
     table.insert(rows, MenuTitle:new{ width = w, text = _("Wi-Fi") })
-    table.insert(rows, CheckRow:new{ width = w, text = _("Wi-Fi"),
-        checked = function() return NetworkMgr:isWifiOn() end,
-        toggle = function() UIManager:broadcastEvent(Event:new("ToggleWifi")) end })
-    table.insert(rows, InfoRow:new{ width = w, text = status })
+    check = CheckRow:new{ width = w, text = _("Wi-Fi"),
+        -- the switch shows where it's going, at once
+        checked = function()
+            local ph = Status.wifiPhase()
+            return ph == "turning_on" or ph == "connecting" or ph == "connected" or ph == "idle"
+        end,
+        toggle = function()
+            local on = NetworkMgr:isWifiOn()
+            Status.wifiAsked(not on)
+            redraw()
+            UIManager:forceRePaint()
+            UIManager:nextTick(function()
+                UIManager:broadcastEvent(Event:new("ToggleWifi"))
+                watch()
+            end)
+        end }
+    table.insert(rows, check)
+    info = InfoRow:new{ width = w, text = status }
+    table.insert(rows, info)
     table.insert(rows, Hairline:new{ width = w })
     table.insert(rows, ActionRow:new{ width = w, menu = menu, text = _("Choose a network…"),
         callback = function() M.chooseNetwork() end })
+    -- opened while it's already in between (toggled from somewhere else)
+    if Status.wifiBusy() then watch() end
     return rows
 end
 
@@ -884,6 +923,32 @@ function M.openList(items, anchor, on_close)
     }
     UIManager:show(menu)
     return menu
+end
+
+--- A touch answered at once, as a phone does: what was tapped flips to
+--- black for a moment (a fast refresh of just that spot), then `fn` runs on
+--- the next tick and `restore` (if given) redraws the spot. Big areas (a
+--- whole page, an invisible corner) aren't flashed: `fn` just runs.
+function M.press(rect, fn, restore)
+    local sw, sh = Screen:getWidth(), Screen:getHeight()
+    local r = rect and Geom:new{ x = math.max(0, rect.x), y = math.max(0, rect.y), w = rect.w, h = rect.h }
+    if r then
+        r.w = math.min(r.w, sw - r.x)
+        r.h = math.min(r.h, sh - r.y)
+    end
+    if not r or r.w <= 0 or r.h <= 0 or r.h > S(130) or (r.w * r.h) > (sw * S(130)) then
+        fn()
+        return
+    end
+    local ok = pcall(function()
+        Screen.bb:invertRect(r.x, r.y, r.w, r.h)
+        UIManager:setDirty(nil, "fast", r)
+        UIManager:forceRePaint()
+    end)
+    UIManager:nextTick(function()
+        fn()
+        if ok and restore then pcall(restore, r) end
+    end)
 end
 
 --- Open the drop-down menu `kind` ("light", "wifi") from what was tapped.

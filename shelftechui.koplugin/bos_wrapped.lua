@@ -482,14 +482,24 @@ function CARDS.share(c, bb, x, y, w, h)
         }
     else
         -- no Wi-Fi (or nothing could be served)
-        local why = c.share_err == "wifi" and _("Connect to Wi-Fi, then scan the code with your phone to get every card as a picture.")
+        local wifi_busy = false
+        if c.share_err == "wifi" then pcall(function() wifi_busy = require("bos_status").wifiBusy() end) end
+        local why = wifi_busy and require("bos_status").wifiText()
+            or c.share_err == "wifi" and _("Connect to Wi-Fi, then scan the code with your phone to get every card as a picture.")
             or _("The cards couldn't be served. Try Text instead.")
         wrap(bb, why, serifI(18), x + S(30), qy + math.floor(q / 2) - S(60), bw2 - S(60), 3, S(28))
-        if c.share_err == "wifi" then
+        if c.share_err == "wifi" and not wifi_busy then
             local kw = S(220)
             local r2 = Look.button(bb, x + math.floor((bw2 - kw) / 2), qy + math.floor(q / 2) + S(30), kw, S(48), _("Turn on Wi-Fi"), { size = 12, on = true })
             c:hit(r2, function()
                 local ok, NetworkMgr = pcall(require, "ui/network/manager")
+                pcall(function()
+                    local Status = require("bos_status")
+                    Status.wifiAsked(true)
+                    UIManager:setDirty(c, "ui")
+                    Status.watchWifi(function() if UIManager:isWidgetShown(c) then UIManager:setDirty(c, "ui") end end,
+                        function() return UIManager:isWidgetShown(c) end)
+                end)
                 if ok then NetworkMgr:runWhenConnected(function() c:shareMode("picture") end) end
             end)
         end
@@ -641,7 +651,12 @@ local function inside(p, r) return p and r and p.x >= r.x and p.x < r.x + r.w an
 function Story:onWTap(_, ges)
     for k = #(self.hits or {}), 1, -1 do
         local h = self.hits[k]
-        if inside(ges.pos, h.rect) then h.fn() return true end
+        if inside(ges.pos, h.rect) then
+            UI.press(h.rect, h.fn, function(r)
+                if UIManager:isWidgetShown(self) then UIManager:setDirty(self, function() return "ui", r end) end
+            end)
+            return true
+        end
     end
     if ges.pos.x < Screen:getWidth() * 0.35 then self:onPrev() else self:onNext() end
     return true
@@ -839,7 +854,7 @@ end
 
 function Note:onNTap(_, ges)
     for _i, h in ipairs(self.hits or {}) do
-        if inside(ges.pos, h.rect) then h.fn() return true end
+        if inside(ges.pos, h.rect) then UI.press(h.rect, h.fn) return true end
     end
     if not inside(ges.pos, self.card) then UIManager:close(self) end
     return true

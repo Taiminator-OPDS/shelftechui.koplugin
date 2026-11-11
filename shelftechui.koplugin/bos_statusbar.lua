@@ -219,6 +219,14 @@ function StatusBar:onTapChip(_, ges)
         UI.openChipMenu(c.home.menu, c._rect, { on_close = function()
             bar.pressed = nil
             bar:repaint()
+            -- closed while Wi-Fi is still turning on or joining: the chip
+            -- follows it until it settles
+            if c.id == "wifi" then
+                pcall(function()
+                    local Status = require("bos_status")
+                    if Status.wifiBusy() then Status.watchWifi(function() bar:repaint() end) end
+                end)
+            end
         end })
         return true
     end
