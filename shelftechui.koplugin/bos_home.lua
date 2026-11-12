@@ -25,11 +25,11 @@ local function buildBar(self)
     pcall(function() pad = self:_layoutPrimitives() end)
     pad = pad or 12
     local chips = require("bos_controls").shown("home")
-    if #chips == 0 then return nil end
+    -- (no chips: the bar is still there for the search field)
     local StatusBar = require("bos_statusbar")
     local HorizontalGroup = require("ui/widget/horizontalgroup")
     local HorizontalSpan = require("ui/widget/horizontalspan")
-    local bar = StatusBar:new{ width = self.width - 2 * pad, chips = chips }
+    local bar = StatusBar:new{ width = self.width - 2 * pad, chips = chips, search = true }
     return VerticalGroup:new{
         align = "left",
         VerticalSpan:new{ width = math.floor(pad * 0.75) },

@@ -461,7 +461,7 @@ function M.seed()
         if anchor then TabModel.insertAfter(tabs, anchor, parent) else table.insert(tabs, parent) end
         -- (1.7.0: FOR YOU is the recommendations from the internet, added by
         -- bos_online.syncShelves, and Want to read; the lists from your own
-        -- library are rows on the Read and Dash layouts)
+        -- library are a row on the Dash layout)
         local kids = {}
         for _i, which in ipairs(kids) do
             TabModel.insertChild(tabs, "stui_foryou", { id = "stui_fy_" .. which, label = labelFor(which),

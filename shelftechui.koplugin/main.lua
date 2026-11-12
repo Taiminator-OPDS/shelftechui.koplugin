@@ -315,7 +315,7 @@ function BookshelfOS:init()
         for _i, id in ipairs(Controls.ids("home")) do table.insert(ids, id) end
         Controls.setIds("home", ids)
     end)
-    -- home layouts (Shelf, Read, Dash): after the edge swipes, so theirs pass through
+    -- home layouts (Shelf, Dash): after the edge swipes, so theirs pass through
     pcall(function() require("bos_layouts").install() end)
     -- 1.4.0 put the Layout chip on the home bar unasked; it's now yours to add
     -- (Settings → Home → Status bar), so take that one back off, once

@@ -2,6 +2,11 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.8.1
+
+- **The Read home layout is removed.** Home is Shelf or Dash; if you were on Read, you're on Shelf.
+- **A search field at the top of the Shelf layout**, in the room the chips left empty on their row: tap it and type for your own books first, then the store's libraries. Hold it for KOReader's search by file name. It takes whatever width the chips don't use (the whole row if you have no chips there).
+
 ## 1.8.0
 
 - **Edit a book's details from its page.** Hold a book: its page now has an **Edit** key beside Resume, which opens Bookshelf's own editor straight on its Edit tab (also "Edit details…" under ⋯).

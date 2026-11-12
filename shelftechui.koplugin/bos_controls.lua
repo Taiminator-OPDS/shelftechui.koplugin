@@ -243,12 +243,12 @@ local CATALOGUE = {
                  qs = _("Send books to this device from a browser on the same Wi-Fi: opens Transfer and turns it on.") },
     },
     {
-        -- the home layout (bos_layouts): Shelf, Read or Dash
+        -- the home layout (bos_layouts): Shelf or Dash
         id = "layout", name = _("Layout"), glyph = UI.GLYPH.grid_large,
         available = function() return true end,
         home = { tap = function(ctx) require("bos_layouts").choose(ctx and ctx.anchor) end },
         hold = { home = function() require("bos_layouts").cycle() end, name_home = _("the next layout") },
-        says = { home = _("Home as Shelf, Read or Dash.") },
+        says = { home = _("Home as Shelf or Dash.") },
     },
     {
         id = "settings", name = _("Settings"), glyph = UI.GLYPH.cog,

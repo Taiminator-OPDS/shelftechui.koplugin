@@ -1,14 +1,13 @@
 --[[
 Home layouts: what home shows, chosen in Settings → Home → Home layout (or the
-layout key at the top of Read and Dash, or the "Layout" chip on the home bar).
+"Layout" chip on the home bar).
 
-  shelf   Bookshelf's home, as it has always been
-  read    a row per shelf of your library (Continue reading first, big), each
-          swiped sideways on its own; tap a row's name for all of it
+  shelf   Bookshelf's home, as it has always been (with the search field
+          beside the chips at its top: bos_statusbar)
   dash    a now-reading card, four cards (streak, this week, up next in
           series, a pick), and one row of covers chosen by chips
 
-Read and Dash are drawn in place of Bookshelf's shelf, inside its own window
+Dash is drawn in place of Bookshelf's shelf, inside its own window
 (BookshelfWidget.paintTo / handleEvent), so everything that comes and goes
 with home (parking a book under it, closing it, the window stack, the screen
 kept under dialogs) behaves exactly as with the shelf. Books open through
@@ -38,17 +37,17 @@ local BLACK, WHITE = Blitbuffer.COLOR_BLACK, Blitbuffer.COLOR_WHITE
 
 local M = {}
 
-M.ORDER = { "shelf", "read", "dash" }
-M.NAMES = { shelf = _("Shelf"), read = _("Read"), dash = _("Dash") }
+M.ORDER = { "shelf", "dash" }
+M.NAMES = { shelf = _("Shelf"), dash = _("Dash") }
 M.DESC = {
     shelf = _("Bookshelf's home: the book you're reading on top, your shelves as tabs, and the books under them."),
-    read = _("A row for each shelf of your library, Continue reading first. Swipe a row sideways; tap its name for all of it."),
     dash = _("The book you're reading, your streak, this week, what's next in a series and a pick, with one row of covers."),
 }
 
 function M.id()
     local v = Store.get("home_layout")
-    if v == "read" or v == "dash" then return v end
+    -- (the Read layout is gone since 1.8.1: anyone on it is back on Shelf)
+    if v == "dash" then return v end
     return "shelf"
 end
 
@@ -257,8 +256,8 @@ local function hit(rect, fn, hold, opts)
     table.insert(st.hits, { rect = rect, fn = fn, hold = hold, flash = not (opts and opts.no_flash) })
 end
 
---- Bookshelf's start menu, opening down from the ☰ key at the top of Read
---- and Dash (Bookshelf's own key is at the bottom of the shelf, and its menu
+--- Bookshelf's start menu, opening down from the ☰ key at the top of Dash
+--- (Bookshelf's own key is at the bottom of the shelf, and its menu
 --- grew up from there, across the screen from the key that was tapped).
 --- A tap on the key while the menu is open lands on the menu's window, which
 --- closes it, as with Bookshelf's own key.
@@ -288,7 +287,7 @@ function M.choose(anchor)
     UI.openList(items, anchor or Geom:new{ x = S(18), y = S(40), w = S(46), h = S(40) })
 end
 
---- The top of Read and Dash: the date, time and battery; then the start
+--- The top of Dash: the date, time and battery; then the start
 --- menu, search and layout keys, and your home chips on the right.
 local function drawTop(bw, bb, W, pad)
     local y = S(8)
@@ -358,82 +357,6 @@ local function drawTop(bw, bb, W, pad)
     y = y + bar_h + Look.SHADOW_SMALL + S(12)
     bb:paintRect(pad, y, W - 2 * pad, Look.LINE, Look.INK)
     return y + Look.LINE + S(12)
-end
-
--- ---------------------------------------------------------------- Read
-
-local function rowSizes(r, w)
-    local cw = r.big and math.floor(w / 4.3) or math.floor(w / 6.3)
-    local ch = math.floor(cw * 1.5)
-    return cw, ch
-end
-
-local function rowHeight(r, w)
-    local _cw, ch = rowSizes(r, w)
-    return S(24) + S(6) + ch + S(14) + S(12)
-end
-
-local function drawRead(bw, bb, W, H)
-    local pad = S(18)
-    local w = W - 2 * pad
-    local y0 = drawTop(bw, bb, W, pad)
-    local D = gather()
-    local footer = S(56)
-    local avail = H - y0 - footer
-    -- the rows, a page of them at a time
-    local pages, cur, used = {}, {}, 0
-    for _i, r in ipairs(D.lists) do
-        local rh = rowHeight(r, w)
-        if #cur > 0 and used + rh > avail then
-            table.insert(pages, cur)
-            cur, used = {}, 0
-        end
-        table.insert(cur, r)
-        used = used + rh
-    end
-    if #cur > 0 then table.insert(pages, cur) end
-    st.pages = math.max(1, #pages)
-    st.page = math.max(1, math.min(st.page, st.pages))
-    st.rows = {}
-    if #pages == 0 then
-        local Page = require("bos_page")
-        Page.wrap(bb, _("Your library is empty. Books you add show up here, with what you're reading first."),
-            Look.serif(17, false, true), pad, y0 + S(20), w, 4, S(26), Look.GRAY)
-    end
-    local y = y0
-    for _i, r in ipairs(pages[st.page] or {}) do
-        local cw, ch = rowSizes(r, w)
-        local gap = S(14)
-        local n = math.max(1, math.floor((w + gap) / (cw + gap)))
-        local off = math.max(1, math.min(st.off[r.id] or 1, math.max(1, #r.books - n + 1)))
-        st.off[r.id] = off
-        local last = math.min(#r.books, off + n - 1)
-        local right = (#r.books > n) and T("%1\u{2013}%2 / %3  \u{203A}", off, last, #r.books)
-            or (tostring(#r.books) .. "  \u{203A}")
-        Look.heading(bb, r.label, pad, y, w, S(24), right)
-        local row = r
-        hit(Geom:new{ x = pad, y = y - S(4), w = w, h = S(32) }, function() M.showList(row) end)
-        y = y + S(24) + S(6)
-        local x = pad
-        for k = off, last do
-            local b = r.books[k]
-            local rect = drawCover(bb, b, x, y, cw, ch)
-            hit(rect, function() openBook(b) end, function() bookPage(b, row.books) end)
-            x = x + cw + gap
-        end
-        table.insert(st.rows, { rect = Geom:new{ x = 0, y = y, w = W, h = ch + S(14) }, row = r, n = n })
-        y = y + ch + S(14) + S(12)
-    end
-    -- ‹  2 / 3  ›
-    if st.pages > 1 then
-        local fy = H - footer + S(6)
-        local bw_, bh = S(64), S(40)
-        local r = Look.button(bb, pad, fy, bw_, bh, "\u{2039}", { size = 16, enabled = st.page > 1 })
-        if st.page > 1 then hit(r, function() st.page = st.page - 1 repaint() end) end
-        Look.label(bb, T("%1 / %2", st.page, st.pages), pad, fy, w, bh, 13, { align = "center" })
-        r = Look.button(bb, W - pad - bw_ - Look.SHADOW_SMALL, fy, bw_, bh, "\u{203A}", { size = 16, enabled = st.page < st.pages })
-        if st.page < st.pages then hit(r, function() st.page = st.page + 1 repaint() end) end
-    end
 end
 
 -- ---------------------------------------------------------------- Dash
@@ -696,7 +619,7 @@ function M.paint(bw, bb, x, y)
     local W, H = Screen:getWidth(), Screen:getHeight()
     st.hits = {}
     bb:paintRect(x, y, W, H, Look.PAPER)
-    if M.id() == "read" then drawRead(bw, bb, W, H) else drawDash(bw, bb, W, H) end
+    drawDash(bw, bb, W, H)
     if st.flash then bb:invertRect(st.flash.x, st.flash.y, st.flash.w, st.flash.h) end
 end
 
@@ -757,11 +680,6 @@ function M.gesture(bw, event, ges)
                 end
                 return true
             end
-        end
-        if M.id() == "read" then
-            local d = (dir == "north" or dir == "west") and 1 or (dir == "south" or dir == "east") and -1 or 0
-            local nxt = math.max(1, math.min(st.pages, st.page + d))
-            if nxt ~= st.page then st.page = nxt repaint() end
         end
         return true
     end

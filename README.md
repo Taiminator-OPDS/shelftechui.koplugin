@@ -21,7 +21,7 @@ ShelfTechUI is a fork of AndyHazz's Bookshelf home screen
 | **Glimpse** | GLIMPSE on the toolbar | Erik Fanki's viewer for the maps, family trees and other pictures in the book, from anywhere in it, without losing your place; in the retro look. Settings → Glimpse |
 | **Notebook** | Toolbar | Bookmarks, highlights and notes as cards, with All / Highlights / Notes / Marks |
 | **Pages** | Toolbar, or KOReader's skim bar | The carousel (the page, its neighbours, a track with chapter ticks) or a grid of thumbnails |
-| **Home layouts** | Settings → Home (or the Layout chip, if you add it to the home bar) | **Shelf** (Bookshelf's home), **Read** (a row for each shelf, Continue reading first; swipe a row sideways, tap its name for all of it) or **Dash** (now reading, streak, this week, up next in series, a pick, and one row of covers) |
+| **Home layouts** | Settings → Home (or the Layout chip, if you add it to the home bar) | **Shelf** (Bookshelf's home, with a search field for your books and the store at its top) or **Dash** (now reading, streak, this week, up next in series, a pick, and one row of covers) |
 | **Highlight handles** | Select text | A knob at each end of the selection to drag |
 | **Pinned pages** | PIN on the toolbar, or PIN PAGE on a selection | A badge on the page opens a drawer with your pins |
 | **Quick Settings** | Swipe down in a book | Tiles (X-Ray when it's installed), the Wi-Fi network name, light sliders |

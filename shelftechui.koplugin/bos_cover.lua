@@ -16,7 +16,7 @@ local logger = require("logger")
 
 local M = {}
 
--- (Read and Dash on home show up to ~30 covers at once)
+-- (Dash on home shows up to ~30 covers at once)
 local MAX = 40
 local cache, order = {}, {}
 
