@@ -2,6 +2,10 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.9.2
+
+- **The update window is fixed.** It was KOReader's confirmation box, which grows with its text: a release with long notes made it taller than the screen, so its frame was drawn over itself (borders inside borders) and its keys were cut off at the bottom. It's now a window of ShelfTechUI's own, in your theme: as tall as what it says and never more than about two thirds of the screen, with What's new shown a page at a time (‹ ›, or swipe) and Not now / Update and restart always inside it.
+
 ## 1.9.1
 
 - **FOR YOU is three picks a day.** In place of folders, the FOR YOU tab on home shows three recommendations: one from your series, one by your authors, one from your genres, never a book you already have. The same three all day; tomorrow, the next in each list, so over a few weeks the whole list comes round. (Once, on the first start, the tab's folders are replaced by the three.)
