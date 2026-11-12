@@ -1558,7 +1558,13 @@ function M.open(opts)
     elseif opts.query and opts.query:match("%S") then s:openSearch(opts.query)
     elseif opts.shelf then s:openShelf(opts.shelf.title, opts.shelf.filters)
     elseif opts.search then
-        UIManager:nextTick(function() if not s.closed then s:showKeyboard() end end)
+        -- straight to the search screen: the field focused and the keyboard
+        -- up before anything is painted, so the storefront never shows
+        -- first (it used to flash by, then the search screen over it)
+        local ok = pcall(function() s:showKeyboard() end)
+        if not ok or not s:keyboardUp() then
+            UIManager:nextTick(function() if not s.closed then s:showKeyboard() end end)
+        end
     end
     return s
 end
