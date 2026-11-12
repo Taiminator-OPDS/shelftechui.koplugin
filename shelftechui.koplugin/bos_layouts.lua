@@ -102,8 +102,9 @@ local function onlineOf(item)
     local Online = require("bos_online")
     local author = item.author
     if not author and type(item.authors) == "table" then author = item.authors[1] end
+    local mine = Online.owned(item)
     return { online = item, title = item.title, author = author,
-        cover_path = Online.cachedCoverPath(item, "M"), dashed = true }
+        cover_path = Online.cachedCoverPath(item, "M"), dashed = true, owned = mine and mine.filepath or nil }
 end
 
 local function gather()
@@ -157,7 +158,7 @@ local function gather()
                         if #items >= 30 then break end
                         table.insert(items, onlineOf(it))
                     end
-                    add("online_" .. sh.which, sh.label, items, { short = _("Online") })
+                    add("online_" .. sh.which, _("Recommended for you"), items, { short = _("For you") })
                 end
             end
             local want = {}
@@ -229,6 +230,7 @@ local function drawCover(bb, b, x, y, cw, ch, opts)
             Page.wrap(bb, b.title or "", Look.mono(math.max(8, math.floor(cw / 10))), x + S(6), y + S(8),
                 cw - S(12), 5, S(14))
         end
+        if b.owned then pcall(function() require("bos_online").paintBadge(bb, x + d, y, cw - 2 * d, ch - d) end) end
     end
     local h = ch + Look.SHADOW_SMALL
     if opts.progress ~= false and b.pct and b.pct > 0 and b.pct < 0.995 then
@@ -579,7 +581,7 @@ local function drawDash(bw, bb, W, H)
         _("Start a series and the next book shows up here."))
     -- a pick: online, else want to read, else discover
     local pick, ptitle
-    for _i, id in ipairs{ "online_series", "online_authors", "online_genres" } do
+    for _i, id in ipairs{ "online_all" } do
         if D.by[id] then pick, ptitle = D.by[id], _("Online pick") break end
     end
     if not pick and D.by.want then pick, ptitle = D.by.want, _("Want to read") end

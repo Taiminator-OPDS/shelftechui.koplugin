@@ -185,6 +185,24 @@ function M.rows() return store():readSetting("rows") or {} end
 
 --- One home shelf's picks: "series", "authors" or "genres" (every genre row).
 function M.rowItems(which)
+    if which == "all" then
+        -- one from each list in turn, so it isn't all one author
+        local lists = { M.rowItems("series"), M.rowItems("authors"), M.rowItems("genres") }
+        local out, seen, i = {}, {}, 1
+        while true do
+            local any = false
+            for _k, l in ipairs(lists) do
+                local p = l[i]
+                if p then
+                    any = true
+                    if not seen[p.key] then seen[p.key] = true out[#out + 1] = p end
+                end
+            end
+            if not any then break end
+            i = i + 1
+        end
+        return out
+    end
     local out, seen = {}, {}
     for _i, row in ipairs(M.rows()) do
         local id = row.id
@@ -243,11 +261,65 @@ end
 
 --- The online shelves inside FOR YOU: added once, then shown only while
 --- online picks are on.
+-- (one shelf since 1.8.0: more in your series, more by your authors and
+-- popular in your genres, taken in turn)
 M.SHELVES = {
-    { id = "stui_fy_online_series", which = "series", label = _("More in your series") },
-    { id = "stui_fy_online_authors", which = "authors", label = _("More by authors you read") },
-    { id = "stui_fy_online_genres", which = "genres", label = _("Popular in your genres") },
+    { id = "stui_fy_online", which = "all", label = _("Recommendations") },
 }
+local OLD_SHELVES = { "stui_fy_online_series", "stui_fy_online_authors", "stui_fy_online_genres" }
+
+--- Your own copy of a recommended book, if it's on the device (the same
+--- title, and the same author when both are known): the library's book.
+local own = { gen = false, by = nil }
+function M.owned(p)
+    if type(p) ~= "table" or not p.title then return nil end
+    local okR, L = pcall(function() return require("bos_recs").library() end)
+    if not okR or not L or not L.books then return nil end
+    if own.by == nil or own.gen ~= L.gen or own.n ~= #L.books then
+        own.by, own.gen, own.n = {}, L.gen, #L.books
+        for _i, b in ipairs(L.books) do
+            local k = norm(b.title)
+            if k ~= "" then
+                own.by[k] = own.by[k] or {}
+                table.insert(own.by[k], b)
+            end
+        end
+    end
+    local hits = own.by[norm(p.title)]
+    if not hits then return nil end
+    local want = p.author and norm(p.author) or ""
+    local surname = want:match("(%S+)$")
+    for _i, b in ipairs(hits) do
+        local have = norm(table.concat(b.authors or {}, " "))
+        if want == "" or have == "" or (surname and have:find(surname, 1, true)) then return b end
+    end
+    return nil
+end
+
+--- "IN LIBRARY" across the foot of a cover drawn at x, y, w, h.
+function M.paintBadge(bb, x, y, w, h)
+    local bh = math.max(S(14), math.floor(h * 0.16))
+    bb:paintRect(x, y + h - bh, w, bh, BLACK)
+    local size = math.max(6, math.min(10, math.floor(w / 9)))
+    Look.label(bb, _("In library"), x + 1, y + h - bh, w - 2, bh, size, { align = "center", color = WHITE })
+end
+
+--- A cover file with the badge painted on it (kept beside the cover), for
+--- Bookshelf's own shelves, which draw the picture they're given.
+function M.badgedCover(path)
+    if not path then return nil end
+    local lfs = require("libs/libkoreader-lfs")
+    local out = path:gsub("%.%w+$", "") .. "_lib.png"
+    if lfs.attributes(out, "mode") == "file" then return out end
+    local ok = pcall(function()
+        local img = require("ui/renderimage"):renderImageFile(path, false)
+        if not img then error("no image") end
+        M.paintBadge(img, 0, 0, img:getWidth(), img:getHeight())
+        img:writePNG(out)
+        img:free()
+    end)
+    return ok and lfs.attributes(out, "mode") == "file" and out or path
+end
 
 function M.syncShelves()
     local okT, TabModel = pcall(require, "lib/bookshelf_tab_model")
@@ -411,20 +483,32 @@ end
 
 --- The ONLINE tab of a book page: picks by its author or in its series.
 function M.forBook(d)
+    -- this book's own first (the same series, the same author), then the
+    -- rest of your recommendations, so the tab is never empty while there
+    -- are any; a book that's on the device carries the badge
     local out, seen = {}, {}
     local author = d.authors and d.authors[1] and d.authors[1]:lower()
+    local function take(p)
+        if p.key and not seen[p.key] and norm(p.title) ~= norm(d.title) then
+            seen[p.key] = true
+            local mine = M.owned(p)
+            table.insert(out, { online = true, key = p.key, title = p.title, author = p.author, series = p.series,
+                year = p.year, cover_i = p.cover_i, dashed = true, cover_path = M.cachedCoverPath(p, "M"),
+                owned = mine and mine.filepath or nil, pick = p })
+        end
+    end
     for _i, row in ipairs(M.rows()) do
         for _j, p in ipairs(row.items or {}) do
-            if not seen[p.key] and ((author and p.author and p.author:lower() == author) or (d.series and p.series == d.series)) then
-                seen[p.key] = true
-                p.dashed = true
-                p.cover_path = M.coverPath(p)
-                table.insert(out, p)
-            end
+            if (author and p.author and p.author:lower() == author) or (d.series and p.series == d.series) then take(p) end
         end
+    end
+    for _i, p in ipairs(M.rowItems("all")) do
+        if #out >= 12 then break end
+        take(p)
     end
     return out
 end
+
 
 -- ---------------------------------------------------------------- want to read (A5)
 
@@ -498,10 +582,11 @@ function M.registerSource()
             if not M.enabled() then return {}, 0 end
             -- answers from what's cached; today's fetch runs in the background
             M.refreshInBackground(false)
-            local list = M.rowItems(source and source.which or "genres")
+            local list = M.rowItems(source and source.which or "all")
             local out = {}
             -- nothing fetched yet: one card on the first shelf saying how
-            if #list == 0 and (source and source.which) == "series" and #M.rows() == 0 then
+            local first = source and (source.which == "series" or source.which == "all")
+            if #list == 0 and first and #M.rows() == 0 then
                 return { { filepath = "stuionline://_setup", title = _("Recommendations"),
                     authors = { _("Turn on Wi-Fi") }, author = _("Turn on Wi-Fi"), stui_setup = true } }, 1
             end
@@ -509,9 +594,16 @@ function M.registerSource()
                 local p = list[i]
                 local path = p.cover_i and (cacheDir() .. "/c" .. p.cover_i .. "M.jpg")
                 if path and lfs.attributes(path, "mode") ~= "file" then path = nil end
+                -- already on the device: its cover says so
+                local mine = M.owned(p)
+                local who = p.author
+                if mine then
+                    path = path and M.badgedCover(path) or path
+                    who = _("In library") .. (p.author and (" \u{00B7} " .. p.author) or "")
+                end
                 out[#out + 1] = { filepath = "stuionline://" .. tostring(p.key):gsub("^/", ""), title = p.title,
-                    authors = { p.author }, author = p.author, series_name = p.series, cover_image_path = path,
-                    stui_pick = p }
+                    authors = { who }, author = who, series_name = p.series, cover_image_path = path,
+                    stui_pick = p, stui_owned = mine and mine.filepath or nil }
             end
             return out, #list
         end,
@@ -539,6 +631,7 @@ function M.registerSource()
             if book.stui_setup then M.setup() return end
             M.showSheet(book.stui_pick or { title = book.title, author = book.author, online = true })
         end,
+        -- (showSheet opens your own copy's page when the book is on the device)
     })
     if not ok then logger.warn("ShelfTechUI: online picks shelf not registered:", err) end
 
@@ -563,6 +656,32 @@ end
 --- Once (1.7.0): FOR YOU holds the recommendations (and Want to read)
 --- only. The lists from your own library (Because you read, Up next…) and
 --- the Store tiles leave it; recommendations are turned on.
+--- 1.8.0: the three recommendation shelves become one, once.
+function M.oneShelf()
+    if Store.get("foryou_one_shelf") then return end
+    local okT, TabModel = pcall(require, "lib/bookshelf_tab_model")
+    if not okT then return end
+    local ok, err = pcall(function()
+        local tabs = TabModel.load()
+        local changed = false
+        for _i, id in ipairs(OLD_SHELVES) do
+            for k = #tabs, 1, -1 do
+                if tabs[k].id == id then
+                    if TabModel.removeTree then TabModel.removeTree(tabs, id) else table.remove(tabs, k) end
+                    changed = true
+                    break
+                end
+            end
+        end
+        if changed then TabModel.save(tabs) end
+    end)
+    if not ok then logger.warn("ShelfTechUI: recommendations shelf not updated:", err) end
+    Store.set("foryou_one_shelf", true)
+    Store.set("foryou_online_seeded", nil)
+    M.syncShelves()
+    pcall(function() require("lib/bookshelf_sources").changed("stui_online") end)
+end
+
 function M.forYouOnlineOnly()
     if Store.get("foryou_online_only") then return end
     local okT, TabModel = pcall(require, "lib/bookshelf_tab_model")
@@ -613,6 +732,12 @@ end
 
 --- A pick's page in the store (the libraries are asked for it there).
 function M.showSheet(item)
+    -- on the device already: its own page (Read, Notebook, Edit…)
+    local mine = M.owned(item)
+    if mine and mine.filepath then
+        local ok = pcall(function() require("bos_bookpage").show(mine.filepath) end)
+        if ok then return end
+    end
     require("bos_store").openBook(item)
 end
 

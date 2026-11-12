@@ -2,6 +2,16 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.8.0
+
+- **Edit a book's details from its page.** Hold a book: its page now has an **Edit** key beside Resume, which opens Bookshelf's own editor straight on its Edit tab (also "Edit details…" under ⋯).
+- **Recommendations on a book's page work.** The Online tab used to download covers while it was being drawn, which could hang the page; it now shows what's on file at once: this book's series and author first, then the rest of your recommendations, with a "Get recommendations" key when there are none yet. Tapping one opens it in the store, in front.
+- **One Recommendations shelf** in FOR YOU, in place of three: more in your series, more by your authors and popular in your genres, taken in turn. (Once, on the first start.) The same single row on Read, Dash and in the store.
+- **"In library" on a recommendation you already have**, across the foot of its cover, everywhere recommendations show. Tapping it opens your own copy's page instead of the store.
+- **The store turns like a book.** A swipe left is the next page and right the one before, anywhere on the storefront (a row of covers moves on with the › beside its name). A swipe right on the first page no longer closes it.
+- **The store's ⚙ menu opens under its key**, on the right, not at the left edge.
+- **Updates**: ShelfTechUI now checks when KOReader starts and when Wi-Fi comes on (every three hours at most, not once a day), and Settings → System → Check for ShelfTechUI updates says what the last check found and when, and GitHub's own words if it couldn't be reached.
+
 ## 1.7.2
 
 Things answer when you touch them, and say what they're doing while they do it.

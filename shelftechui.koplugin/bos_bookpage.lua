@@ -161,6 +161,14 @@ function BookPage:tabBooks()
     return self.similar
 end
 
+--- Bookshelf's widget (its editor lives there): the page's, else home's.
+local function shelfOf(page)
+    local w = page and page.widget
+    if w and w._showBookDetail then return w end
+    local ok, sw = pcall(function() return require("bos_shelf").shelfWidget() end)
+    if ok and sw and sw._showBookDetail then return sw end
+end
+
 function BookPage.drawBody(self, bb, y, w)
     local W, H = Screen:getWidth(), Screen:getHeight()
     local x = self.pad
@@ -217,11 +225,24 @@ function BookPage.drawBody(self, bb, y, w)
     local r1 = Look.button(bb, tx, ty, b1w, S(38), label, { on = true, size = 12, down = self.pressed == "read" })
     self:hit(r1, function(p) p:open(p.fp) end, nil, "read")
     local ui = readerUI(self.fp)
+    local kx = tx + b1w + S(14)
     if ui then
         local l2 = _("Notebook")
-        local r2 = Look.button(bb, tx + b1w + S(14), ty, Look.textWidth(require("bos_look").case(l2), 12) + S(28), S(38), l2,
+        local w2 = Look.textWidth(require("bos_look").case(l2), 12) + S(28)
+        local r2 = Look.button(bb, kx, ty, w2, S(38), l2,
             { size = 12, down = self.pressed == "notebook" })
         self:hit(r2, function(p) p:onClose() require("bos_nav").showNotebook(ui) end, nil, "notebook")
+        kx = kx + w2 + S(14)
+    end
+    -- EDIT: Bookshelf's own editor for the book's details (title, author,
+    -- series, cover…), straight on its Edit tab
+    if shelfOf(self) then
+        local l3 = _("Edit")
+        local w3 = Look.textWidth(require("bos_look").case(l3), 12) + S(28)
+        if kx + w3 + Look.SHADOW_SMALL <= tx + tw then
+            local r3 = Look.button(bb, kx, ty, w3, S(38), l3, { size = 12, down = self.pressed == "edit" })
+            self:hit(r3, function(p) M.edit(p) end, nil, "edit")
+        end
     end
     y = math.max(y + ch + S(8), ty + S(44)) + S(10)
 
@@ -317,9 +338,13 @@ function BookPage.drawBody(self, bb, y, w)
         bb:paintRect(x, y + th, w - Look.SHADOW, Look.LINE, BLACK)
         local books = self:tabBooks()
         if #books == 0 then
-            local msg = self.tab == "online" and _("Nothing yet: pull down on For you · Online to fetch picks.")
+            local msg = self.tab == "online" and _("No recommendations yet: they're fetched over Wi-Fi.")
                 or _("Nothing like it in your library yet.")
             Look.label(bb, msg, x + S(12), y + th + S(10), w - S(24), S(24), 10, { color = Look.GRAY, keep_case = true, bold = false })
+            if self.tab == "online" then
+                local rg = Look.button(bb, x + S(12), y + th + S(40), S(230), S(38), _("Get recommendations"), { size = 11 })
+                self:hit(rg, function(p) require("bos_online").setup() end)
+            end
         else
             local rects = Page.coverRow(bb, books, x + S(8), y + th + S(14), w - Look.SHADOW - S(16), cw2,
                 { no_shelf = true, gap = S(12) })
@@ -348,11 +373,29 @@ function BookPage.drawBody(self, bb, y, w)
     end
 end
 
+--- Bookshelf's editor for this book, on its Edit tab (what it saves is
+--- what Bookshelf saves: the page is closed first, and home shows the change).
+function M.edit(page)
+    local w, fp = shelfOf(page), page.fp
+    if not w then
+        UIManager:show(require("ui/widget/infomessage"):new{ text = _("Editing is done from home: open this book's page there."), timeout = 3 })
+        return
+    end
+    page:onClose()
+    local ok, err = pcall(function()
+        local Repo = repo()
+        local book = Repo and Repo.buildBook and Repo.buildBook(fp) or { filepath = fp }
+        w:_showBookDetail(book, { stui_original = true, active = "edit" })
+    end)
+    if not ok then logger.warn("ShelfTechUI: Bookshelf's editor failed:", err) end
+end
+
 function BookPage.more(self, rect)
     local d = self.d
     local items = {}
     if self.widget and self.widget._showBookDetail then
-        table.insert(items, { text = _("Edit, cover and reviews (Bookshelf)"), callback = function()
+        table.insert(items, { text = _("Edit details…"), callback = function() M.edit(self) end })
+        table.insert(items, { text = _("Cover and reviews (Bookshelf)"), callback = function()
             local w, fp = self.widget, self.fp
             self:onClose()
             local ok, err = pcall(function()

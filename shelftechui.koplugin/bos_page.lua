@@ -255,6 +255,8 @@ function Page.coverRow(bb, books, x, y, w, cw, opts)
             else
                 Cover.paint(bb, b.filepath, cx, y, cw, ch, { shadow = S(3), title = b.title })
             end
+            -- a recommendation that's on the device already
+            if b.owned then pcall(function() require("bos_online").paintBadge(bb, cx, y, cw, ch) end) end
             if b.badge then
                 local bw = Look.textWidth(b.badge, 9) + S(10)
                 Look.box(bb, cx + cw - bw + S(6), y - S(6), bw, S(18), { fill = BLACK })

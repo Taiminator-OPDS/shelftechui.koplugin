@@ -129,10 +129,19 @@ local function fetchLatest(beta)
             user_agent = "KOReader-ShelfTechUI" })
         list = one and { one } or nil
     end
+    local raw_list = list
     -- (an error comes back as a table too: { message = ... })
     if type(list) == "table" and list.message and not list[1] then list = nil end
     if list and list[1] and type(list[1]) == "table" and list[1].message and not list[1].tag_name then list = nil end
     local out = { at = os.time(), ok = list ~= nil }
+    -- why not, in GitHub's words when it gave any (shown in Settings)
+    if not out.ok then
+        local why
+        if type(raw_list) == "table" then
+            why = raw_list.message or (type(raw_list[1]) == "table" and raw_list[1].message)
+        end
+        out.error = why and tostring(why):sub(1, 160) or "no answer"
+    end
     local best
     for _i, r in ipairs(list or {}) do
         if type(r) == "table" and not r.draft and (beta or not r.prerelease) and r.tag_name then
@@ -243,7 +252,9 @@ function M.check(opts)
             if rel then
                 M.offer(rel)
             elseif not (r and r.ok and r.at and os.time() - r.at < 120) then
-                UIManager:show(InfoMessage:new{ text = _("Couldn't reach GitHub. Check the Wi-Fi and try again."), timeout = 4 })
+                local why = r and r.at and os.time() - r.at < 120 and r.error
+                UIManager:show(InfoMessage:new{ text = _("Couldn't reach GitHub. Check the Wi-Fi and try again.")
+                    .. (why and why ~= "no answer" and ("\n\n" .. T(_("GitHub said: %1"), why)) or ""), timeout = 6 })
             else
                 UIManager:show(InfoMessage:new{ text = T(_("ShelfTechUI %1 is the newest version."), M.installed()), timeout = 3 })
             end
@@ -265,7 +276,9 @@ end
 function M.autoCheck()
     if Store.get("update_auto") == false then return end
     local last = tonumber(Store.get("update_last_check")) or 0
-    if os.time() - last < 20 * 3600 then return end
+    -- (every three hours at most: a start of KOReader or Wi-Fi coming on
+    -- asks again, so a new version is offered the same day, not the next)
+    if os.time() - last < 3 * 3600 then return end
     M.check()
 end
 
@@ -483,7 +496,26 @@ function M.settingsItems()
     return {
         {
             text = _("Check for ShelfTechUI updates"),
-            description = _("Asks GitHub for a newer ShelfTechUI (Wi-Fi). If there is one, it shows what's new, then downloads it, checks it and restarts KOReader. Nothing changes if anything goes wrong."),
+            description_func = function()
+                -- what the last check found, and when
+                local r = readResult()
+                local last = tonumber(Store.get("update_last_check")) or 0
+                local when
+                if last > 0 then
+                    local mins = math.floor((os.time() - last) / 60)
+                    when = mins < 1 and _("just now") or mins < 60 and T(_("%1 min ago"), mins)
+                        or mins < 48 * 60 and T(_("%1 h ago"), math.floor(mins / 60)) or T(_("%1 days ago"), math.floor(mins / 1440))
+                end
+                local state
+                if not when then state = _("Not checked yet.")
+                elseif r and r.ok and r.release then
+                    state = M.available() and T(_("Last checked %1: %2 is available (you have %3)."), when, r.release.version, M.installed())
+                        or T(_("Last checked %1: you have the newest version (%2)."), when, M.installed())
+                elseif r and r.ok then state = T(_("Last checked %1: no release found."), when)
+                else state = T(_("Last checked %1: GitHub couldn't be reached%2."), when,
+                    (r and r.error and r.error ~= "no answer") and (" (" .. r.error .. ")") or "") end
+                return state .. " " .. _("Tap to check now (Wi-Fi): a newer version shows what's new, downloads, is checked, and KOReader restarts. Nothing changes if anything goes wrong.")
+            end,
             mandatory_func = function()
                 local rel = M.available()
                 return rel and T(_("%1 available"), rel.version) or M.installed()
@@ -493,7 +525,7 @@ function M.settingsItems()
         },
         {
             text = _("Check automatically"),
-            description = _("Once a day, when Wi-Fi is on. A new version is offered once, on home, never over a book."),
+            description = _("When KOReader starts and when Wi-Fi comes on (every three hours at most). A new version is offered once, on home, never over a book; it stays in this list until you install it."),
             checked_func = function() return Store.get("update_auto") ~= false end,
             callback = function() Store.set("update_auto", Store.get("update_auto") == false and true or false) end,
         },

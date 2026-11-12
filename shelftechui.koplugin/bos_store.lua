@@ -315,6 +315,8 @@ local function drawCover(bb, b, x, y, w, h)
             Look.label(bb, b.author, x + S(6), y + h - S(22), w - S(12), S(16), math.max(7, math.floor(w / 14)), { color = Look.GRAY })
         end
     end
+    -- on the device already
+    if b.owned then pcall(function() require("bos_online").paintBadge(bb, x + 1, y, w - 2, h - 1) end) end
 end
 
 local function glyphKey(bb, x, y, w, h, glyph, on)
@@ -466,13 +468,12 @@ function Store:homeData()
     -- from what you read
     local Online = require("bos_online")
     local picks, seen = {}, {}
-    for _i, which in ipairs{ "series", "authors", "genres" } do
-        for _j, p in ipairs(Online.rowItems(which)) do
-            if p.key and not seen[p.key] then
-                seen[p.key] = true
-                picks[#picks + 1] = { title = p.title, author = p.author, year = p.year, pick = p,
-                    cover_path = Online.cachedCoverPath(p, "M") }
-            end
+    for _j, p in ipairs(Online.rowItems("all")) do
+        if p.key and not seen[p.key] then
+            seen[p.key] = true
+            local mine = Online.owned(p)
+            picks[#picks + 1] = { title = p.title, author = p.author, year = p.year, pick = p,
+                cover_path = Online.cachedCoverPath(p, "M"), owned = mine and mine.filepath or nil }
         end
     end
     -- one from each list in turn, so the row isn't all one author
@@ -694,6 +695,11 @@ end
 
 function Store:openBook(book)
     self:hideKeyboard()
+    -- a recommendation that's on the device already: your copy's own page
+    if book.owned then
+        local ok = pcall(function() require("bos_bookpage").show(book.owned) end)
+        if ok then return end
+    end
     local v = { kind = "book", book = book, jobs = {}, page = 1 }
     if book.pick then
         -- a recommendation: what Open Library knows shows now; the
@@ -894,6 +900,7 @@ function Store:paintBar(bb)
         self:hit(Geom:new{ x = rc.x - S(4), y = 0, w = W - rc.x + S(4), h = y + h + S(10) }, function() self:clear() end)
     else
         local rc = glyphKey(bb, kx, y, h, h, UI.GLYPH.cog)
+        self.cog_rect = Geom:new{ x = rc.x, y = rc.y, w = h, h = h }
         self:hit(Geom:new{ x = rc.x - S(4), y = 0, w = W - rc.x + S(4), h = y + h + S(10) }, function() self:settings() end)
     end
 end
@@ -932,7 +939,8 @@ function Store:settings()
         require("bos_online").refreshInBackground(true)
         UIManager:show(InfoMessage:new{ text = _("Getting new recommendations: they'll be here in a minute."), timeout = 3 })
     end })
-    UI.openList(items, nil, function() end)
+    -- (under its key, at the right, where it was tapped)
+    UI.openList(items, self.cog_rect, function() end)
 end
 
 --- The footer: ‹ page / pages ›. Returns its height.
@@ -1351,17 +1359,12 @@ function Store:onSSwipe(_, ges)
         if d == "south" then self:hideKeyboard() end
         return true
     end
-    if v.kind == "home" and (d == "west" or d == "east") then
-        for _i, b in ipairs(v.blocks or {}) do
-            if b.rect and b.swipe and inside(ges.pos, b.rect) then
-                b.swipe(d)
-                return true
-            end
-        end
-    end
+    -- the store turns like a book: a swipe left is the next page, right the
+    -- one before, on every screen of it (a row of covers moves on with the
+    -- › beside its name)
     if d == "west" or d == "north" then self:turn(1)
     elseif d == "east" then
-        if v.page > 1 then self:turn(-1) else self:back() end
+        if v.page > 1 then self:turn(-1) elseif v.kind ~= "home" then self:back() end
     elseif d == "south" then
         if v.page > 1 then self:turn(-1) end
     end
@@ -1474,6 +1477,20 @@ function M.open(opts)
         s = Store:new{}
         M.current = s
         UIManager:show(s)
+    else
+        -- already open under something (a book's page opened from it):
+        -- bring it back to the front
+        local stack = UIManager._window_stack or {}
+        if stack[#stack] and stack[#stack].widget ~= s then
+            for i = #stack, 1, -1 do
+                if stack[i].widget == s then
+                    local e = table.remove(stack, i)
+                    table.insert(stack, e)
+                    UIManager:setDirty(s, "ui")
+                    break
+                end
+            end
+        end
     end
     if opts.list then
         s:hideKeyboard()
