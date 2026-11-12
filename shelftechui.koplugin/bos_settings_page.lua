@@ -30,7 +30,7 @@ local S = UI.S
 
 local Page = {}
 
-Page.VERSION = "1.8.1"
+Page.VERSION = "1.8.2"
 
 -- Dispatcher's sub-menus edit tables in place and flag `caller.updated`.
 local saver = setmetatable({}, { __newindex = function() Store.save() end })
@@ -794,6 +794,15 @@ function Page.sections(plugin)
     table.insert(home.items, { heading = _("Home screen") })
     pick(home.items, { _("Status bar"), _("Swipe down on home"), _("Reading summary"), _("Insights in the reading summary"),
         _("Edge swipes on home"), _("Start menu entries"), _("Settings in the start menu") })
+    table.insert(home.items, {
+        text = _("Bookshelf's search key"),
+        description = _("The magnifier at the end of the shelf's tabs. Off: the search field at the top of home does its job (the same matching; \"All in your library\" opens the same results). On: both."),
+        checked_func = function() return Store.get("shelf_search_key") == true end,
+        callback = function()
+            Store.set("shelf_search_key", Store.get("shelf_search_key") ~= true or nil)
+            pcall(function() require("bos_home").refresh() end)
+        end,
+    })
     table.insert(home.items, { heading = _("Library") })
     pick(home.items, { _("Library"), _("For you") })
     fold(home, "bookshelf_tab", _("Bookshelf"))

@@ -559,6 +559,12 @@ end
 
 function Store:close()
     if self.closed then return end
+    -- (the keyboard is its own window: it goes with the store, whatever
+    -- closes it: opening your own book from the list, "All in your library")
+    if self:keyboardUp() then
+        pcall(function() self.input:onCloseKeyboard() end)
+        self.is_always_active = nil
+    end
     UIManager:close(self)
 end
 
@@ -818,28 +824,73 @@ function Store:download(v, acq)
     bd:downloadBook(book, acq)
 end
 
---- Your own books matching what's typed (every word in the title, the
---- author or the series), the ones you're reading first. At most `max`.
+--- Your own books matching what's typed, the ones you're reading first.
+--- Bookshelf's own search does the matching (Repo.searchBooks: every word
+--- in the title, the author, the series, and the genres if its setting says
+--- so; the Kindle library too), so this finds exactly what its search key
+--- found. Without it: title, author and series. At most `max` (default: all).
 function M.mine(q, max)
     local words = {}
     for w in tostring(q or ""):lower():gmatch("%S+") do words[#words + 1] = w end
     if #words == 0 or #table.concat(words) < 2 then return {} end
-    local ok, L = pcall(function() return require("bos_recs").library() end)
-    if not ok or not L or not L.books then return {} end
-    local out = {}
-    for _i, b in ipairs(L.books) do
-        local hay = (tostring(b.title or "") .. " " .. table.concat(b.authors or {}, " ") .. " " .. tostring(b.series or "")):lower()
-        local all = true
-        for _j, w in ipairs(words) do if not hay:find(w, 1, true) then all = false break end end
-        if all then out[#out + 1] = b end
+    local okL, L = pcall(function() return require("bos_recs").library() end)
+    local by_fp = {}
+    if okL and L and L.books then for _i, b in ipairs(L.books) do by_fp[b.filepath] = b end end
+    local out
+    local okR, found = pcall(function()
+        local Repo = require("lib/bookshelf_book_repository")
+        return Repo.searchBooks(table.concat(words, " "))
+    end)
+    if okR and type(found) == "table" then
+        out = {}
+        for _i, r in ipairs(found) do
+            local fp = r.filepath
+            if type(fp) == "string" then
+                -- (the library's record when there is one: it knows how far you are)
+                out[#out + 1] = by_fp[fp] or { filepath = fp, title = r.title, authors = r.authors or {}, series = r.series_name }
+            end
+        end
+    else
+        out = {}
+        for _i, b in ipairs(okL and L and L.books or {}) do
+            local hay = (tostring(b.title or "") .. " " .. table.concat(b.authors or {}, " ") .. " " .. tostring(b.series or "")):lower()
+            local all = true
+            for _j, w in ipairs(words) do if not hay:find(w, 1, true) then all = false break end end
+            if all then out[#out + 1] = b end
+        end
     end
     table.sort(out, function(a, b)
         local ra, rb = a.rank or 1e9, b.rank or 1e9
         if ra ~= rb then return ra < rb end
         return tostring(a.title or "") < tostring(b.title or "")
     end)
-    while #out > (max or 12) do table.remove(out) end
+    if max then while #out > max do table.remove(out) end end
     return out
+end
+
+--- Every one of your books that matches: Bookshelf's own results view on
+--- the Shelf layout (its groups by author, series and genre too); a page of
+--- covers on Dash.
+function Store:allMine(v)
+    local q = (v.query or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    local mine = v.mine or {}
+    self:close()
+    UIManager:nextTick(function()
+        local ok, err = pcall(function()
+            local Layouts = require("bos_layouts")
+            local bw = require("bos_shelf").shelfWidget()
+            if Layouts.id() == "shelf" and bw and bw._searchAndDrill then
+                bw:_searchAndDrill(q)
+                return
+            end
+            local books = {}
+            for _i, b in ipairs(mine) do
+                books[#books + 1] = { filepath = b.filepath, title = b.title, author = b.authors and b.authors[1], pct = b.pct }
+            end
+            Layouts.showList({ label = T(_("In your library: “%1”"), q), books = books })
+        end)
+        if not ok then logger.warn("ShelfTechUI: your library's results:", err) end
+    end)
 end
 
 function Store:read(path)
@@ -1099,6 +1150,14 @@ function Store:paintResults(bb, v, bottom)
         local n = math.min(#mine, typing and 2 or 3)
         local mh = S(66)
         Look.label(bb, T(#mine == 1 and _("On this device · %1 book") or _("On this device · %1 books"), #mine), x, y - S(4), w, S(18), 9, {})
+        if #mine > n then
+            -- the rest: every match, as Bookshelf's own search shows them
+            local all = T(_("All %1 in your library"), #mine) .. " \u{203A}"
+            local aw = Look.textWidth(Look.case(all), 9) + S(8)
+            Look.label(bb, all, x + w - aw, y - S(4), aw, S(18), 9, { align = "right" })
+            bb:paintRect(x + w - aw + S(8), y + S(12), aw - S(8), math.max(1, S(1)), Look.INK)
+            self:hit(Geom:new{ x = x + w - aw - S(10), y = y - S(12), w = aw + S(10), h = S(34) }, function() self:allMine(v) end)
+        end
         y = y + S(18)
         local mcw, mch = S(36), S(54)
         for k = 1, n do

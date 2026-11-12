@@ -2,6 +2,12 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.8.2
+
+- **One search on home.** The search field now finds exactly what Bookshelf's own search found: it uses Bookshelf's matching (title, author, series, and genres if Bookshelf is set to include them), and keeps every match, not just the first few. "All N in your library ›" beside the first matches opens Bookshelf's own results view on Shelf (with its groups by author, series and genre), or a page of covers on Dash.
+- **Bookshelf's magnifier is off the shelf's tabs**, since the field does its job. To have it back: Settings → Home → Bookshelf's search key.
+- Fixed: the keyboard could stay on screen after the store closed itself (opening one of your own books from the search).
+
 ## 1.8.1
 
 - **The Read home layout is removed.** Home is Shelf or Dash; if you were on Read, you're on Shelf.

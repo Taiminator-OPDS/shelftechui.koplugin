@@ -1392,6 +1392,13 @@ function BookshelfWidget:_rebuild()
     -- Nerd-font glyph U+F002 (fa-search) renders bolder than the
     -- bundled mdlight appbar.search SVG; ChipBar threads it through
     -- a TextWidget with KOReader's xtext fallback to symbols.ttf.
+    -- ShelfTechUI: the search field at the top of home searches the library
+    -- too (the same matching, Repo.searchBooks, and "All in your library"
+    -- opens this very results view), so this key is left out unless asked
+    -- for (Settings → Home → Bookshelf's search key).
+    local stui_search_key = false
+    pcall(function() stui_search_key = require("bos_settings_store").get("shelf_search_key") == true end)
+    if stui_search_key then
     active_chips[#active_chips + 1] = {
         key        = "search",
         nerd_glyph = "\xEF\x80\x82",
@@ -1400,6 +1407,7 @@ function BookshelfWidget:_rebuild()
         -- Search results pill's long-press does.
         holdable   = true,
     }
+    end
     -- "Micro modules" hero toggle at the right end, after search. Like the
     -- "currently reading" chip it's an action chip that renders an upward
     -- triangle when active, pointing at the hero slot it controls; the two
