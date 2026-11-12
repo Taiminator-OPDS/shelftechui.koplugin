@@ -316,8 +316,6 @@ function CatalogProvider:search(query, page, filters, opts)
     }
 end
 
-function CatalogProvider:clearCache() self._cache = {} end
-
 function CatalogProvider:hydrate(book)
     if book and (book.provider == "internet_archive" or not book.provider) then
         return InternetArchive:hydrate(book)

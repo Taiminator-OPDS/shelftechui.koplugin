@@ -40,11 +40,6 @@ local function inside(pos, r)
     return pos and r and pos.x >= r.x and pos.x < r.x + r.w and pos.y >= r.y and pos.y < r.y + r.h
 end
 
-local function wifiOn()
-    local ok, on = pcall(function() return require("ui/network/manager"):isWifiOn() end)
-    return ok and on
-end
-
 -- ---------------------------------------------------------------------------
 -- The tiles (which ones, their order and their long-press: bos_controls)
 -- ---------------------------------------------------------------------------

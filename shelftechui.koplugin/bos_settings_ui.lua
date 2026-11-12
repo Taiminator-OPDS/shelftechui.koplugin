@@ -107,7 +107,6 @@ end
 local UI = require("bos_ui")
 local function face(size) return UI.face(size) end
 local function smallface(size) return UI.face(size) end
-local function italicface(size) return UI.italicFace(size) end
 local function bface(size) return (UI.boldFace(size)) end
 local function bflag(size) local _f, b = UI.boldFace(size) return b end
 
@@ -329,10 +328,15 @@ function HubScreen:popTo(depth)
     self:render()
 end
 
-function HubScreen:goHome() self:popTo(1) end
-
 function HubScreen:closeAll()
-    self.plugin:closeHub()
+    -- (an editor opened from a row may have taken this screen off the stack
+    -- and put it back itself, as Bookshelf's line editors do: by then the
+    -- plugin had let go of it, and asking the plugin to close it did nothing)
+    if self.plugin.screen == self then
+        self.plugin:closeHub()
+    else
+        UIManager:close(self)
+    end
 end
 
 function HubScreen:onBack() self:back() return true end
@@ -856,94 +860,6 @@ function HubScreen:strip(cells, w)
     } }
 end
 
---- The sections as chips, paged with ‹ › cells when they don't all fit.
-function HubScreen:sectionChips(w)
-    local b = Size.border.default
-    local f, bold = Look.mono(CHIP_FONT - 3), true
-    local chev_w = S(40)
-    local nat = {}
-    local total = 0
-    for i, sec in ipairs(self.sections) do
-        local tw = TextWidget:new{ text = upper(sec.name), face = f, bold = bold }
-        nat[i] = tw:getSize().w + 2 * S(12)
-        tw:free()
-        total = total + nat[i] + (i > 1 and b or 0)
-    end
-    local inner = w - 2 * b
-    local pages = {}
-    if total <= inner then
-        pages[1] = {}
-        for i = 1, #self.sections do table.insert(pages[1], i) end
-    else
-        local room = inner - 2 * (chev_w + b)
-        local cur, used = {}, 0
-        for i = 1, #self.sections do
-            local need = nat[i] + (#cur > 0 and b or 0)
-            if #cur > 0 and used + need > room then
-                table.insert(pages, cur)
-                cur, used = {}, 0
-                need = nat[i]
-            end
-            table.insert(cur, i)
-            used = used + need
-        end
-        if #cur > 0 then table.insert(pages, cur) end
-    end
-    if not self.strip_page then
-        self.strip_page = 1
-        for p, list in ipairs(pages) do
-            for _j, i in ipairs(list) do if i == self.section_idx then self.strip_page = p end end
-        end
-    end
-    self.strip_page = math.max(1, math.min(#pages, self.strip_page))
-    local p = self.strip_page
-    local cells = {}
-    local paged = #pages > 1
-    if paged then
-        table.insert(cells, { icon = "chevron.left", width = chev_w, enabled = p > 1,
-            callback = function() self.strip_page = p - 1 self:render() end })
-    end
-    for _j, i in ipairs(pages[p]) do
-        local sec = self.sections[i]
-        table.insert(cells, { text = sec.name, selected = i == self.section_idx,
-            callback = function()
-                if i == self.section_idx and #self.stack == 1 then return end
-                self:openSection(i)
-            end })
-    end
-    if paged then
-        table.insert(cells, { icon = "chevron.right", width = chev_w, enabled = p < #pages,
-            callback = function() self.strip_page = p + 1 self:render() end })
-    end
-    return self:strip(cells, w)
-end
-
---- In a sub-menu: [‹] [SECTION] [Menu] [Sub-menu] … (the current page is the
---- title below). Older crumbs give way to "…" when they don't fit.
-function HubScreen:breadcrumbs(w)
-    local sec = self.sections[self.section_idx]
-    local depth = #self.stack
-    local cells = {
-        { icon = "chevron.left", width = S(44), callback = function() self:back() end },
-        { text = sec and sec.name or self.stack[1].title, selected = true,
-          callback = function() self:popTo(1) end },
-    }
-    local crumbs = {}
-    for d = 2, depth - 1 do
-        local dd = d
-        table.insert(crumbs, { text = self.stack[d].title, callback = function() self:popTo(dd) end })
-    end
-    -- keep the nearest crumbs; at most two, the rest collapse into "…"
-    if #crumbs > 2 then
-        local keep = { { text = "…", callback = crumbs[#crumbs - 2].callback } }
-        table.insert(keep, crumbs[#crumbs - 1])
-        table.insert(keep, crumbs[#crumbs])
-        crumbs = keep
-    end
-    for _i, c in ipairs(crumbs) do table.insert(cells, c) end
-    return self:strip(cells, w)
-end
-
 -- Footer: ✕ close, and the page controls when there's more than one page.
 function HubScreen:buildFooter(page, count, w)
     local h = self.footer_h
@@ -1211,6 +1127,21 @@ function HubScreen:onCloseWidget()
 end
 
 function HubScreen:onShow()
+    -- shown again after something closed it for a while (see closeAll): it's
+    -- the plugin's screen again, and what it lists may have changed
+    if self.plugin and self.plugin.screen ~= self then
+        local other = self.plugin.screen
+        self.plugin.screen = self
+        if other then pcall(function() UIManager:close(other) end) end
+        pcall(function()
+            local lvl = self.stack and self.stack[#self.stack]
+            if lvl and lvl.rebuild then
+                local ok, items = pcall(lvl.rebuild)
+                if ok and type(items) == "table" then lvl.items = items end
+            end
+            self:render()
+        end)
+    end
     UIManager:setDirty(self, function() return "ui", self.dimen end)
 end
 

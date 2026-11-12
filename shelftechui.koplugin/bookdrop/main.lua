@@ -376,53 +376,6 @@ local function selectedOptionLabel(options, value)
     end
 end
 
-function Bookdrop:filterSummary(filters)
-    filters = filters or {}
-    local labels = {}
-    local content = selectedOptionLabel(content_options, filters.content)
-    if content and filters.content then labels[#labels + 1] = content end
-    local language = selectedOptionLabel(language_options, filters.language)
-    if language and filters.language then labels[#labels + 1] = language end
-
-    if type(filters.formats) == "table" then
-        local selected, total = {}, #format_options
-        for option_number, option in ipairs(format_options) do
-            if filters.formats[option[1]] then selected[#selected + 1] = _(option[2]) end
-        end
-        if #selected < total then labels[#labels + 1] = table.concat(selected, "/") end
-    end
-    if type(filters.libraries) == "table" then
-        local selected = {}
-        for option_number, option in ipairs(library_options) do
-            if filters.libraries[option[1]] then selected[#selected + 1] = _(option[2]) end
-        end
-        if #selected == 1 then
-            labels[#labels + 1] = selected[1]
-        elseif #selected < #library_options then
-            labels[#labels + 1] = T(_("%1 libraries"), #selected)
-        end
-    end
-    return table.concat(labels, " · ")
-end
-
-function Bookdrop:allFormatsEnabled()
-    local formats = self:getFilters().formats
-    for option_number, option in ipairs(format_options) do
-        if not formats[option[1]] then return false end
-    end
-    return true
-end
-
-function Bookdrop:selectAllFormats()
-    local filters = self:getFilters()
-    for option_number, option in ipairs(format_options) do
-        filters.formats[option[1]] = true
-    end
-    self.settings:saveSetting("filters", filters)
-    self.settings:flush()
-    self:refreshSettingsMenu()
-end
-
 function Bookdrop:toggleFormat(format)
     local filters = self:getFilters()
     if filters.formats[format] then
@@ -437,49 +390,6 @@ function Bookdrop:toggleFormat(format)
         filters.formats[format] = nil
     else
         filters.formats[format] = true
-    end
-    self.settings:saveSetting("filters", filters)
-    self.settings:flush()
-    self:refreshSettingsMenu()
-end
-
-function Bookdrop:formatMenu()
-    local items = {
-        {
-            text = _("Select all formats"),
-            checked_func = function() return self:allFormatsEnabled() end,
-            mandatory_func = function()
-                return self:allFormatsEnabled() and CHECKED or UNCHECKED
-            end,
-            callback = function() self:selectAllFormats() end,
-        },
-    }
-    for option_number, option in ipairs(format_options) do
-        local value, label = option[1], option[2]
-        items[#items + 1] = {
-            text = _(label),
-            checked_func = function() return self:getFilters().formats[value] == true end,
-            mandatory_func = function()
-                return self:getFilters().formats[value] and CHECKED or UNCHECKED
-            end,
-            callback = function() self:toggleFormat(value) end,
-        }
-    end
-    return items
-end
-
-function Bookdrop:allLibrariesEnabled()
-    local libraries = self:getFilters().libraries
-    for option_number, option in ipairs(library_options) do
-        if not libraries[option[1]] then return false end
-    end
-    return true
-end
-
-function Bookdrop:selectAllLibraries()
-    local filters = self:getFilters()
-    for option_number, option in ipairs(library_options) do
-        filters.libraries[option[1]] = true
     end
     self.settings:saveSetting("filters", filters)
     self.settings:flush()
@@ -504,31 +414,6 @@ function Bookdrop:toggleLibrary(library)
     self.settings:saveSetting("filters", filters)
     self.settings:flush()
     self:refreshSettingsMenu()
-end
-
-function Bookdrop:libraryMenu()
-    local items = {
-        {
-            text = _("Select all libraries"),
-            checked_func = function() return self:allLibrariesEnabled() end,
-            mandatory_func = function()
-                return self:allLibrariesEnabled() and CHECKED or UNCHECKED
-            end,
-            callback = function() self:selectAllLibraries() end,
-        },
-    }
-    for option_number, option in ipairs(library_options) do
-        local value, label = option[1], option[2]
-        items[#items + 1] = {
-            text = _(label),
-            checked_func = function() return self:getFilters().libraries[value] == true end,
-            mandatory_func = function()
-                return self:getFilters().libraries[value] and CHECKED or UNCHECKED
-            end,
-            callback = function() self:toggleLibrary(value) end,
-        }
-    end
-    return items
 end
 
 function Bookdrop:loadCoversProgressively(books, widget, limit)
@@ -565,131 +450,10 @@ function Bookdrop:loadCoversProgressively(books, widget, limit)
     UIManager:scheduleIn(0.3, poll)
 end
 
-function Bookdrop:optionMenu(key, options, on_select)
-    local items = {}
-    for option_index, option in ipairs(options) do
-        local value, label = option[1], option[2]
-        items[#items + 1] = {
-            text = _(label),
-            checked_func = function() return (self:getFilters()[key] or "") == value end,
-            mandatory_func = function()
-                return (self:getFilters()[key] or "") == value and CHECKED or ""
-            end,
-            callback = function()
-                self:setFilter(key, value)
-                self:refreshSettingsMenu()
-                if on_select then on_select(value, _(label)) end
-            end,
-        }
-    end
-    return items
-end
-
 local function safeFilename(value)
     value = tostring(value or "book"):gsub("[%z\1-\31/\\:*?\"<>|]", "-")
     value = value:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
     return value ~= "" and value or "book"
-end
-
-local function coverExtension(path)
-    local file = io.open(path, "rb")
-    if not file then return nil end
-    local magic = file:read(8) or ""
-    file:close()
-    if magic:sub(1, 3) == "\255\216\255" then return "jpg" end
-    if magic == "\137PNG\r\n\26\n" then return "png" end
-end
-
-function Bookdrop:saveCoverImage(book, source_path)
-    local extension = coverExtension(source_path)
-    if not extension then
-        UIManager:show(InfoMessage:new{ text = _("The cover is not a supported JPEG or PNG image.") })
-        return
-    end
-
-    local download_dir = G_reader_settings:readSetting("download_dir")
-        or G_reader_settings:readSetting("home_dir")
-        or G_reader_settings:readSetting("lastdir")
-        or Device.home_dir
-        or "."
-    local destination = download_dir .. "/" .. safeFilename(book.title)
-        .. " - cover." .. extension
-    local existing = io.open(destination, "rb")
-    if existing then
-        existing:close()
-        UIManager:show(InfoMessage:new{
-            text = T(_("Cover already downloaded to:\n%1"), destination),
-        })
-        return
-    end
-
-    local temporary_path = destination .. ".part"
-    os.remove(temporary_path)
-    local input, input_err = io.open(source_path, "rb")
-    if not input then
-        UIManager:show(InfoMessage:new{
-            text = T(_("Could not read the cover image: %1"), input_err or _("unknown error")),
-        })
-        return
-    end
-    local output, output_err = io.open(temporary_path, "wb")
-    if not output then
-        input:close()
-        UIManager:show(InfoMessage:new{
-            text = T(_("Could not save the cover image: %1"), output_err or _("unknown error")),
-        })
-        return
-    end
-
-    local copied, copy_err = pcall(function()
-        while true do
-            local chunk = input:read(64 * 1024)
-            if not chunk then break end
-            assert(output:write(chunk))
-        end
-    end)
-    input:close()
-    local closed = output:close()
-    if not copied or not closed or not os.rename(temporary_path, destination) then
-        os.remove(temporary_path)
-        UIManager:show(InfoMessage:new{
-            text = T(_("Could not save the cover image: %1"),
-                copy_err or _("the destination is not writable")),
-        })
-        return
-    end
-
-    UIManager:show(InfoMessage:new{
-        text = T(_("Cover downloaded successfully to:\n%1"), destination),
-    })
-end
-
-function Bookdrop:downloadCover(book)
-    local source_path = book.cover_path or CoverCache:get(book)
-    if source_path then
-        self:saveCoverImage(book, source_path)
-        return
-    end
-    if not book.cover_url then
-        UIManager:show(InfoMessage:new{ text = _("No cover image is available for this book.") })
-        return
-    end
-
-    NetworkMgr:runWhenConnected(function()
-        Trapper:wrap(function()
-            Trapper:info(_("Downloading cover image…"))
-            source_path = CoverCache:fetch(book)
-            Trapper:clear()
-            if source_path then
-                book.cover_path = source_path
-                self:saveCoverImage(book, source_path)
-            else
-                UIManager:show(InfoMessage:new{
-                    text = _("Could not download a cover image for this book."),
-                })
-            end
-        end)
-    end)
 end
 
 --- Where a book's file goes (and is, once downloaded).
@@ -1000,12 +764,7 @@ end
 function Bookdrop:refreshSettingsMenu() end -- (the Settings app redraws its own rows)
 
 function Bookdrop:showStoreHome() require("bos_store").open() end
-function Bookdrop:showSearchDialog(_parent, query)
-    if query and query:match("%S") then require("bos_store").open{ query = query }
-    else require("bos_store").open{ search = true } end
-end
 function Bookdrop:runSearch(query) require("bos_store").open{ query = query } end
-function Bookdrop:showBook(book) require("bos_store").open{ book = book } end
 
 --- The store's settings, as rows for the Settings app.
 function Bookdrop:settingsItems()

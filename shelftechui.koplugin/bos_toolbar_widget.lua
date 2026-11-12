@@ -516,10 +516,6 @@ function ReadingToolbar:refresh(refresh_type)
     UIManager:setDirty(old_pill and not new_pill and self.ui or self, refresh_type or "ui", region)
 end
 
-function ReadingToolbar:refreshTop()
-    UIManager:setDirty(self, "ui", self.top_dimen)
-end
-
 function ReadingToolbar:onCloseWidget()
     self.closed = true
     local top, bottom = self.top_dimen, self.bottom_dimen
@@ -544,11 +540,6 @@ function ReadingToolbar:closeAnd(fn)
             if not ok then logger.warn("ShelfTechUI: action failed:", err) end
         end)
     end
-end
-
---- The Settings app.
-function ReadingToolbar:openMainMenu()
-    self:closeAnd(function() require("bos_settings").open() end)
 end
 
 --- Quick Settings (also what swiping down from the top opens while reading).
@@ -594,11 +585,6 @@ function ReadingToolbar:openMenuFromSwipe()
 end
 
 -- ------------------------------------------------------------ buttons
-
-function ReadingToolbar:setOpenButton(id)
-    self.open_button = id
-    self:refreshTop()
-end
 
 function ReadingToolbar:onButton(b, rect)
     local id = b.id
@@ -700,31 +686,6 @@ function ReadingToolbar:cycleStatsView(dir)
 end
 
 -- ------------------------------------------------------------ navigation
-
-function ReadingToolbar:gotoChapter(dir)
-    local cur = self:currentPage()
-    local target
-    if dir > 0 then
-        target = self.ui.toc:getNextChapter(cur)
-    else
-        -- first back to the start of this chapter, then the one before
-        target = self.ui.toc:getPreviousChapter(cur)
-    end
-    if target and target ~= cur then
-        self.preview_page = nil
-        self.plugin:goToPage(target)
-        self:refresh()
-    end
-end
-
-function ReadingToolbar:stepPage(dir)
-    local target = self:currentPage() + dir
-    if target >= 1 and target <= self.page_count then
-        self.preview_page = nil
-        self.plugin:goToPage(target)
-        self:refresh()
-    end
-end
 
 function ReadingToolbar:previewAt(x)
     local page = self:pageForPct(self:pctForX(x))

@@ -35,12 +35,11 @@ end
 
 local StatusBar = InputContainer:extend{
     width = nil,
-    -- search = true: a search field in the room the chips leave on the first
-    -- row (the Shelf layout's top: the chips sit on the right, and the rest
-    -- of the row was empty). Tap: one search, your books then the store
-    -- (bos_store); hold: KOReader's search by file name.
-    search = false,
 }
+
+-- A field (the "Search field" control) is at least this wide, and grows to
+-- take the room its row has left.
+local FIELD_MIN = 150
 
 function StatusBar:init()
     self.labels = Store.get("home_chip_labels") == true
@@ -75,6 +74,7 @@ function StatusBar:chipText(c)
 end
 
 function StatusBar:chipWidth(c)
+    if c.field then return S(FIELD_MIN) end
     local glyph_w = glyphOf(c) and math.floor(self.chip_h * 0.5) or 0
     local text, f, b = self:chipText(c)
     if not text then return math.max(self.chip_h + S(6), glyph_w + 2 * self.pad) end
@@ -150,15 +150,17 @@ function StatusBar:layout()
     self.height = math.max(1, #rows) * self.chip_h + math.max(0, #rows - 1) * self.row_gap + self.shadow
 end
 
---- The search field in the first row's free room (when there's enough).
-function StatusBar:paintSearch(bb, x, y, room)
-    self._search_rect = nil
+--- A field among the chips (the search field): a box as wide as it's given,
+--- a magnifier and what it searches. Pressed: filled, like a chip.
+function StatusBar:paintField(bb, c, x, y, w)
     local Look = require("bos_look")
-    local w = room - self.gap - self.shadow
-    if not self.search or w < S(150) then return end
     local h = self.chip_h
-    Look.box(bb, x, y, w, h, { shadow = self.shadow, border = UI.line() })
-    local t = TextWidget:new{ text = UI.GLYPH.search, face = UI.symbolFace(UI.ptForPx(math.floor(h * 0.38))), fgcolor = BLACK }
+    local sel = self.pressed == c
+    local sh = self.shadow
+    if sel then x, y = x + sh, y + sh else Look.shadow(bb, x, y, w, h, sh) end
+    Look.box(bb, x, y, w, h, { border = UI.line(), fill = sel and BLACK or WHITE })
+    local ink = sel and WHITE or BLACK
+    local t = TextWidget:new{ text = UI.GLYPH.search, face = UI.symbolFace(UI.ptForPx(math.floor(h * 0.38))), fgcolor = ink }
     local sz = t:getSize()
     t:paintTo(bb, x + S(12), y + math.floor((h - sz.h) / 2))
     t:free()
@@ -166,24 +168,29 @@ function StatusBar:paintSearch(bb, x, y, room)
     local _ = require("gettext")
     local hint = w > S(300) and _("Search your books and the store") or w > S(190) and _("Books and the store") or _("Search")
     local face = Look.text(13) or UI.face(13)
-    local t2 = TextWidget:new{ text = hint, face = face, fgcolor = Look.GRAY, max_width = w - (lx - x) - S(8) }
+    local t2 = TextWidget:new{ text = hint, face = face, fgcolor = sel and WHITE or Look.GRAY, max_width = math.max(1, w - (lx - x) - S(8)) }
     local s2 = t2:getSize()
     t2:paintTo(bb, lx, y + math.floor((h - s2.h) / 2))
     t2:free()
-    self._search_rect = Geom:new{ x = x, y = y - S(4), w = w + self.shadow, h = h + S(8) }
+    c._rect = Geom:new{ x = sel and x - sh or x, y = sel and y - sh or y, w = w + sh, h = h + sh }
 end
 
 function StatusBar:paintTo(bb, x, y)
     self.dimen = Geom:new{ x = x, y = y, w = self.width, h = self.height }
-    if #self.rows == 0 then self:paintSearch(bb, x, y, self.width + self.gap) end -- (no chips: the field has the row)
     for r, row in ipairs(self.rows) do
         -- spacers share the free room; without one the row sits on the right
-        local spacers = 0
-        for _i, it in ipairs(row.items) do if it.c.spacer then spacers = spacers + 1 end end
+        -- and a field takes the free room first: all of it (shared between
+        -- fields, if there are several), so it's as wide as its row allows
+        -- wherever it stands among the chips
+        local spacers, fields = 0, 0
+        for _i, it in ipairs(row.items) do
+            if it.c.spacer then spacers = spacers + 1 elseif it.c.field then fields = fields + 1 end
+        end
         local free = math.max(0, self.width - row.w)
-        local cx = x + (spacers == 0 and free or 0)
+        local grow = fields > 0 and math.floor(free / fields) or 0
+        if fields > 0 then free = 0 end
+        local cx = x + ((spacers == 0 and fields == 0) and free or 0)
         local cy = y + (r - 1) * (self.chip_h + self.row_gap)
-        if r == 1 and spacers == 0 then self:paintSearch(bb, x, cy, free) end
         local first = true
         for _i, it in ipairs(row.items) do
             if it.c.spacer then
@@ -194,8 +201,13 @@ function StatusBar:paintTo(bb, x, y)
                 cx = cx + room
             else
                 if not first then cx = cx + self.gap end
-                self:paintChip(bb, it.c, cx, cy, it.w)
-                cx = cx + it.w
+                if it.c.field then
+                    self:paintField(bb, it.c, cx, cy, it.w + grow)
+                    cx = cx + it.w + grow
+                else
+                    self:paintChip(bb, it.c, cx, cy, it.w)
+                    cx = cx + it.w
+                end
                 first = false
             end
         end
@@ -240,11 +252,6 @@ function StatusBar:flash(c)
 end
 
 function StatusBar:onTapChip(_, ges)
-    if self._search_rect and inside(ges.pos, self._search_rect) then
-        -- the field answers first (a fast flash of itself), then the store's search opens
-        UI.press(self._search_rect, function() require("bos_store").open{ search = true } end)
-        return true
-    end
     local c = self:chipAt(ges.pos)
     if not c then return false end
     if c.home.menu then
@@ -281,10 +288,6 @@ function StatusBar:afterAction(c)
 end
 
 function StatusBar:onHoldChip(_, ges)
-    if self._search_rect and inside(ges.pos, self._search_rect) then
-        UIManager:sendEvent(require("ui/event"):new("ShowFileSearch"))
-        return true
-    end
     local c = self:chipAt(ges.pos)
     if not c then return false end
     self:flash(c)

@@ -128,6 +128,5 @@ function M.current()
 end
 
 function M.id() return M.current().id end
-function M.is(id) return M.current().id == id end
 
 return M

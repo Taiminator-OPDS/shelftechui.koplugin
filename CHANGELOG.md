@@ -2,6 +2,12 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.8.3
+
+- **The search field is a piece of the home bar you can place.** It's now in the bar's own list (Settings → Home → Status bar → Search field), so you can put chips on either side of it, and it always stretches to take whatever room its row has left: from the chip before it to the chip after it. The same on Dash. (It was added once at the front of your bar; with a great many chips it keeps a minimum width and the rest wrap to a second row.)
+- **Fixed: Settings wouldn't close after editing in Bookshelf's settings** (Edit top panel content and its other line editors). Those editors take the Settings screen away while they're open and put it back themselves; by then Settings had lost track of its own screen, so its close corner and Back did nothing. It now picks its screen up again when it's shown, and closes it either way.
+- Pruned: 29 functions nothing called any more (about 400 lines), left from the old toolbar, the old Settings chrome and Bookdrop's old menus.
+
 ## 1.8.2
 
 - **One search on home.** The search field now finds exactly what Bookshelf's own search found: it uses Bookshelf's matching (title, author, series, and genres if Bookshelf is set to include them), and keeps every match, not just the first few. "All N in your library ›" beside the first matches opens Bookshelf's own results view on Shelf (with its groups by author, series and genre), or a page of covers on Dash.

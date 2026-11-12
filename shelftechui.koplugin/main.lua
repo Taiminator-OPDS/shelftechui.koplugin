@@ -315,6 +315,18 @@ function BookshelfOS:init()
         for _i, id in ipairs(Controls.ids("home")) do table.insert(ids, id) end
         Controls.setIds("home", ids)
     end)
+    -- the search field is one of the home bar's own pieces (1.8.3), so it can
+    -- be put anywhere among the chips: added once, first on the bar
+    pcall(function()
+        local St = require("bos_settings_store")
+        if St.get("searchbar_seeded") then return end
+        St.set("searchbar_seeded", true)
+        local Controls = require("bos_controls")
+        if type(St.get("home_controls")) ~= "table" or Controls.isOn("home", "searchbar") then return end
+        local ids = { "searchbar" }
+        for _i, id in ipairs(Controls.ids("home")) do table.insert(ids, id) end
+        Controls.setIds("home", ids)
+    end)
     -- home layouts (Shelf, Dash): after the edge swipes, so theirs pass through
     pcall(function() require("bos_layouts").install() end)
     -- 1.4.0 put the Layout chip on the home bar unasked; it's now yours to add

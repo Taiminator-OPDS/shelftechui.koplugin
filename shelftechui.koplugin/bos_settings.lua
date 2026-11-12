@@ -222,8 +222,6 @@ end
 -- What the app shows
 -- ---------------------------------------------------------------------------
 
-function Settings:getIcon() return ICON_NAME end
-
 function Settings:tabs()
     local menu = self.ui.menu
     if not menu then return {} end

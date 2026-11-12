@@ -367,23 +367,6 @@ function M.setEnabled(on)
 end
 function M.fresh() return store():readSetting("day") == os.date("%Y-%m-%d") end
 
---- Runs `fn` with fresh picks: fetched once a day, over Wi-Fi.
-function M.withPicks(fn, force)
-    if not M.enabled() then return fn(M.rows()) end
-    if (M.fresh() and not force) or not connected() then return fn(M.rows()) end
-    local InfoMessage = require("ui/widget/infomessage")
-    local msg = InfoMessage:new{ text = _("Fetching picks from Open Library…") }
-    UIManager:show(msg)
-    UIManager:forceRePaint()
-    UIManager:nextTick(function()
-        local ok, rows = pcall(M.fetch)
-        UIManager:close(msg)
-        if not ok then logger.warn("ShelfTechUI: online picks failed:", rows) rows = M.rows() end
-        local okF, err = pcall(fn, rows)
-        if not okF then logger.warn("ShelfTechUI: online picks page failed:", err) end
-    end)
-end
-
 -- ---------------------------------------------------------------- covers, descriptions, portraits
 
 function M.coverPath(item, size)

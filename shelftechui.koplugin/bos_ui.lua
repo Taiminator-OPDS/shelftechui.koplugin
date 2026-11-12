@@ -74,14 +74,6 @@ function M.hasBookshelf()
 end
 
 
---- Send a Bookshelf event to the current UI (true when Bookshelf is there).
-function M.bookshelfEvent(name, ...)
-    local p, ui = M.bookshelfPlugin()
-    if not p then return false end
-    ui:handleEvent(Event:new(name, ...))
-    return true
-end
-
 -- ---------------------------------------------------------------------------
 -- Fonts (Bookshelf's UI font when installed, else KOReader's)
 -- ---------------------------------------------------------------------------
@@ -137,7 +129,6 @@ end
 -- ---------------------------------------------------------------------------
 
 function M.line() return require("bos_look").LINE end
-function M.stripLine() return Size.border.default end
 
 function M.nightMode()
     local NM = try("lib/bookshelf_night_mode_sync")

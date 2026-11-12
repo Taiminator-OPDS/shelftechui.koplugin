@@ -154,6 +154,16 @@ local CATALOGUE = {
                  qs = _("Searches the text of this book.") },
     },
     {
+        -- the search field (bos_store's search: your books, then the store):
+        -- on the home bar it's a field, not a chip, and takes whatever room
+        -- its row has left, wherever it's put among the chips
+        id = "searchbar", name = _("Search field"), glyph = UI.GLYPH.search, field = true,
+        available = function() return true end,
+        home = { tap = function() require("bos_store").open{ search = true } end },
+        hold = { home = event("ShowFileSearch"), name_home = _("KOReader's search by file name") },
+        says = { home = _("A search field that fills the room left on its row: your own books as you type, then the store's libraries.") },
+    },
+    {
         -- the store (bos_store): a tap opens the storefront
         id = "store", name = _("Store"), glyph = UI.GLYPH.cart,
         available = function() return require("bos_online").bookdrop() ~= nil end,
@@ -599,7 +609,7 @@ end
 
 
 Controls.DEFAULTS = {
-    home = { "store", "light", "wifi", "settings" },
+    home = { "searchbar", "store", "light", "wifi", "settings" },
     qs = { "wifi", "night", "rotate", "refresh" },
 }
 

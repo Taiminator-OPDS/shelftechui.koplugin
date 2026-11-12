@@ -146,13 +146,6 @@ end
 
 -- ---------------------------------------------------------------- B8: a word of the day
 
-local function vocabDB()
-    local DataStorage = require("datastorage")
-    local lfs = require("libs/libkoreader-lfs")
-    local path = DataStorage:getSettingsDir() .. "/vocabulary_builder.sqlite3"
-    return lfs.attributes(path, "mode") == "file" and path or nil
-end
-
 
 function M.showWord(w)
     if not w then return end
