@@ -2,6 +2,12 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.8.4
+
+- **Back from the search screen is home.** Opened from home's search field, the search screen's Back (its × key, the Back button, or a swipe right) now closes it in one go, keyboard and all, instead of stepping through the storefront first. Swiping the keyboard down still only puts the keyboard away.
+- **A storefront key beside the field** on that search screen (the cart): one tap for the store's main page. From there, Back is home too.
+- Opened as the store (the Store chip), nothing changes: Back puts the keyboard away, then leaves.
+
 ## 1.8.3
 
 - **The search field is a piece of the home bar you can place.** It's now in the bar's own list (Settings → Home → Status bar → Search field), so you can put chips on either side of it, and it always stretches to take whatever room its row has left: from the chip before it to the chip after it. The same on Dash. (It was added once at the front of your bar; with a great many chips it keeps a minimum width and the rest wrap to a second row.)

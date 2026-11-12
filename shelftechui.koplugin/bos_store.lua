@@ -371,6 +371,10 @@ function Store:init()
     local key_w = self.bar_h
     self.field_x = self.pad + key_w + S(10)
     self.field_w = W - self.pad - self.field_x - key_w - S(10) - Look.SHADOW_SMALL
+    -- opened by home's search field (from_search): it's a search screen
+    -- first, so Back from it is home, and the storefront has a key of its
+    -- own beside the field
+    if self.from_search then self.field_w = self.field_w - key_w - S(10) - Look.SHADOW_SMALL end
     self.input = InputText:new{
         text = "", hint = _("Search your books and the store"),
         width = self.field_w - S(40) - S(8), face = tface(15),
@@ -440,9 +444,27 @@ function Store:hideKeyboard()
     self.input:unfocus()
     self.is_always_active = nil
     local v = self:view()
-    if v.kind == "results" and v.typed and not (v.query and v.query:match("%S")) then
+    if v.kind == "results" and v.typed and not (v.query and v.query:match("%S")) and not self.from_search then
         self:pop(true)
     end
+    self:redraw("ui")
+end
+
+--- Is this the search screen that home's field opened (nothing under it
+--- but the storefront it never showed)?
+function Store:onSearchScreen()
+    local v = self:view()
+    return self.from_search and #self.stack == 2 and v.kind == "results" and v.typed == true
+end
+
+--- The storefront (the key beside the field on the search screen).
+function Store:toStorefront()
+    if self:keyboardUp() then
+        self.input:onCloseKeyboard()
+        self.input:unfocus()
+        self.is_always_active = nil
+    end
+    while #self.stack > 1 do self:pop(true) end
     self:redraw("ui")
 end
 
@@ -550,6 +572,11 @@ function Store:pop(quiet)
 end
 
 function Store:back()
+    -- the search screen opened from home: Back is home, in one go
+    if self:onSearchScreen() then
+        self:close()
+        return
+    end
     if self:keyboardUp() then
         self:hideKeyboard()
         return
@@ -930,7 +957,9 @@ end
 function Store:paintBar(bb)
     local W = self.dimen.w
     local y, h, pad = self.bar_y, self.bar_h, self.pad
-    local home = #self.stack <= 1 and not self:keyboardUp()
+    -- (× where Back leaves the store: the storefront, and the search screen
+    -- home's field opened)
+    local home = (#self.stack <= 1 and not self:keyboardUp()) or self:onSearchScreen()
     local r = Look.button(bb, pad, y, h, h, home and "\u{00D7}" or "\u{2039}", { size = 18 })
     self:hit(Geom:new{ x = 0, y = 0, w = r.x + r.w + S(4), h = y + h + S(10) }, function() self:back() end)
     -- the field
@@ -946,6 +975,15 @@ function Store:paintBar(bb)
     self.field_rect = Geom:new{ x = fx, y = y - S(6), w = fw, h = h + S(12) }
     -- the key on the right: clear what's typed, else the store's settings
     local kx = fx + fw + Look.SHADOW_SMALL + S(10)
+    if self.from_search then
+        -- the storefront's key (filled while it's the storefront you're on)
+        local at_home = self:view().kind == "home"
+        local rs = glyphKey(bb, kx, y, h, h, UI.GLYPH.cart, at_home)
+        if not at_home then
+            self:hit(Geom:new{ x = rs.x - S(4), y = 0, w = h + S(8), h = y + h + S(10) }, function() self:toStorefront() end)
+        end
+        kx = kx + h + Look.SHADOW_SMALL + S(10)
+    end
     if (self.input:getText() or "") ~= "" then
         local rc = Look.button(bb, kx, y, h, h, "\u{00D7}", { size = 16 })
         self:hit(Geom:new{ x = rc.x - S(4), y = 0, w = W - rc.x + S(4), h = y + h + S(10) }, function() self:clear() end)
@@ -964,7 +1002,7 @@ function Store:clear()
     if v.kind == "results" and v.typed then
         Search.cancel(v.session)
         v.query, v.books, v.session, v.waiting, v.note = "", {}, nil, false, nil
-        if not self:keyboardUp() then self:pop(true) end
+        if not self:keyboardUp() and not self.from_search then self:pop(true) end
     end
     self:redraw("ui")
 end
@@ -1533,7 +1571,7 @@ function M.open(opts)
     end
     local s = M.current
     if not s or s.closed then
-        s = Store:new{}
+        s = Store:new{ from_search = opts.search and true or nil }
         M.current = s
         UIManager:show(s)
     else
