@@ -13,7 +13,7 @@ put on hold. Nothing leaves the device.
           genres     Unread in your top genres
           discover   Everything unread, best matches first, lightly shuffled
                      each day
-  similar(fp), byAuthor(fp), series(fp): for the book pages
+  byAuthor(fp), series(fp): for the series and author pages
 
 These are Bookshelf shelf sources ("For you"), so they're shelves like any
 other: on home, in a shelf of shelves, in any view.
@@ -281,25 +281,6 @@ function M.list(which, limit)
         sortBy(out, function(b) return b._s end)
     end
     while #out > limit do table.remove(out) end
-    return out
-end
-
-function M.similar(fp, limit)
-    local L = M.library()
-    local a = L and find(L, fp)
-    if not a then return {} end
-    local out = {}
-    for _i, b in ipairs(L.books) do
-        if b ~= a then
-            local s = likeness(a, b)
-            if s > 0 then
-                b._s = s + (b.state == "unread" and 1 or 0)
-                table.insert(out, b)
-            end
-        end
-    end
-    sortBy(out, function(b) return b._s end)
-    while #out > (limit or 12) do table.remove(out) end
     return out
 end
 

@@ -464,7 +464,7 @@ function M.missingByAuthor(name, books)
     return out
 end
 
---- The ONLINE tab of a book page: picks by its author or in its series.
+--- The Recommendations tab of a book's window (bos_bookdetail): picks by its author or in its series first.
 function M.forBook(d)
     -- this book's own first (the same series, the same author), then the
     -- rest of your recommendations, so the tab is never empty while there
@@ -718,7 +718,7 @@ function M.showSheet(item)
     -- on the device already: its own page (Read, Notebook, Edit…)
     local mine = M.owned(item)
     if mine and mine.filepath then
-        local ok = pcall(function() require("bos_bookpage").show(mine.filepath) end)
+        local ok = pcall(function() if not require("bos_bookdetail").show(mine.filepath) then error("no window") end end)
         if ok then return end
     end
     require("bos_store").openBook(item)

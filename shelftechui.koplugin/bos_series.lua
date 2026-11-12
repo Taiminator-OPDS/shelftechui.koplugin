@@ -163,7 +163,7 @@ local function show(kind, name, books, author, missing)
             local r = Look.button(bb, x + w - Look.SHADOW - bw - S(14), y + math.floor((bh - S(38)) / 2), bw, S(38), bl,
                 { on = true, size = 12 })
             self:hit(r, function(p) p:onClose() require("bos_shelf").open(nxt.filepath) end)
-            self:hit(Geom:new{ x = x, y = y, w = w - bw - S(30), h = bh }, function() require("bos_bookpage").show(nxt.filepath) end)
+            self:hit(Geom:new{ x = x, y = y, w = w - bw - S(30), h = bh }, function() require("bos_bookdetail").show(nxt.filepath) end)
             y = y + bh + Look.SHADOW + S(14)
         end
 
@@ -194,8 +194,7 @@ local function show(kind, name, books, author, missing)
                 if b.rating then sub = sub .. " · \u{2605} " .. b.rating end
                 if b == nxt then sub = sub .. " · " .. _("Up next") end
                 if kind == "author" and b.series then sub = sub .. " · " .. b.series .. (b.series_num and (" #" .. b.series_num) or "") end
-                self:hit(Geom:new{ x = 0, y = ry, w = W, h = rh }, function() require("bos_bookpage").show(b.filepath, {
-                    list = (function() local l = {} for _j, bb2 in ipairs(books) do l[#l + 1] = bb2.filepath end return l end)() }) end)
+                self:hit(Geom:new{ x = 0, y = ry, w = W, h = rh }, function() require("bos_bookdetail").show(b.filepath) end)
             else
                 local m = r.missing
                 dashedBox(bb, x + S(36), ry + S(8), S(30), S(45))

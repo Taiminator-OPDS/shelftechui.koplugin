@@ -30,7 +30,7 @@ local S = UI.S
 
 local Page = {}
 
-Page.VERSION = "1.8.4"
+Page.VERSION = "1.9.0"
 
 -- Dispatcher's sub-menus edit tables in place and flag `caller.updated`.
 local saver = setmetatable({}, { __newindex = function() Store.save() end })
@@ -1002,14 +1002,12 @@ function Page.items()
         },
         {
             text = _("For you"),
-            description = _("Recommendation shelves from your own library, the book page, and online picks from Open Library."),
+            description = _("Recommendations from what you read (Open Library), and your Want to read list."),
             sub_item_table_func = function()
                 return {
-                    toggle("book_page", _("ShelfTechUI book page"),
-                        _("Holding a book (or its details) opens the retro book page: stars, status, the description, genres, the series, Similar and More by the author, and ‹ › to the books beside it. Bookshelf's own book window is under its ⋯.")),
                     {
                         text = _("Recommendations"),
-                        description = _("Books you don't have yet, from what you read: more in your series, more by authors you read, popular in your genres. They fill FOR YOU on home and the first row of the store; tapping one opens its page in the store. From Open Library, over Wi-Fi only, fetched at most once a day in the background, no account."),
+                        description = _("Books you don't have yet, from what you read: more in your series, more by authors you read, popular in your genres. They fill FOR YOU on home and the first row of the store; and a Recommendations tab in a book's window (hold a book); tapping one opens its page in the store. From Open Library, over Wi-Fi only, fetched at most once a day in the background, no account."),
                         checked_func = function() return require("bos_online").enabled() end,
                         callback = function()
                             require("bos_online").setEnabled(not require("bos_online").enabled())

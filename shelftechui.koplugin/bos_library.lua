@@ -315,7 +315,7 @@ function Library:tapBook(i)
     if self:selectedCount() > 0 then return self:toggle(b) end
     local list = {}
     for _j, r in ipairs(self.rows) do list[#list + 1] = r.filepath end
-    require("bos_bookpage").show(b.filepath, { list = list })
+    require("bos_bookdetail").show(b.filepath)
 end
 
 function Library:toggle(b)
@@ -383,7 +383,7 @@ function Library:chooseFilter()
 end
 
 function Library:setStatus()
-    local BookPage = require("bos_bookpage")
+    local BookPage = require("bos_bookdetail")
     local items = {}
     for _i, s in ipairs{ { "new", _("Unread") }, { "reading", _("Reading") }, { "complete", _("Finished") }, { "abandoned", _("On hold") } } do
         table.insert(items, { text = s[2], callback = function()

@@ -267,11 +267,10 @@ function BookshelfOS:init()
     -- the Library in the start menu (once)
     UIManager:nextTick(function() pcall(function() require("bos_library").seedStartMenu()
         require("bos_library").seedLauncher() end) end)
-    -- For you: recommendation shelves, the want-to-read shelf, the book page
+    -- For you: recommendation shelves, the want-to-read shelf
     pcall(function()
         require("bos_recs").registerSource()
         require("bos_online").registerSource()
-        require("bos_bookpage").install()
     end)
     UIManager:nextTick(function() pcall(function()
         require("bos_recs").seed()

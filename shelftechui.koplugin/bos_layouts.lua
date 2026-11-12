@@ -184,7 +184,7 @@ local function bookPage(b, list)
     if b.online then require("bos_online").showSheet(b.online) return end
     local files = {}
     for _i, x in ipairs(list or {}) do if x.filepath then table.insert(files, x.filepath) end end
-    require("bos_bookpage").show(b.filepath, { list = files })
+    require("bos_bookdetail").show(b.filepath)
 end
 
 -- online covers, decoded once at their size

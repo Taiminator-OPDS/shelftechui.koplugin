@@ -54,7 +54,7 @@ local ZONES = {
 
 -- The bottom row, in order. Fixed: every cell has one job, and under its name
 -- a figure of its own (bos_rowdata).
--- (no BOOK: the book card opens the book page; no LIGHT or TEXT: the swipes
+-- (no BOOK: the book card opens the book's information; no LIGHT or TEXT: the swipes
 -- have them; no MORE: bookmarks are on the card and in NOTEBOOK)
 local BUTTONS = { { id = "glimpse" }, { id = "pin" }, { id = "stats" } }
 

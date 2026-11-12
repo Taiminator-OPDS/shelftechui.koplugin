@@ -2,6 +2,13 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.9.0
+
+- **Holding a book opens Bookshelf's own book window again.** ShelfTechUI's separate book page is gone (and its setting with it): everything that opened it (holding a book on Shelf or Dash, a series or author page, the library list, a recommendation you already have) now opens Bookshelf's window, with its Description, My review, Tags, Edit and Cover tabs.
+- **A Recommendations tab in that window.** Books from the internet for the one you're looking at: its series and author first, then the rest of your recommendations. Big covers, three across, with title and author under each, "In library" on the ones you have, and ‹ › for more. Tapping one closes the window and opens the store on it (or your own copy's window). With none on file yet, a Get recommendations key.
+- In a book, BOOK on the reading toolbar opens KOReader's book information.
+- Removed: the book page (about 500 lines) and what only it used.
+
 ## 1.8.4
 
 - **Back from the search screen is home.** Opened from home's search field, the search screen's Back (its × key, the Back button, or a swipe right) now closes it in one go, keyboard and all, instead of stepping through the storefront first. Swiping the keyboard down still only puts the keyboard away.

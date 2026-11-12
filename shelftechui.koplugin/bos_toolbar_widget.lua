@@ -612,13 +612,10 @@ function ReadingToolbar:onButton(b, rect)
     end
 end
 
---- BOOK and a tap on the card: this book's page (Bookshelf's book page when
---- there is one, else KOReader's book details).
+--- BOOK and a tap on the card: KOReader's details of this book.
 function ReadingToolbar:openBookPage()
     local ui = self.ui
     self:closeThen(function()
-        local okB, BookPage = pcall(require, "bos_bookpage")
-        if okB and BookPage and BookPage.open and BookPage.open(ui, ui.document.file) then return end
         ui:handleEvent(Event:new("ShowBookInfo"))
     end)
 end

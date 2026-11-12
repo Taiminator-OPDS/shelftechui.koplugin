@@ -24948,6 +24948,14 @@ function BookshelfWidget:_showBookDetail(book, opts)
         tabs[tags_idx] = tags_tab
     end
 
+    -- ShelfTechUI: recommendations for this book, from the internet
+    -- (bos_bookdetail: its series and author first, then the rest; "In
+    -- library" on what's on the device; a tap opens the store on it).
+    pcall(function()
+        local t = require("bos_bookdetail").recsTab(self, book, function() return modal end)
+        if t then tabs[#tabs + 1] = t end
+    end)
+
     -- Edit next: the actions tab is reached for less often than Description/
     -- Reviews/Tags, so it sits toward the end of the strip rather than hogging
     -- the first (default-focus) slot.

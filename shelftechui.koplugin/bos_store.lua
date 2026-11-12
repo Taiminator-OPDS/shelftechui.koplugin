@@ -730,7 +730,7 @@ function Store:openBook(book)
     self:hideKeyboard()
     -- a recommendation that's on the device already: your copy's own page
     if book.owned then
-        local ok = pcall(function() require("bos_bookpage").show(book.owned) end)
+        local ok = pcall(function() if not require("bos_bookdetail").show(book.owned) then error("no window") end end)
         if ok then return end
     end
     local v = { kind = "book", book = book, jobs = {}, page = 1 }

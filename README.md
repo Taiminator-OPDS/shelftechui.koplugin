@@ -10,8 +10,8 @@ ShelfTechUI is a fork of AndyHazz's Bookshelf home screen
 |---|---|---|
 | **Home** | KOReader's file browser | Bookshelf's home: hero card, chips, shelves — on line shelves, square covers on hard shadows, retro footer keys. Edge swipes: left = brightness, right = warmth, diagonal = full refresh |
 | **For you** | Home shelf | Because you read…, Up next in series, Pick back up, More by authors you finish, your top genres, Discover, Want to read — from your own library (Bookshelf shelf sources) |
-| **Book page** | Hold a book, or BOOK in a book | Stars, status, description, genres, the series, Similar / More by the author / Online, ‹ › to the books beside it; Bookshelf's own window under ⋯ |
-| **Series & author pages** | From a book page | A completion ruler, Up next with your time to read it, every book (and, with online picks, the ones you don't have) |
+| **A book's window** | Hold a book | Bookshelf's own book window (description, your review, tags, edit, cover), with a **Recommendations** tab: books from the internet for that one, big covers, "In library" on the ones you have; a tap opens the store on it |
+| **Series & author pages** | From the library list (by series, by author) | A completion ruler, Up next with your time to read it, every book (and, with online picks, the ones you don't have) |
 | **Library** | Start menu | Search, sort, filter, A–Z, select several to set status or add to a collection |
 | **Online picks** (opt-in) | Settings → For you | From Open Library, Wi-Fi only, once a day: missing from your series, more by your authors, popular in your genres; FIND hands off to Bookdrop; + WANT |
 | **Store** | First shelf in FOR YOU | Bookdrop, built in: its home, search, categories and manga reader as tiles. The manga reader downloads its runtime (about 25 MB) the first time you open it |
