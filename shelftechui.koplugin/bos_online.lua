@@ -184,7 +184,43 @@ end
 function M.rows() return store():readSetting("rows") or {} end
 
 --- One home shelf's picks: "series", "authors" or "genres" (every genre row).
+--- Today's three: one from each list (your series, your authors, your
+--- genres), a different one each day, never a book you already have. The
+--- same three all day; tomorrow the next in each list. FOR YOU on home is
+--- these three, and they're the only covers fetched ahead of time.
+local today = { day = nil, picks = nil }
+function M.daily(day)
+    day = day or os.date("%Y-%m-%d")
+    if today.day == day and today.picks and today.n == #M.rows() then return today.picks end
+    local y, m, d = day:match("(%d+)-(%d+)-(%d+)")
+    local n = math.floor(os.time({ year = tonumber(y) or 2000, month = tonumber(m) or 1, day = tonumber(d) or 1, hour = 12 }) / 86400)
+    local lists = {}
+    for _i, which in ipairs{ "series", "authors", "genres" } do
+        local l = {}
+        for _j, p in ipairs(M.rowItems(which)) do if not M.owned(p) then l[#l + 1] = p end end
+        if #l > 0 then lists[#lists + 1] = l end
+    end
+    local out, seen = {}, {}
+    local function take(p) if p and not seen[p.key] and #out < 3 then seen[p.key] = true out[#out + 1] = p return true end end
+    -- one from each list, at today's place in it
+    for _i, l in ipairs(lists) do take(l[(n % #l) + 1]) end
+    -- fewer than three lists (or the same book in two): the next ones along
+    local step = 1
+    while #out < 3 and step <= 60 do
+        local any = false
+        for _i, l in ipairs(lists) do
+            if #l > step - 1 then any = true end
+            take(l[((n + step) % #l) + 1])
+        end
+        if not any then break end
+        step = step + 1
+    end
+    today.day, today.picks, today.n = day, out, #M.rows()
+    return out
+end
+
 function M.rowItems(which)
+    if which == "daily" then return M.daily() end
     if which == "all" then
         -- one from each list in turn, so it isn't all one author
         local lists = { M.rowItems("series"), M.rowItems("authors"), M.rowItems("genres") }
@@ -232,12 +268,10 @@ function M.refreshInBackground(force)
     local ok, pid = pcall(ffiutil.runInSubProcess, function()
         local okF, rows = pcall(M.fetch)
         if not okF then logger.warn("ShelfTechUI: online picks failed:", rows) return end
-        -- the covers the shelves show, so they draw from the cache
-        for _i, row in ipairs(rows) do
-            for j, p in ipairs(row.items or {}) do
-                if j <= 8 then pcall(M.coverPath, p) end
-            end
-        end
+        -- today's three covers, so FOR YOU draws from the cache (anything
+        -- else fetches its covers when it's looked at: M.fetchCovers)
+        M._store = nil
+        for _i, p in ipairs(M.daily()) do pcall(M.coverPath, p) end
     end)
     if not ok or not pid then
         logger.warn("ShelfTechUI: online picks fetch not started:", pid)
@@ -259,14 +293,13 @@ function M.refreshInBackground(force)
     return true
 end
 
---- The online shelves inside FOR YOU: added once, then shown only while
---- online picks are on.
+--- The one list of recommendations (the Dash layout's row; FOR YOU on home
+--- shows today's three of it: M.daily).
 -- (one shelf since 1.8.0: more in your series, more by your authors and
 -- popular in your genres, taken in turn)
 M.SHELVES = {
     { id = "stui_fy_online", which = "all", label = _("Recommendations") },
 }
-local OLD_SHELVES = { "stui_fy_online_series", "stui_fy_online_authors", "stui_fy_online_genres" }
 
 --- Your own copy of a recommended book, if it's on the device (the same
 --- title, and the same author when both are known): the library's book.
@@ -321,44 +354,58 @@ function M.badgedCover(path)
     return ok and lfs.attributes(out, "mode") == "file" and out or path
 end
 
+--- The covers of `items` that aren't on file yet (at most `max`), fetched
+--- in the background; done() when any arrived. For the lists that are looked
+--- at now and then (a book's Recommendations tab, the store's row), so
+--- nothing is downloaded for covers nobody sees.
+function M.fetchCovers(items, done, max)
+    if not (M.enabled() and connected()) or M._covering then return false end
+    local need = {}
+    for _i, it in ipairs(items or {}) do
+        local p = it.pick or it
+        if p.cover_i and not M.cachedCoverPath(p, "M") then
+            need[#need + 1] = p
+            if #need >= (max or 9) then break end
+        end
+    end
+    if #need == 0 then return false end
+    local ffiutil = require("ffi/util")
+    local ok, pid = pcall(ffiutil.runInSubProcess, function()
+        for _i, p in ipairs(need) do pcall(M.coverPath, p) end
+    end)
+    if not ok or not pid then return false end
+    M._covering = true
+    local waited = 0
+    local function poll()
+        if ffiutil.isSubProcessDone(pid) or waited > 60 then
+            M._covering = nil
+            if done then pcall(done) end
+            return
+        end
+        waited = waited + 1
+        UIManager:scheduleIn(1, poll)
+    end
+    UIManager:scheduleIn(1, poll)
+    return true
+end
+
 function M.syncShelves()
+    -- FOR YOU is the shelf itself (today's three): shown while
+    -- recommendations are on
     local okT, TabModel = pcall(require, "lib/bookshelf_tab_model")
     if not okT then return end
     local ok, err = pcall(function()
         local tabs = TabModel.load()
-        local by = {}
-        for _i, t in ipairs(tabs) do by[t.id] = t end
-        if not by.stui_foryou then return end
-        local on, changed = M.enabled(), false
-        local add = not Store.get("foryou_online_seeded")
-        for _i, s in ipairs(M.SHELVES) do
-            local t = by[s.id]
-            if not t and add then
-                t = { id = s.id, label = s.label, source = { kind = "stui_online", which = s.which },
-                    filter = {}, sort_priority = {}, view_mode = "covers", enabled = on }
-                TabModel.insertChild(tabs, "stui_foryou", t)
-                -- before Want to read
-                local at, want
-                for i, x in ipairs(tabs) do
-                    if x == t then at = i elseif x.id == "stui_fy_want" then want = i end
-                end
-                if at and want and want < at then
-                    table.remove(tabs, at)
-                    table.insert(tabs, want, t)
-                end
-                changed = true
-            elseif t and (t.enabled ~= false) ~= on then
-                t.enabled = on
-                changed = true
+        for _i, t in ipairs(tabs) do
+            if t.id == "stui_foryou" and (t.enabled ~= false) ~= M.enabled() then
+                t.enabled = M.enabled()
+                TabModel.save(tabs)
             end
         end
-        if changed then TabModel.save(tabs) end
     end)
-    if not ok then logger.warn("ShelfTechUI: online shelves not updated:", err) end
-    Store.set("foryou_online_seeded", true)
+    if not ok then logger.warn("ShelfTechUI: For you not updated:", err) end
 end
 
---- Settings → For you → Online picks.
 function M.setEnabled(on)
     Store.set("online_picks", on and true or false)
     M.syncShelves()
@@ -565,10 +612,10 @@ function M.registerSource()
             if not M.enabled() then return {}, 0 end
             -- answers from what's cached; today's fetch runs in the background
             M.refreshInBackground(false)
-            local list = M.rowItems(source and source.which or "all")
+            local list = M.rowItems(source and source.which or "daily")
             local out = {}
             -- nothing fetched yet: one card on the first shelf saying how
-            local first = source and (source.which == "series" or source.which == "all")
+            local first = not source or source.which == nil or source.which == "series" or source.which == "all" or source.which == "daily"
             if #list == 0 and first and #M.rows() == 0 then
                 return { { filepath = "stuionline://_setup", title = _("Recommendations"),
                     authors = { _("Turn on Wi-Fi") }, author = _("Turn on Wi-Fi"), stui_setup = true } }, 1
@@ -636,64 +683,29 @@ end
 
 -- ---------------------------------------------------------------- FOR YOU, recommendations only
 
---- Once (1.7.0): FOR YOU holds the recommendations (and Want to read)
---- only. The lists from your own library (Because you read, Up next…) and
---- the Store tiles leave it; recommendations are turned on.
---- 1.8.0: the three recommendation shelves become one, once.
-function M.oneShelf()
-    if Store.get("foryou_one_shelf") then return end
+--- 1.9.1: FOR YOU is one shelf of today's three picks, not a shelf of
+--- shelves. Once: its folders go (Recommendations; Want to read, which lives
+--- in the store), and the tab itself shows the three.
+function M.dailyShelf()
+    if Store.get("foryou_daily") then return end
     local okT, TabModel = pcall(require, "lib/bookshelf_tab_model")
     if not okT then return end
     local ok, err = pcall(function()
         local tabs = TabModel.load()
-        local changed = false
-        for _i, id in ipairs(OLD_SHELVES) do
-            for k = #tabs, 1, -1 do
-                if tabs[k].id == id then
-                    if TabModel.removeTree then TabModel.removeTree(tabs, id) else table.remove(tabs, k) end
-                    changed = true
-                    break
-                end
-            end
+        local parent
+        for _i, t in ipairs(tabs) do if t.id == "stui_foryou" then parent = t end end
+        if not parent then return end
+        for _i, kid in ipairs(TabModel.childrenOf("stui_foryou", tabs)) do
+            if TabModel.removeTree then TabModel.removeTree(tabs, kid.id) end
         end
-        if changed then TabModel.save(tabs) end
-    end)
-    if not ok then logger.warn("ShelfTechUI: recommendations shelf not updated:", err) end
-    Store.set("foryou_one_shelf", true)
-    Store.set("foryou_online_seeded", nil)
-    M.syncShelves()
-    pcall(function() require("lib/bookshelf_sources").changed("stui_online") end)
-end
-
-function M.forYouOnlineOnly()
-    if Store.get("foryou_online_only") then return end
-    local okT, TabModel = pcall(require, "lib/bookshelf_tab_model")
-    if not okT then return end
-    if Store.get("online_picks") == nil then Store.set("online_picks", true) end
-    local ok, err = pcall(function()
-        local tabs = TabModel.load()
-        local changed = false
-        for _i, id in ipairs{ "stui_fy_because", "stui_fy_upnext", "stui_fy_pickup", "stui_fy_authors", "stui_fy_genres",
-                "stui_fy_discover", "stui_fy_store" } do
-            for k = #tabs, 1, -1 do
-                if tabs[k].id == id then
-                    if TabModel.removeTree then TabModel.removeTree(tabs, id) else table.remove(tabs, k) end
-                    changed = true
-                    break
-                end
-            end
-        end
-        local by = {}
-        for _i, s in ipairs(M.SHELVES) do by[s.id] = s end
-        for _i, t in ipairs(tabs) do
-            if by[t.id] and t.label ~= by[t.id].label then t.label = by[t.id].label changed = true end
-        end
-        if changed then TabModel.save(tabs) end
+        for k = #tabs, 1, -1 do if tabs[k].parent == "stui_foryou" then table.remove(tabs, k) end end
+        parent.source = { kind = "stui_online", which = "daily" }
+        parent.view_mode = "covers"
+        parent.enabled = M.enabled()
+        TabModel.save(tabs)
     end)
     if not ok then logger.warn("ShelfTechUI: For you not updated:", err) end
-    Store.set("foryou_online_only", true)
-    Store.set("foryou_online_seeded", nil) -- (add the three shelves if they were never added)
-    M.syncShelves()
+    Store.set("foryou_daily", true)
     pcall(function() require("lib/bookshelf_sources").changed("stui_online") end)
 end
 

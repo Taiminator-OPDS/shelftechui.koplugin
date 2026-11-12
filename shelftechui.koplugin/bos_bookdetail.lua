@@ -108,6 +108,18 @@ function RecsTab:load()
         return require("bos_online").forBook({ title = b.title, authors = b.authors or {}, series = b.series_name })
     end)
     self.items = ok and list or {}
+    -- their covers, fetched now if they aren't on file (only the first page's:
+    -- nothing is downloaded for covers nobody looks at)
+    if not self._covers_asked and #self.items > 0 then
+        self._covers_asked = true
+        local first = {}
+        for i = 1, math.min(6, #self.items) do first[i] = self.items[i] end
+        pcall(function()
+            require("bos_online").fetchCovers(first, function()
+                if self.dimen and self.dimen.x then self:load() self:redraw() end
+            end, 6)
+        end)
+    end
 end
 
 function RecsTab:getSize() return Geom:new{ w = self.width, h = self.height } end

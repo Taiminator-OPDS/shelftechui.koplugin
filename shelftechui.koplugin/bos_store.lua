@@ -490,16 +490,36 @@ function Store:homeData()
     -- from what you read
     local Online = require("bos_online")
     local picks, seen = {}, {}
-    for _j, p in ipairs(Online.rowItems("all")) do
-        if p.key and not seen[p.key] then
-            seen[p.key] = true
-            local mine = Online.owned(p)
-            picks[#picks + 1] = { title = p.title, author = p.author, year = p.year, pick = p,
-                cover_path = Online.cachedCoverPath(p, "M"), owned = mine and mine.filepath or nil }
+    local function add(list, into)
+        for _j, p in ipairs(list) do
+            if p.key and not seen[p.key] then
+                seen[p.key] = true
+                local mine = Online.owned(p)
+                into[#into + 1] = { title = p.title, author = p.author, year = p.year, pick = p,
+                    cover_path = Online.cachedCoverPath(p, "M"), owned = mine and mine.filepath or nil }
+            end
         end
     end
-    -- one from each list in turn, so the row isn't all one author
-    if #picks > 0 then table.insert(rows, { id = "foryou", title = _("Recommended for you"), books = picks }) end
+    -- today's three first (the ones on home's FOR YOU), then the rest
+    add(Online.daily(), picks)
+    add(Online.rowItems("all"), picks)
+    if #picks > 0 then
+        table.insert(rows, { id = "foryou", title = _("Recommended for you"), books = picks })
+        -- the covers of the ones on screen, fetched now if they aren't on file
+        if not self._covers_asked then
+            self._covers_asked = true
+            local first = {}
+            for i = 1, math.min(8, #picks) do first[i] = picks[i] end
+            Online.fetchCovers(first, function()
+                if not self.closed and self:view().kind == "home" then self:homeData() self:redraw("ui") end
+            end, 8)
+        end
+    end
+    -- what you've marked + WANT (it used to be a shelf in FOR YOU on home)
+    local want = {}
+    seen = {}
+    add(Online.wantList(), want)
+    if #want > 0 then table.insert(rows, { id = "want", title = _("Want to read"), books = want }) end
     local recent = bd and bd.settings and bd.settings:readSetting("recent_books", {}) or {}
     if #recent > 0 then
         for _i, b in ipairs(recent) do b.cover_path = b.cover_path or CoverCache():get(b) end

@@ -30,7 +30,7 @@ local S = UI.S
 
 local Page = {}
 
-Page.VERSION = "1.9.0"
+Page.VERSION = "1.9.1"
 
 -- Dispatcher's sub-menus edit tables in place and flag `caller.updated`.
 local saver = setmetatable({}, { __newindex = function() Store.save() end })
@@ -1026,11 +1026,10 @@ function Page.items()
                     },
                     {
                         text = _("Add the For you shelf to home again"),
-                        description = _("If you removed it: a FOR YOU shelf of shelves with the recommendations (more in your series, more by authors you read, popular in your genres) and Want to read."),
+                        description = _("If you removed it: the FOR YOU shelf, with today's three recommendations."),
                         keep_menu_open = true,
                         callback = function()
                             Store.set("foryou_seeded", nil)
-                            Store.set("foryou_online_seeded", nil)
                             require("bos_recs").seed()
                             require("bos_online").syncShelves()
                             refreshHome()

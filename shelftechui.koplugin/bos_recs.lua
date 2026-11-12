@@ -435,22 +435,11 @@ function M.seed()
     local ok, err = pcall(function()
         local tabs = TabModel.load()
         for _i, t in ipairs(tabs) do if t.id == "stui_foryou" then return end end
-        -- on a spine shelf, each list stands as its own labelled run of books
-        local parent = { id = "stui_foryou", label = _("For you"), source = { kind = TabModel.SHELVES_KIND },
-            filter = {}, sort_priority = {}, view_mode = "spines", enabled = true }
+        -- FOR YOU: one shelf of today's three recommendations (bos_online.daily)
+        local parent = { id = "stui_foryou", label = _("For you"), source = { kind = "stui_online", which = "daily" },
+            filter = {}, sort_priority = {}, view_mode = "covers", enabled = true }
         local anchor = tabs[1] and tabs[1].id
         if anchor then TabModel.insertAfter(tabs, anchor, parent) else table.insert(tabs, parent) end
-        -- (1.7.0: FOR YOU is the recommendations from the internet, added by
-        -- bos_online.syncShelves, and Want to read; the lists from your own
-        -- library are a row on the Dash layout)
-        local kids = {}
-        for _i, which in ipairs(kids) do
-            TabModel.insertChild(tabs, "stui_foryou", { id = "stui_fy_" .. which, label = labelFor(which),
-                source = { kind = SOURCE_ID, which = which }, filter = {}, sort_priority = {},
-                view_mode = "covers", enabled = true })
-        end
-        TabModel.insertChild(tabs, "stui_foryou", { id = "stui_fy_want", label = _("Want to read"),
-            source = { kind = "stui_want" }, filter = {}, sort_priority = {}, view_mode = "covers", enabled = true })
         TabModel.save(tabs)
     end)
     if not ok then logger.warn("ShelfTechUI: For you shelf not added:", err) end

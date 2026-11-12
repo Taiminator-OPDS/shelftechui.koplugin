@@ -2,6 +2,12 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.9.1
+
+- **FOR YOU is three picks a day.** In place of folders, the FOR YOU tab on home shows three recommendations: one from your series, one by your authors, one from your genres, never a book you already have. The same three all day; tomorrow, the next in each list, so over a few weeks the whole list comes round. (Once, on the first start, the tab's folders are replaced by the three.)
+- **Lighter.** Only those three covers are fetched ahead of time (it used to be up to eight for each list). The store's Recommended row and a book's Recommendations tab fetch the covers of what they show when you open them.
+- **Want to read** is a row in the store (it was a folder in FOR YOU). The store's Recommended row starts with today's three, then the rest of the list.
+
 ## 1.9.0
 
 - **Holding a book opens Bookshelf's own book window again.** ShelfTechUI's separate book page is gone (and its setting with it): everything that opened it (holding a book on Shelf or Dash, a series or author page, the library list, a recommendation you already have) now opens Bookshelf's window, with its Description, My review, Tags, Edit and Cover tabs.
