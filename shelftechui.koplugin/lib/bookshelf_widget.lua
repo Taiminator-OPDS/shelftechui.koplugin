@@ -25002,6 +25002,21 @@ function BookshelfWidget:_showBookDetail(book, opts)
         active_tab = edit_idx or 1
     end
 
+    -- ShelfTechUI: fewer tabs (bos_bookdetail.consolidate): Description,
+    -- Reviews, Similar and Hardcover are keys inside one About tab, and
+    -- Cover is a key inside Edit. What was asked for is opened on its key.
+    pcall(function()
+        local new_tabs, map = require("bos_bookdetail").consolidate(tabs)
+        if type(new_tabs) ~= "table" or #new_tabs == 0 then return end
+        local to = map[active_tab]
+        tabs = new_tabs
+        if to then
+            active_tab = to.tab
+            if to.source then tabs[to.tab].active_source = to.source end
+        end
+        if reviews_idx and map[reviews_idx] then reviews_idx = map[reviews_idx].tab end
+    end)
+
     local args = {
         tabs       = tabs,
         bw         = self,

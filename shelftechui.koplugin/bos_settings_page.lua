@@ -30,7 +30,7 @@ local S = UI.S
 
 local Page = {}
 
-Page.VERSION = "1.11.2"
+Page.VERSION = "1.12.0"
 
 -- Dispatcher's sub-menus edit tables in place and flag `caller.updated`.
 local saver = setmetatable({}, { __newindex = function() Store.save() end })
@@ -792,7 +792,7 @@ function Page.sections(plugin)
         end
     end
     table.insert(home.items, { heading = _("Home screen") })
-    pick(home.items, { _("Status bar"), _("Swipe down on home"), _("Reading summary"), _("Insights in the reading summary"),
+    pick(home.items, { _("Status bar"), _("Swipe down on home"), _("Reading summary"),
         _("Edge swipes on home"), _("Start menu entries"), _("Settings in the start menu") })
     table.insert(home.items, {
         text = _("Bookshelf's search key"),
@@ -1082,8 +1082,6 @@ function Page.items()
             mandatory_func = function() return choiceName("home_swipe", HOME_SWIPE) end,
             sub_item_table_func = function() return radios("home_swipe", HOME_SWIPE) end,
         },
-        toggle("summary_insights", _("Insights in the reading summary"),
-            _("A second page in the reading summary (swipe it sideways): the last 26 weeks day by day, your yearly goal, when you'll finish, when you read, and your records.")),
         {
             text = _("Reading summary"),
             description = _("The panel swiping down on home opens: what it shows."),

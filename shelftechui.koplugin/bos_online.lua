@@ -24,7 +24,6 @@ Everything fetched is kept under koreader/cache/stui_online.
 --]]
 
 local Device = require("device")
-local Geom = require("ui/geometry")
 local UIManager = require("ui/uimanager")
 local logger = require("logger")
 local T = require("ffi/util").template
@@ -304,7 +303,24 @@ function M.refreshInBackground(force)
         -- today's covers, so FOR YOU draws from the cache (anything
         -- else fetches its covers when it's looked at: M.fetchCovers)
         M._store = nil
-        for _i, p in ipairs(M.daily()) do pcall(M.coverPath, p) end
+        local changed = false
+        for _i, p in ipairs(M.daily()) do
+            pcall(M.coverPath, p)
+            -- what it's about, for the hero on home (Hardcover's picks
+            -- arrive with theirs)
+            if p.description == nil then
+                local okD, d = pcall(M.description, p)
+                d = okD and type(d) == "string" and d:gsub("<[^>]+>", ""):gsub("%s+", " ") or nil
+                if d and #d > 900 then d = d:sub(1, 900):gsub("[\128-\191]*$", "") .. "…" end
+                p.description = d or false
+                changed = true
+            end
+        end
+        if changed then
+            local st = store()
+            st:saveSetting("rows", M.rows())
+            st:flush()
+        end
     end)
     if not ok or not pid then
         logger.warn("ShelfTechUI: online picks fetch not started:", pid)
@@ -675,6 +691,10 @@ function M.registerSource()
                 end
                 out[#out + 1] = { filepath = "stuionline://" .. tostring(p.key):gsub("^/", ""), title = p.title,
                     authors = { who }, author = who, series_name = p.series, cover_image_path = path,
+                    -- for the hero: what the book is about, and Hardcover's
+                    -- rating for a pick that came from there
+                    description = type(p.description) == "string" and p.description or nil,
+                    hardcover_rating = p.rating, hardcover_ratings_count = p.ratings, stui_hc_rating = p.rating and true or nil,
                     stui_pick = p, stui_owned = mine and mine.filepath or nil }
             end
             return out, #list

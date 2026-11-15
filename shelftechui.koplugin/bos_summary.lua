@@ -10,7 +10,7 @@ The reading summary (Bookshelf home): swipe down from the top of the shelf.
     │3h12│ │ 48m│ │5h02│ │1h30│      ← time spent reading it
     └────┘ └────┘ └────┘ └────┘
     ─────────────────────────────
-    Reading calendar                    ›
+    Insights                            ›
 
 Figures come from KOReader's reading statistics (statistics.sqlite3), read
 only; covers from Bookshelf (or KOReader's cover browser). Tap outside it,
@@ -18,7 +18,6 @@ swipe up, or press Back to close.
 --]]
 
 local Device = require("device")
-local Event = require("ui/event")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local InputContainer = require("ui/widget/container/inputcontainer")
@@ -283,23 +282,6 @@ function Figures:paintTo(bb, x, y)
 end
 
 -- ---------------------------------------------------------------------------
--- TODAY | INSIGHTS
--- ---------------------------------------------------------------------------
-
-local Tabs = require("ui/widget/widget"):extend{ width = nil, page = 1, panel = nil }
-
-function Tabs:getSize() return Geom:new{ w = self.width, h = S(40) } end
-
-function Tabs:paintTo(bb, x, y)
-    local Look = require("bos_look")
-    local w = math.min(S(260), self.width)
-    local tx = x + math.floor((self.width - w) / 2)
-    local cells = { { key = 1, text = _("Today") }, { key = 2, text = _("Insights") } }
-    local rects = Look.segments(bb, tx, y + S(4), w, S(30), cells, self.page)
-    self.panel.tab_rects = rects
-end
-
--- ---------------------------------------------------------------------------
 -- The panel
 -- ---------------------------------------------------------------------------
 
@@ -320,12 +302,6 @@ function Summary:init()
     if status then
         table.insert(rows, status)
         table.insert(rows, VerticalSpan:new{ width = S(14) })
-    end
-
-    local insights_on = Store.get("summary_insights") ~= false
-    if insights_on then
-        table.insert(rows, Tabs:new{ width = w, page = 1, panel = self })
-        table.insert(rows, VerticalSpan:new{ width = S(10) })
     end
 
     if Store.get("summary_stats") ~= false then
@@ -374,30 +350,14 @@ function Summary:init()
         table.insert(rows, VerticalSpan:new{ width = S(6) })
     end
     table.insert(rows, VerticalSpan:new{ width = S(8) })
-    table.insert(rows, UI.ButtonRow:new{ width = w, menu = self, text = _("Reading calendar"),
-        callback = function() UIManager:broadcastEvent(Event:new("ShowCalendarView")) end })
+    -- Insights: your reading as a dashboard (an app of its own:
+    -- bos_insights_app; the calendar is a key on it)
+    local panel = self
+    table.insert(rows, UI.ButtonRow:new{ width = w, menu = self, text = _("Insights"),
+        callback = function() panel:closeThen(function() require("bos_insights_app").open() end) end })
     table.insert(rows, VerticalSpan:new{ width = S(10) })
     self.rows = rows
     self[1] = rows
-    self.pages = { rows }
-    self.page_i = 1
-    if insights_on then
-        -- page 2: Insights (built when first shown)
-        self.make_insights = function()
-            local g = VerticalGroup:new{ align = "left" }
-            table.insert(g, VerticalSpan:new{ width = self.pad })
-            local st = UI.buildStatusRow(w)
-            if st then
-                table.insert(g, st)
-                table.insert(g, VerticalSpan:new{ width = S(14) })
-            end
-            table.insert(g, Tabs:new{ width = w, page = 2, panel = self })
-            table.insert(g, VerticalSpan:new{ width = S(12) })
-            table.insert(g, require("bos_insights").Insights:new{ width = w })
-            table.insert(g, VerticalSpan:new{ width = S(16) })
-            return g
-        end
-    end
     self.panel_h = rows:getSize().h
     self.panel = Geom:new{ x = 0, y = 0, w = W, h = self.panel_h }
     local range = function() return self.dimen end
@@ -445,37 +405,12 @@ function Summary:closeThen(fn)
     end)
 end
 
---- TODAY ⇄ INSIGHTS
-function Summary:showPage(i)
-    if i == self.page_i or not self.make_insights then return end
-    local old = self:region()
-    if i == 2 and not self.pages[2] then self.pages[2] = self.make_insights() end
-    if not self.pages[i] then return end
-    self.page_i = i
-    self.rows = self.pages[i]
-    self[1] = self.rows
-    self.panel_h = self.rows:getSize().h
-    self.panel = Geom:new{ x = 0, y = 0, w = self.dimen.w, h = self.panel_h }
-    -- Everything under the panel is drawn again (not just the screen
-    -- refreshed: with a nil widget nothing repaints, and Insights, the
-    -- longer page, stayed on screen below Today), then one full refresh
-    -- clears the e-ink ghost of the other page.
-    UIManager:setDirty("all", "full")
-end
-
 function Summary:onSumTap(_, ges)
-    for key, r in pairs(self.tab_rects or {}) do
-        if inside(ges.pos, r) then self:showPage(key) return true end
-    end
     if not inside(ges.pos, self.panel) then UIManager:close(self) end
     return true
 end
 
 function Summary:onSumSwipe(_, ges)
-    if inside(ges.pos, self.panel) and (ges.direction == "west" or ges.direction == "east") and self.make_insights then
-        self:showPage(ges.direction == "west" and 2 or 1)
-        return true
-    end
     if ges.direction == "north" or not inside(ges.pos, self.panel) then UIManager:close(self) end
     return true
 end

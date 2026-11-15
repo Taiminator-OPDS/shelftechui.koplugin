@@ -201,6 +201,8 @@ end
 function BookshelfOS:init()
     -- the file browser's list under home is built when it's seen (bos_fmlazy)
     pcall(function() require("bos_fmlazy").install() end)
+    -- a book a friend on Hardcover is reading says so on its cover
+    pcall(function() require("bos_hardcover_home").install() end)
     -- 1.6.3 kept two big lists of Settings rows in KOReader's settings file
     -- (about 40 KB, written out each time a book closes): gone
     if not BookshelfOS._rows_cleared then
@@ -382,6 +384,9 @@ function BookshelfOS:onDispatcherRegisterActions()
     Dispatcher:registerAction("stui_wrapped", {
         category = "none", event = "StuiWrapped", title = _("ShelfTechUI: Wrapped (your year in books)"), general = true,
     })
+    Dispatcher:registerAction("stui_insights", {
+        category = "none", event = "StuiInsights", title = _("ShelfTechUI: Insights"), general = true,
+    })
     Dispatcher:registerAction("stui_hardcover", {
         category = "none", event = "StuiHardcover", title = _("ShelfTechUI: Hardcover"), general = true,
     })
@@ -492,6 +497,11 @@ end
 
 function BookshelfOS:onStuiHomeLayout()
     require("bos_layouts").cycle()
+    return true
+end
+
+function BookshelfOS:onStuiInsights()
+    require("bos_insights_app").open()
     return true
 end
 

@@ -859,6 +859,13 @@ function ReviewsModal:_activeBody()
     local tab = self._tabs and self._tabs[self._active_tab]
     if tab and tab.widget_builder then
         local w = tab.widget_builder(self.width, self._body_h, self)
+        -- ShelfTechUI: a gathered tab (bos_bookdetail) on one of its text
+        -- keys hands back Bookshelf's own sourced body: treated as that is
+        if type(w) == "table" and w._stui_html then
+            local hfocus = w.seg_rows and { layout = { w.seg_rows[1] },
+                disableFocusManagement = function() end } or nil
+            return w, false, hfocus
+        end
         local focus = (type(w) == "table") and (w.focus_tables or w.focus_table) or nil
         return w, true, focus
     end
@@ -1397,7 +1404,10 @@ function ReviewsModal:onSwipe(_arg, ges)
         -- grid), page within it first; only spill over to tab-cycling once
         -- you're already at that end. This makes swipe behave like every other
         -- paginated surface in the app while keeping tab-swipe reachable.
-        local pager = self._tab_body and self._tab_body._pager
+        local tb = self._tab_body
+        -- (ShelfTechUI: the cover grid is a key inside Edit now; its paging
+        -- is its own body's)
+        local pager = tb and (tb._pager or (tb._inner and tb._inner._pager))
         if pager and pager.goto_page then
             if dir == "west" and pager.page < pager.total_pages then
                 pager.goto_page(pager.page + 1); return true

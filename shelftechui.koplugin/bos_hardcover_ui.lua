@@ -312,7 +312,22 @@ function App:load(tab, force)
         if self.tab == tab then self:refresh("ui") end
     end
     if force then HC.forget(tab == "friends" and "friends" or tab == "popular" and "trending" or "shelf") end
-    if tab == "friends" then HC.friends(got)
+    if tab == "friends" then
+        -- the readers you follow, each with what they're on (bos_hardcover
+        -- keeps it; `force` asks Hardcover again)
+        HC.social(function(soc, why)
+            if (soc.at or 0) == 0 and why then return got(nil, why) end
+            local books = {}
+            for _i, who in ipairs(soc.people) do
+                local row = who.reading[1] or who.finished[1]
+                if row then books[#books + 1] = row.book end
+            end
+            self.loading[tab] = nil
+            if self.closed then return end
+            self.data[tab] = soc.people
+            HC.fetchCovers(books, function() if not self.closed and self.tab == tab then self:refresh("ui") end end, 16)
+            if self.tab == tab then self:refresh("ui") end
+        end, force)
     elseif tab == "popular" then HC.trending(got)
     elseif tab == "search" then HC.search(self.query or "", got)
     else
@@ -420,8 +435,7 @@ function App:body(bb, y, w)
     end
     if #list == 0 then
         local empty = {
-            friends = (list.people or 0) == 0 and _("You don't follow anyone on Hardcover yet. Follow readers on hardcover.app and what they read shows here.")
-                or _("The readers you follow haven't been reading lately."),
+            friends = _("You don't follow anyone on Hardcover yet. Follow readers on hardcover.app and they show here, with what they're reading and how far along they are."),
             reading = _("Nothing on your Reading shelf. Open a book here and it's put there by itself."),
             want = _("Nothing on your Want to read shelf. Find a book in Popular or Search and add it."),
             read = _("Nothing on your Read shelf yet."),
@@ -435,31 +449,19 @@ function App:body(bb, y, w)
 
     local pages
     if self.tab == "friends" then
-        -- one line per piece of news: cover, who and what, the book
-        local rh = S(108)
+        -- one row a reader, those reading now first: the cover of what
+        -- they're on, their name, the book and how far along they are
+        local rh = S(100)
         local per = math.max(1, math.floor((bottom - y) / rh))
         pages = math.max(1, math.ceil(#list / per))
         local cur = math.max(1, math.min(pages, self.pg[self.tab] or 1))
         self.pg[self.tab] = cur
         for k = 1, per do
-            local it = list[(cur - 1) * per + k]
-            if not it then break end
+            local who = list[(cur - 1) * per + k]
+            if not who then break end
             local ry = y + (k - 1) * rh
-            local ch = rh - S(18)
-            local cw = math.floor(ch / 1.5)
-            drawCover(bb, it.book, x, ry, cw, ch)
-            local tx = x + cw + S(16)
-            local tw = w - cw - S(16)
-            local what = it.status == 3 and _("finished") or _("is reading")
-            local head = (it.who.name or it.who.username or "?") .. " " .. what
-            if it.status == 3 and it.rating then head = head .. "  \u{2605} " .. string.format("%.1f", it.rating):gsub("%.0$", "") end
-            Look.label(bb, head, tx, ry, tw, S(20), 10, { color = Look.GRAY })
-            local th = Page.wrap(bb, it.book.title, Look.serif(17, true), tx, ry + S(22), tw, 2, S(24))
-            if it.book.author then
-                Page.wrap(bb, it.book.author, Look.serif(13, false, true), tx, ry + S(24) + th, tw, 1, S(20), Look.GRAY)
-            end
-            if k < per and list[(cur - 1) * per + k + 1] then bb:paintRect(tx, ry + rh - S(9), tw, 1, Look.LIGHT) end
-            self:hit(Geom:new{ x = x, y = ry, w = w, h = rh - S(6) }, function() M.openBook(it.book) end)
+            M.friendRow(self, bb, who, x, ry, w, rh)
+            if k < per and list[(cur - 1) * per + k + 1] then bb:paintRect(x, ry + rh - S(7), w, 1, Look.LIGHT) end
         end
     else
         -- a grid of covers
@@ -516,6 +518,194 @@ function M.open(tab)
     M.app:show()
     if not M.pruned then M.pruned = true UIManager:scheduleIn(20, HC.prune) end
     return M.app
+end
+
+-- ---------------------------------------------------------------- readers
+
+local function stars(r) return "\u{2605} " .. (string.format("%.1f", r):gsub("%.0$", "")) end
+
+--- "42% · page 130" for a book someone is in the middle of.
+local function howFar(row)
+    local parts = {}
+    if row.percent then parts[#parts + 1] = T(_("%1%"), row.percent) end
+    if row.page and row.page > 0 then parts[#parts + 1] = T(_("page %1"), row.page) end
+    return #parts > 0 and table.concat(parts, "  ·  ") or nil
+end
+
+--- One reader, as a row of a friends list (the app's Friends tab): a dot
+--- that's filled while they're reading, their name, what they're on and
+--- how far along. A tap opens their page.
+function M.friendRow(host, bb, who, x, y, w, rh)
+    local row = who.reading[1]
+    local last = not row and who.finished[1]
+    local book = (row or last or {}).book
+    local ch = rh - S(18)
+    local cw = math.floor(ch / 1.5)
+    if book then drawCover(bb, book, x, y, cw, ch) else Look.box(bb, x, y, cw, ch, { border = math.max(1, S(1)) }) end
+    local tx = x + cw + S(16)
+    local tw = w - cw - S(16) - S(24)
+    -- ● Name                                   ›
+    local d = S(10)
+    if row then Look.disc(bb, tx + math.floor(d / 2), y + S(11), math.floor(d / 2), BLACK)
+    else
+        Look.disc(bb, tx + math.floor(d / 2), y + S(11), math.floor(d / 2), BLACK)
+        Look.disc(bb, tx + math.floor(d / 2), y + S(11), math.floor(d / 2) - math.max(1, S(1.5)), WHITE)
+    end
+    Page.wrap(bb, who.name or who.username or "?", tface(15, true), tx + d + S(8), y, tw - d - S(8), 1, S(22))
+    Look.label(bb, "\u{203A}", x + w - S(20), y + S(20), S(20), S(30), 16, { align = "right" })
+    if row then
+        Page.wrap(bb, row.book.title, Look.serif(14, false, true), tx, y + S(26), tw, 1, S(21))
+        local far = howFar(row)
+        if row.percent then
+            Look.slimTrack(bb, tx, y + S(56), math.min(tw, S(220)), S(10), row.percent / 100)
+            if far then Look.label(bb, far, tx + math.min(tw, S(220)) + S(12), y + S(50), tw - S(232), S(20), 9, { color = Look.GRAY }) end
+        else
+            Look.label(bb, far or _("Reading"), tx, y + S(52), tw, S(18), 9, { color = Look.GRAY })
+        end
+    elseif last then
+        Page.wrap(bb, last.book.title, Look.serif(14, false, true), tx, y + S(26), tw, 1, S(21), Look.GRAY)
+        Look.label(bb, _("Finished") .. (last.rating and ("  ·  " .. stars(last.rating)) or ""), tx, y + S(52), tw, S(18), 9, { color = Look.GRAY })
+    else
+        Look.label(bb, _("Nothing lately"), tx, y + S(28), tw, S(18), 9, { color = Look.GRAY })
+    end
+    host:hit(Geom:new{ x = x, y = y, w = w, h = rh - S(8) }, function() M.openProfile(who) end)
+end
+
+--- A reader's page: what they're reading and how far, what they finished
+--- lately, their counts, and the way to their figures (Insights).
+function M.openProfile(who)
+    local o = { who = who }
+    local page
+    page = Page:new{ caption = _("Reader"),
+        draw = function(self, bb, y, w)
+            local x = self.pad
+            local u = o.full or o.who
+            local H = Screen:getHeight()
+            y = y + Page.wrap(bb, u.name or u.username or "?", Look.serif(22, true), x, y, w - S(150), 1, S(32))
+            if u.username then Look.label(bb, "@" .. u.username, x, y, w - S(150), S(18), 10, { color = Look.GRAY, keep_case = true }) y = y + S(22) end
+            -- [FIGURES ›]: their reading in numbers
+            local rs = Look.button(bb, x + w - S(140) - Look.SHADOW_SMALL, y - S(52), S(140), S(40), _("Insights") .. "  \u{203A}", { size = 12 })
+            self:hit(rs, function() require("bos_insights_app").open({ id = u.id, name = u.name or u.username }) end)
+            local facts = {}
+            if u.books then facts[#facts + 1] = T(_("%1 books"), count(u.books)) end
+            if u.want then facts[#facts + 1] = T(_("%1 to read"), count(u.want)) end
+            if u.followers then facts[#facts + 1] = T(_("%1 followers"), count(u.followers)) end
+            if #facts > 0 then Look.label(bb, table.concat(facts, "  ·  "), x, y, w, S(20), 10) y = y + S(26) end
+            if u.bio then y = y + Page.wrap(bb, u.bio, Look.serif(13, false, true), x, y, w, 2, S(20), Look.GRAY) + S(6) end
+            y = y + S(8)
+            if o.err and not o.full then
+                Page.wrap(bb, o.err, Look.serif(15, false, true), x, y, w, 3, S(23), Look.GRAY)
+                return
+            end
+            -- READING NOW
+            local reading = u.reading or {}
+            Page.heading(bb, #reading > 0 and _("Reading now") or _("Not reading anything just now"), x, y, w)
+            y = y + S(30)
+            local rh = S(86)
+            for k = 1, math.min(#reading, 3) do
+                local row = reading[k]
+                local ch = rh - S(14)
+                local cw = math.floor(ch / 1.5)
+                drawCover(bb, row.book, x, y, cw, ch)
+                local tx, tw = x + cw + S(16), w - cw - S(16)
+                Page.wrap(bb, row.book.title, Look.serif(15, true), tx, y, tw, 1, S(22))
+                if row.book.author then Page.wrap(bb, row.book.author, Look.serif(12, false, true), tx, y + S(22), tw, 1, S(18), Look.GRAY) end
+                local far = howFar(row)
+                if row.percent then
+                    Look.slimTrack(bb, tx, y + S(50), math.min(tw, S(240)), S(10), row.percent / 100)
+                    if far then Look.label(bb, far, tx + math.min(tw, S(240)) + S(12), y + S(44), tw - S(252), S(20), 9, { color = Look.GRAY }) end
+                elseif far then
+                    Look.label(bb, far, tx, y + S(46), tw, S(18), 9, { color = Look.GRAY })
+                end
+                self:hit(Geom:new{ x = x, y = y, w = w, h = rh - S(6) }, function() M.openBook(row.book) end)
+                y = y + rh
+            end
+            y = y + S(6)
+            -- RECENTLY FINISHED: covers with their stars
+            local done = u.finished or {}
+            if #done > 0 then
+                Page.heading(bb, _("Finished lately"), x, y, w)
+                y = y + S(30)
+                local cols, gap = 5, S(14)
+                local cw = math.floor((w - (cols - 1) * gap - Look.SHADOW_SMALL) / cols)
+                local ch = math.floor(cw * 1.5)
+                local rowh = ch + S(34)
+                local rows = math.max(1, math.floor((H - y - S(10)) / rowh))
+                for k = 1, math.min(#done, rows * cols) do
+                    local row = done[k]
+                    local cx = x + ((k - 1) % cols) * (cw + gap)
+                    local cy = y + math.floor((k - 1) / cols) * rowh
+                    drawCover(bb, row.book, cx, cy, cw, ch)
+                    if row.rating then Look.label(bb, stars(row.rating), cx, cy + ch + S(6), cw, S(16), 9, { color = Look.GRAY }) end
+                    self:hit(Geom:new{ x = cx - S(4), y = cy - S(4), w = cw + S(8), h = rowh - S(2) }, function() M.openBook(row.book) end)
+                end
+            elseif not o.full then
+                Look.label(bb, _("Loading…"), x, y, w, S(22), 10, { color = Look.GRAY })
+            end
+        end }
+    page:show()
+    local function covers(u)
+        local books = {}
+        for _i, r in ipairs(u.reading or {}) do books[#books + 1] = r.book end
+        for _i, r in ipairs(u.finished or {}) do books[#books + 1] = r.book end
+        HC.fetchCovers(books, function() if not page.closed then page:refresh("ui") end end, 16)
+    end
+    covers(who)
+    HC.profile(who.id, function(full, why)
+        if page.closed then return end
+        if full then o.full = full covers(full) else o.err = why end
+        page:refresh("ui")
+    end)
+    return page
+end
+
+--- Send this device's reading history to Hardcover (asked first, with the
+--- numbers): finished books with their dates, books in progress with how
+--- far. See bos_hardcover.sendHistory for what is and isn't touched.
+function M.sendHistory()
+    if not HC.signedIn() then notify(_("Sign in to Hardcover first.")) return end
+    local list, done_n, going_n = {}, 0, 0
+    pcall(function()
+        local L = require("bos_recs").library()
+        local Repo = require("lib/bookshelf_book_repository")
+        for _i, b in ipairs(L and L.books or {}) do
+            local done = b.status == "complete"
+            local pct = tonumber(b.pct)
+            if b.filepath and b.title and (done or (pct and pct > 0.02)) and not (HC.linkFor(b.filepath) or {}).status then
+                local on
+                if done then pcall(function() on = Repo.finishedOn and Repo.finishedOn(b.filepath) end) end
+                on = type(on) == "string" and on:match("^%d%d%d%d%-%d%d%-%d%d") or nil
+                list[#list + 1] = { file = b.filepath, title = b.title, author = b.authors and b.authors[1] or nil,
+                    done = done, finished_on = on, percent = pct }
+                if done then done_n = done_n + 1 else going_n = going_n + 1 end
+            end
+        end
+    end)
+    if #list == 0 then
+        notify(_("Nothing to send: every book you've read here is on Hardcover already."))
+        return
+    end
+    local ButtonDialog = require("ui/widget/buttondialog")
+    local dlg
+    dlg = ButtonDialog:new{
+        title = T(_("Send to Hardcover: %1 finished, %2 in progress?\nOnly books Hardcover has under the same title and author. A book already on your shelves there is left as it is."), done_n, going_n),
+        title_align = "center",
+        buttons = { {
+            { text = _("Cancel"), callback = function() UIManager:close(dlg) end },
+            { text = _("Send"), callback = function()
+                UIManager:close(dlg)
+                notify(_("Sending your reading history… you can carry on."))
+                HC.sendHistory(list, function(out, why)
+                    if not out then notify(why or _("Hardcover didn't take it.")) return end
+                    local msg = T(_("Hardcover: %1 added, %2 already there, %3 not found."), out.sent, out.already, out.unmatched)
+                    if (out.left or 0) > 0 then msg = msg .. " " .. T(_("%1 more: send again."), out.left) end
+                    notify(msg)
+                    if M.app and not M.app.closed then M.app.data = {} M.app:load(M.app.tab) M.app:refresh("ui") end
+                end)
+            end },
+        } },
+    }
+    UIManager:show(dlg)
 end
 
 -- ---------------------------------------------------------------- five stars
@@ -626,6 +816,24 @@ local function drawBook(host, bb, x, y, w, bottom, o)
             Look.label(bb, (string.format("%.1f", mine.rating):gsub("%.0$", "")), x + S(120) + 5 * S(28) + S(8), y, S(60), S(30), 11)
         end
         y = y + S(40)
+    end
+    -- the readers you follow who have it: "Ana 42%  ·  Tomás ★ 5" (a tap on
+    -- a name opens their page)
+    local also = HC.friendsWith(b.title, b.id)
+    if also and #also > 0 then
+        local lx = x + Look.label(bb, _("Friends"), x, y, S(120), S(26), 10, { color = Look.GRAY }) + S(12)
+        for k = 1, math.min(#also, 3) do
+            local e = also[k]
+            local text = (e.who.name or e.who.username or "?") .. "  "
+                .. (e.status == 2 and (e.percent and T(_("%1%"), e.percent) or _("reading")) or (e.rating and stars(e.rating) or _("read")))
+            local tw2 = Look.textWidth(text, 10) + S(16)
+            if lx + tw2 > x + w then break end
+            Look.box(bb, lx, y + S(1), tw2, S(24), { border = math.max(1, S(1)) })
+            Look.label(bb, text, lx, y + S(1), tw2, S(24), 10, { align = "center", keep_case = true })
+            hit(Geom:new{ x = lx - S(3), y = y - S(5), w = tw2 + S(6), h = S(36) }, function() M.openProfile(e.who) end)
+            lx = lx + tw2 + S(8)
+        end
+        y = y + S(34)
     end
     if o.err then
         Page.wrap(bb, o.err, Look.serif(15, false, true), x, y + S(6), w, 3, S(23), Look.GRAY)
@@ -950,7 +1158,9 @@ end
 --- The tab for Bookshelf's book window (a book of yours on the device),
 --- while Hardcover is in use (signed in, or never yet declined).
 function M.tab(bw, book, modal)
-    if HC.get("tab_hidden") == true then return nil end
+    -- (a key in the window's About tab, once you're signed in: nothing
+    -- there to tap for someone who doesn't use Hardcover)
+    if HC.get("tab_hidden") == true or not HC.signedIn() then return nil end
     if type(book) ~= "table" or type(book.filepath) ~= "string" or book.is_remote or book.is_folder then return nil end
     local okS, Sources = pcall(require, "lib/bookshelf_sources")
     if okS and Sources.isRemotePath and Sources.isRemotePath(book.filepath) then return nil end
@@ -982,8 +1192,14 @@ function M.settings()
                 HC.set("ask_rating", not HC.get("ask_rating", true)) M.settings() end },
             { text = T(_("Quotes you share are: %1"), ({ _("Public"), _("For followers"), _("Private") })[HC.get("quote_privacy", 1)] or _("Public")),
                 callback = function() HC.set("quote_privacy", HC.get("quote_privacy", 1) % 3 + 1) M.settings() end },
-            { text = T(_("Hardcover tab on a book's window: %1"), HC.get("tab_hidden") and _("No") or _("Yes")), callback = function()
+            { text = T(_("Friends on home's covers: %1"), yesno("home_badges", true)), callback = function()
+                HC.set("home_badges", not HC.get("home_badges", true))
+                HC.links_gen = (HC.links_gen or 0) + 1
+                pcall(function() require("bos_home").refresh() end)
+                M.settings() end },
+            { text = T(_("Hardcover in a book's window: %1"), HC.get("tab_hidden") and _("No") or _("Yes")), callback = function()
                 HC.set("tab_hidden", not HC.get("tab_hidden") and true or nil) M.settings() end },
+            { text = _("Send this device's reading history…"), callback = function() M.sendHistory() end },
             { text = HC.clientId() and _("App ID: set (link codes)") or _("App ID: none (sign in with a key)"), callback = function() M.askClientId() end },
         }
     end

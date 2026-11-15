@@ -16,7 +16,6 @@ ours added to it.
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
-local Device = require("device")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local InputContainer = require("ui/widget/container/inputcontainer")
@@ -247,6 +246,108 @@ function M.recsTab(bw, book, modal)
             return RecsTab:new{ width = avail_w, height = avail_h, book = book, modal = modal, show_parent = show_parent }
         end,
     }
+end
+
+-- ---------------------------------------------------------------- fewer tabs
+
+-- Bookshelf's book window grew a tab for every kind of thing: Description,
+-- Reviews, Recommendations, Hardcover, Highlights, Tags, Edit, Cover. Here
+-- they're gathered by what you came for:
+--
+--   ABOUT   what the book is and what's said of it: Description · Reviews ·
+--           Similar · Hardcover, as a row of keys inside the one tab
+--   (Highlights and Tags stay tabs: they're yours, and worked on)
+--   EDIT    changing the book: Details · Cover
+--
+-- The window opens on About's Description as before; anything that asked
+-- for a particular tab (the hero's stars for the reviews, "change cover")
+-- lands on its key inside the right tab.
+
+local ABOUT = { description = true, reviews = true, stui_recs = true, stui_hardcover = true }
+local EDIT = { edit = true, cover = true }
+
+local function keyLabel(tab)
+    if tab.id == "description" then return _("Description") end
+    if tab.id == "stui_recs" then return _("Similar") end
+    if tab.id == "stui_hardcover" then return _("Hardcover") end
+    if tab.id == "edit" then return _("Details") end
+    return tab.label
+end
+
+local function gather(members, id, label)
+    local VerticalGroup = require("ui/widget/verticalgroup")
+    local g = { id = id, label = label, sources = {}, stui_group = true }
+    for _i, m in ipairs(members) do
+        if m.sources and not m.widget_builder then
+            -- (a description from two places: a key each)
+            for k, src in ipairs(m.sources) do
+                g.sources[#g.sources + 1] = { label = k == 1 and keyLabel(m) or T(_("%1 (%2)"), keyLabel(m), src.label or ""),
+                    html = src.html, member = m }
+            end
+        else
+            if m.sources then m._active_source = m._active_source or m.active_source or 1 end
+            g.sources[#g.sources + 1] = { label = keyLabel(m), html = (not m.widget_builder) and m.html or nil, member = m }
+        end
+    end
+    g.active_source = 1
+    g.widget_builder = function(w, h, sp)
+        local idx = g._active_source or g.active_source or 1
+        local src = g.sources[idx] or g.sources[1]
+        if src.html then
+            -- text: Bookshelf's own scroller under the keys
+            local body = sp:_buildSourcedBody(g, w, h)
+            body._stui_html = true
+            return body
+        end
+        local chips = sp:_buildSourceChips(g)
+        local inner = src.member.widget_builder(w, h - chips:getSize().h, sp)
+        local body = VerticalGroup:new{ align = "left", chips, inner }
+        -- what the window asks of a tab's body: its keys' focus row, its own
+        -- paging (the cover grid), its focus tables
+        body.seg_rows = chips.seg_rows
+        body._inner = inner
+        if type(inner) == "table" then
+            body._pager, body.focus_tables, body.focus_table = inner._pager, inner.focus_tables, inner.focus_table
+        end
+        return body
+    end
+    return g
+end
+
+--- The window's tabs, gathered. Returns the new list and, for each old
+--- position, where it went: { tab = new position, source = its key }.
+function M.consolidate(tabs)
+    local about, editing = {}, {}
+    for _i, t in ipairs(tabs) do
+        if ABOUT[t.id] then about[#about + 1] = t elseif EDIT[t.id] then editing[#editing + 1] = t end
+    end
+    local out, map = {}, {}
+    local about_at, edit_at
+    local function place(members, old, id, label, at)
+        if #members < 2 then
+            out[#out + 1] = tabs[old]
+            map[old] = { tab = #out }
+            return nil
+        end
+        if not at then
+            out[#out + 1] = gather(members, id, label)
+            at = #out
+        end
+        local g = out[at]
+        for k, src in ipairs(g.sources) do
+            if src.member == tabs[old] then map[old] = { tab = at, source = k } break end
+        end
+        return at
+    end
+    for i, t in ipairs(tabs) do
+        if ABOUT[t.id] then about_at = place(about, i, "description", _("About"), about_at) or about_at
+        elseif EDIT[t.id] then edit_at = place(editing, i, "edit", _("Edit"), edit_at) or edit_at
+        else
+            out[#out + 1] = t
+            map[i] = { tab = #out }
+        end
+    end
+    return out, map
 end
 
 return M

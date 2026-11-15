@@ -828,7 +828,12 @@ function HeroCard:_buildRightColumn(book, regions, state, dimen)
     -- community rating for them, and the tappable stars would set a rating the
     -- user can't keep -- they don't own the book until they download it. Skip
     -- the whole block so the freed height goes to the title / description.
-    if regions.rating and book and not book.is_remote then
+    -- ShelfTechUI: a recommendation from Hardcover (FOR YOU) carries its
+    -- community rating: shown like any book's, when Hardcover's rating is
+    -- what the hero is set to show (display-only: there's nothing to rate).
+    local stui_pick_rating = book and book.is_remote and book.stui_hc_rating
+        and BookshelfSettings.isTrue("hardcover_hero_rating")
+    if regions.rating and book and (not book.is_remote or stui_pick_rating) then
         local hardcover_mode = BookshelfSettings.isTrue("hardcover_hero_rating")
         -- The Hardcover rating is display-only; showing it replaces the user's
         -- own tappable stars. If the Hardcover plugin isn't live (uninstalled or
@@ -836,7 +841,7 @@ function HeroCard:_buildRightColumn(book, regions, state, dimen)
         -- regardless of any still-cached Hardcover ratings -- so the user never
         -- loses the ability to rate. The setting is left saved, so it resumes if
         -- the plugin is reinstalled.
-        if hardcover_mode then
+        if hardcover_mode and not stui_pick_rating then
             local ok_hc, HC = pcall(require, "lib/bookshelf_hardcover")
             if not (ok_hc and HC and HC.isAvailable and HC.isAvailable()) then
                 hardcover_mode = false

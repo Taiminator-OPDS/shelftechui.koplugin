@@ -21,7 +21,13 @@ Everything that touches the network runs in a background process
   M.signOut()
 
   M.shelf(status, cb)       your books of a status (1 want, 2 reading, 3 read)
-  M.friends(cb)             what the people you follow are reading
+  M.social(cb, force)       the readers you follow, each with what they're
+                            reading and how far (kept on the device:
+                            M.socialCached() never asks the network)
+  M.friendsWith(title, id)  who among them has a book
+  M.profile(user_id, cb)    a reader's page
+  M.stats(user_id, cb)      a reader's figures (yours with no id)
+  M.sendHistory(list, cb)   this device's reading history, sent in one go
   M.trending(cb)            popular this month
   M.search(q, cb)
   M.book(id, cb)            a book: details, your entry, quotes, reviews
@@ -403,46 +409,256 @@ function M.shelf(status, cb)
     end)
 end
 
---- What the people you follow are reading and have just read: one line
---- each, the latest first.
-function M.friends(cb)
-    local hit = cached("friends", 300)
-    if hit then return cb(hit) end
+--- How far along a read is: percent (0..100) and the page, or nil.
+local function progressOf(read, book_pages)
+    if type(read) ~= "table" then return nil end
+    local pages = (type(read.edition) == "table" and tonumber(read.edition.pages)) or tonumber(book_pages)
+    local page = tonumber(read.progress_pages)
+    if page and pages and pages > 0 then
+        return math.max(0, math.min(100, math.floor(100 * page / pages + 0.5))), page
+    end
+    local p = tonumber(read.progress)
+    if p and p > 0 then return math.max(0, math.min(100, math.floor(p + 0.5))), page end
+    return nil, page
+end
+
+local READS = "user_book_reads(order_by: {id: desc}, limit: 1) { progress progress_pages started_at finished_at edition { pages } }"
+
+local function shelfRow(ub)
+    local b = bookOf(ub.book)
+    if not b then return nil end
+    local pct, page = progressOf(first(ub.user_book_reads), b.pages)
+    return { book = b, status = ub.status_id, rating = tonumber(ub.rating), at = ub.updated_at or ub.last_read_date or "",
+        percent = ub.status_id == 2 and pct or nil, page = ub.status_id == 2 and page or nil }
+end
+
+-- What's known about the readers you follow is kept on the device (its own
+-- file), so home's badges and the start menu's list never wait on the
+-- network: they show what was last fetched, and it's fetched again in the
+-- background when it's older than a quarter of an hour and Wi-Fi is on.
+local social_file, social_mem
+local function socialStore()
+    if not social_file then social_file = LuaSettings:open(DataStorage:getSettingsDir() .. "/stui_hardcover_social.lua") end
+    return social_file
+end
+
+--- The readers you follow, as last fetched (never asks the network):
+--- { at, people = { { id, username, name, books, followers, reading = {
+--- { book, percent, page, at } }, finished = { { book, rating, at } } } } }.
+function M.socialCached()
+    if not social_mem then
+        local v = socialStore():readSetting("social")
+        social_mem = type(v) == "table" and v or { at = 0, people = {} }
+    end
+    return social_mem
+end
+
+local social_waiting
+--- The readers you follow, fresh when it can be: cb(social) at once from
+--- what's kept when that's recent (or there's no Wi-Fi), else after asking.
+function M.social(cb, force)
+    local kept = M.socialCached()
+    if not M.signedIn() then return cb({ at = 0, people = {} }) end
+    if not force and (os.time() - (kept.at or 0) < 900 or not connected()) then return cb(kept) end
+    if not connected() then return cb(kept, say("offline")) end
+    if social_waiting then social_waiting[#social_waiting + 1] = cb return end
+    social_waiting = { cb }
     call([[query ($u: Int!) {
-      followed_users(where: {user_id: {_eq: $u}}, limit: 60) {
+      followed_users(where: {user_id: {_eq: $u}}, limit: 80) {
         followed_user {
-          id username name
-          user_books(where: {status_id: {_in: [2, 3]}}, order_by: {updated_at: desc_nulls_last}, limit: 3) {
+          id username name books_count followers_count
+          user_books(where: {status_id: {_in: [2, 3]}}, order_by: {updated_at: desc_nulls_last}, limit: 5) {
             id status_id rating updated_at
+            ]] .. READS .. [[
             book { ]] .. BOOK .. [[ }
           }
         }
       }
     }]], { u = uid() }, function(data, why)
-        if not data then return cb(nil, why) end
-        cb(remember("friends", data))
+        local list = social_waiting or {}
+        social_waiting = nil
+        if data then
+            social_mem = data
+            socialStore():saveSetting("social", data)
+            socialStore():flush()
+            M.social_gen = (M.social_gen or 0) + 1
+        end
+        for _i, f in ipairs(list) do pcall(f, data or kept, why) end
     end, function(data)
-        local out = { people = 0 }
+        local out = { at = os.time(), people = {} }
         for _i, f in ipairs(data.followed_users or {}) do
             local who = userOf(f.followed_user)
             if who then
-                out.people = out.people + 1
+                who.books, who.followers = f.followed_user.books_count, f.followed_user.followers_count
+                who.reading, who.finished = {}, {}
                 for _k, ub in ipairs(f.followed_user.user_books or {}) do
-                    local b = bookOf(ub.book)
-                    if b then
-                        out[#out + 1] = { who = who, book = b, status = ub.status_id, rating = tonumber(ub.rating), at = ub.updated_at or "" }
+                    local row = shelfRow(ub)
+                    if row then
+                        if row.status == 2 then who.reading[#who.reading + 1] = row else who.finished[#who.finished + 1] = row end
                     end
                 end
+                who.at = (who.reading[1] and who.reading[1].at) or (who.finished[1] and who.finished[1].at) or ""
+                out.people[#out.people + 1] = who
             end
         end
-        table.sort(out, function(a, b) return a.at > b.at end)
+        -- those reading now first, the latest first
+        table.sort(out.people, function(a, b)
+            local ra, rb = #a.reading > 0, #b.reading > 0
+            if ra ~= rb then return ra end
+            return (a.at or "") > (b.at or "")
+        end)
         return out
     end)
 end
 
-local function hydrate(token, ids)
+--- Refresh what's kept, quietly, when it's old and Wi-Fi is on (home and
+--- the start menu call this; it costs nothing when there's nothing to do).
+function M.socialTouch(done)
+    if not M.signedIn() or not connected() then return end
+    if os.time() - (M.socialCached().at or 0) < 900 or social_waiting then return end
+    M.social(function() if done then pcall(done) end end)
+end
+
+-- A title, as it's compared (the same book in two catalogues).
+local function tkey(s)
+    s = tostring(s or ""):lower():gsub("%b()", " "):gsub(":.*$", ""):gsub("^the ", ""):gsub("^an? ", ""):gsub("[^%w]", "")
+    return s
+end
+
+local by_title = { gen = -1, map = {} }
+--- Who among the readers you follow has this book, by title (and by its
+--- Hardcover id when the file is linked): { { who, percent, page, status,
+--- rating } } or nil. From what's kept: instant, and safe while painting.
+function M.friendsWith(title, hc_id)
+    if not M.signedIn() then return nil end
+    local soc = M.socialCached()
+    if by_title.gen ~= (M.social_gen or 0) or by_title.at ~= soc.at then
+        local map, ids = {}, {}
+        local function add(who, row, status)
+            local e = { who = who, percent = row.percent, page = row.page, status = status, rating = row.rating }
+            local k = tkey(row.book.title)
+            if k ~= "" then map[k] = map[k] or {} table.insert(map[k], e) end
+            ids[row.book.id] = ids[row.book.id] or {}
+            table.insert(ids[row.book.id], e)
+        end
+        for _i, who in ipairs(soc.people or {}) do
+            for _k, row in ipairs(who.reading or {}) do add(who, row, 2) end
+            for _k, row in ipairs(who.finished or {}) do add(who, row, 3) end
+        end
+        by_title = { gen = M.social_gen or 0, at = soc.at, map = map, ids = ids }
+    end
+    if hc_id and by_title.ids[hc_id] then return by_title.ids[hc_id] end
+    local k = tkey(title)
+    return k ~= "" and by_title.map[k] or nil
+end
+
+--- A reader's page: who they are, what they're reading (and how far), what
+--- they've finished lately, and their counts.
+function M.profile(user_id, cb)
+    local key = "profile" .. user_id
+    local hit = cached(key, 300)
+    if hit then return cb(hit) end
+    call([[query ($id: Int!) {
+      users(where: {id: {_eq: $id}}, limit: 1) {
+        id username name bio books_count followers_count followed_users_count
+        reading: user_books(where: {status_id: {_eq: 2}}, order_by: {updated_at: desc_nulls_last}, limit: 6) {
+          id status_id rating updated_at
+          ]] .. READS .. [[
+          book { ]] .. BOOK .. [[ }
+        }
+        finished: user_books(where: {status_id: {_eq: 3}}, order_by: [{last_read_date: desc_nulls_last}, {updated_at: desc_nulls_last}], limit: 12) {
+          id status_id rating updated_at last_read_date
+          book { ]] .. BOOK .. [[ }
+        }
+        want: user_books_aggregate(where: {status_id: {_eq: 1}}) { aggregate { count } }
+      }
+    }]], { id = user_id }, function(data, why)
+        if not data then return cb(nil, why) end
+        cb(remember(key, data))
+    end, function(data)
+        local u = first(data.users)
+        local who = userOf(u)
+        if not who then return nil, "refused" end
+        who.bio = type(u.bio) == "string" and u.bio ~= "" and u.bio or nil
+        who.books, who.followers, who.follows = u.books_count, u.followers_count, u.followed_users_count
+        who.want = type(u.want) == "table" and type(u.want.aggregate) == "table" and u.want.aggregate.count or nil
+        who.reading, who.finished = {}, {}
+        for _i, ub in ipairs(u.reading or {}) do local r = shelfRow(ub) if r then who.reading[#who.reading + 1] = r end end
+        for _i, ub in ipairs(u.finished or {}) do local r = shelfRow(ub) if r then who.finished[#who.finished + 1] = r end end
+        return who
+    end)
+end
+
+--- A reader's figures from their Read shelf (yours with no id): books and
+--- pages in all and this year, the average of their ratings, how many a
+--- year and a month, the authors they've read most, and their goal.
+function M.stats(user_id, cb)
+    user_id = user_id or uid()
+    local key = "stats" .. tostring(user_id)
+    local hit = cached(key, 1800)
+    if hit then return cb(hit) end
+    call([[query ($id: Int!) {
+      user_books(where: {user_id: {_eq: $id}, status_id: {_eq: 3}}, order_by: {last_read_date: desc_nulls_last}, limit: 600) {
+        rating last_read_date date_added
+        book { pages cached_contributors }
+      }
+    }]], { id = user_id }, function(data, why)
+        if not data then return cb(nil, why) end
+        cb(remember(key, data))
+    end, function(data, token)
+        local year = os.date("%Y")
+        local st = { books = 0, pages = 0, year_books = 0, year_pages = 0, rated = 0, rating_sum = 0,
+            years = {}, months = {}, authors = {}, dist = { 0, 0, 0, 0, 0 } }
+        for m = 1, 12 do st.months[m] = 0 end
+        local authors = {}
+        for _i, ub in ipairs(data.user_books or {}) do
+            st.books = st.books + 1
+            local pages = type(ub.book) == "table" and tonumber(ub.book.pages) or 0
+            st.pages = st.pages + pages
+            local day = type(ub.last_read_date) == "string" and ub.last_read_date or (type(ub.date_added) == "string" and ub.date_added) or ""
+            local y, m = day:match("^(%d%d%d%d)%-(%d%d)")
+            if y then
+                st.years[y] = (st.years[y] or 0) + 1
+                if y == year then
+                    st.year_books = st.year_books + 1
+                    st.year_pages = st.year_pages + pages
+                    st.months[tonumber(m)] = st.months[tonumber(m)] + 1
+                end
+            end
+            local r = tonumber(ub.rating)
+            if r and r > 0 then
+                st.rated = st.rated + 1
+                st.rating_sum = st.rating_sum + r
+                local bucket = math.max(1, math.min(5, math.floor(r + 0.5)))
+                st.dist[bucket] = st.dist[bucket] + 1
+            end
+            local a = type(ub.book) == "table" and authorOf(ub.book.cached_contributors)
+            if a then
+                a = a:match("^[^,]+") or a
+                authors[a] = (authors[a] or 0) + 1
+            end
+        end
+        st.average = st.rated > 0 and (st.rating_sum / st.rated) or nil
+        for name, n in pairs(authors) do st.authors[#st.authors + 1] = { name = name, n = n } end
+        table.sort(st.authors, function(a, b) if a.n ~= b.n then return a.n > b.n end return a.name < b.name end)
+        for i = #st.authors, 6, -1 do st.authors[i] = nil end
+        st.capped = #(data.user_books or {}) >= 600
+        -- their goal for the year, if they show one
+        local g = graphql(token, [[query ($u: Int!, $d: date!) {
+          goals(where: {user_id: {_eq: $u}, archived: {_eq: false}, start_date: {_lte: $d}, end_date: {_gte: $d}}, order_by: {id: desc}, limit: 1) {
+            goal progress metric
+          }
+        }]], { u = user_id, d = os.date("%Y-%m-%d") })
+        local goal = g and first(g.goals)
+        if goal then st.goal = { goal = tonumber(goal.goal) or 0, progress = math.floor(tonumber(goal.progress) or 0) } end
+        return st
+    end)
+end
+
+local function hydrate(token, ids, with_description)
     if #ids == 0 then return {} end
-    local data, why = graphql(token, "query ($ids: [Int!]) { books(where: {id: {_in: $ids}}) { " .. BOOK .. " } }", { ids = ids })
+    local data, why = graphql(token, "query ($ids: [Int!]) { books(where: {id: {_in: $ids}}) { " .. BOOK
+        .. (with_description and " description" or "") .. " } }", { ids = ids })
     if not data then return nil, why end
     local by = {}
     for _i, b in ipairs(data.books or {}) do by[b.id] = bookOf(b) end
@@ -574,25 +790,41 @@ function M.recommendNow(have, norm_title)
         id = tonumber(id)
         if id and not mine[id] and not seen[id] and #ids < 36 then seen[id] = true ids[#ids + 1] = id why[id] = because end
     end
-    -- like what you rated highest (and what you're reading)
+    -- like the books you rated 4 or more: a book high in several of their
+    -- "similar" lists scores best, one you rated 4.5+ counting double (the
+    -- scoring Hardcover Sync uses); the reason is the book that counted most
     local seeds = graphql(token, [[query ($u: Int!) {
-      user_books(where: {user_id: {_eq: $u}, status_id: {_in: [2, 3]}},
-          order_by: [{rating: desc_nulls_last}, {updated_at: desc_nulls_last}], limit: 12) {
-        book { id cached_similar_book_ids }
+      user_books(where: {user_id: {_eq: $u}, _or: [{rating: {_gte: 4}}, {status_id: {_eq: 2}}]},
+          order_by: [{updated_at: desc_nulls_last}], limit: 15) {
+        rating status_id
+        book { id title cached_similar_book_ids }
       }
     }]], { u = u })
-    local lists = {}
+    local score, best = {}, {}
+    local DEPTH = 30
     for _i, ub in ipairs(seeds and seeds.user_books or {}) do
-        local sim = type(ub.book) == "table" and ub.book.cached_similar_book_ids
+        local book = type(ub.book) == "table" and ub.book
+        local sim = book and book.cached_similar_book_ids
         if type(sim) == "table" then
-            local l = {}
-            for _k, v in ipairs(sim) do l[#l + 1] = type(v) == "table" and (v.id or v.book_id) or v end
-            if #l > 0 then lists[#lists + 1] = l end
+            local rating = tonumber(ub.rating) or 4
+            local weight = rating >= 4.5 and 2 or 1
+            local rank = 0
+            for _k, v in ipairs(sim) do
+                local id = tonumber(type(v) == "table" and (v.id or v.book_id) or v)
+                if id then
+                    rank = rank + 1
+                    if rank > DEPTH then break end
+                    local gain = weight * (DEPTH + 1 - rank)
+                    score[id] = (score[id] or 0) + gain
+                    if not best[id] or gain > best[id].gain then best[id] = { gain = gain, title = book.title } end
+                end
+            end
         end
     end
-    for i = 1, 8 do
-        for _k, l in ipairs(lists) do if l[i] then add(l[i], "similar") end end
-    end
+    local ranked = {}
+    for id, sc in pairs(score) do ranked[#ranked + 1] = { id = id, score = sc } end
+    table.sort(ranked, function(a, b) if a.score ~= b.score then return a.score > b.score end return a.id < b.id end)
+    for _i, r in ipairs(ranked) do add(r.id, best[r.id] and best[r.id].title or "similar") end
     -- what the readers you follow are reading
     if #ids < 24 then
         local fr = graphql(token, [[query ($u: Int!) {
@@ -609,12 +841,17 @@ function M.recommendNow(have, norm_title)
         local tr = graphql(token, "{ books_trending(duration: month, limit: 30) { ids } }")
         for _i, id in ipairs(tr and tr.books_trending and tr.books_trending.ids or {}) do add(id, "popular") end
     end
-    local books = hydrate(token, ids) or {}
+    local books = hydrate(token, ids, true) or {}
     local out = {}
     for _i, b in ipairs(books) do
         if b.title ~= "" and not have[norm_title(b.title)] then
+            local desc = type(b.description) == "string" and b.description:gsub("<[^>]+>", ""):gsub("%s+", " ") or nil
+            if desc and #desc > 900 then desc = desc:sub(1, 900):gsub("[\128-\191]*$", "") .. "…" end
+            local because = why[b.id]
             out[#out + 1] = { online = true, key = "hc:" .. b.id, title = b.title, author = b.author, year = b.year,
-                cover_i = b.image and ("hc" .. b.id) or nil, cover_url = b.image, hc = b.id, because = why[b.id] }
+                cover_i = b.image and ("hc" .. b.id) or nil, cover_url = b.image, hc = b.id,
+                -- "friends", "popular", or the title of the book of yours it's like
+                because = because, rating = b.rating, ratings = b.ratings, description = desc or false }
         end
     end
     return out
@@ -689,6 +926,7 @@ function M.setLink(file, link)
     local links = get("links", {})
     links[file] = link
     set("links", links)
+    M.links_gen = (M.links_gen or 0) + 1
 end
 
 --- The likeliest Hardcover book for a title and an author: cb(book, sure).
@@ -813,6 +1051,92 @@ function M.sendProgress(file, percent, cb)
         if not r or r.error then return nil, why or "refused" end
         return { id = ub.id, status = 2, read_id = r.user_book_read and r.user_book_read.id }
     end)
+end
+
+--- This device's reading history, sent to Hardcover in one go: the books
+--- you've finished here (with the day you finished them) and the ones
+--- you're in the middle of (with how far along). `list`: { { file, title,
+--- author, done, finished_on, percent } }. Only a book that is certainly
+--- the same one (the same title and author) is sent, and a book already on
+--- one of your Hardcover shelves is left exactly as it is there. Runs in
+--- the background; cb{ sent, already, unmatched, links = { file = link } }.
+function M.sendHistory(list, cb)
+    if not M.signedIn() then return cb(nil, say("signedout")) end
+    if not connected() then return cb(nil, say("offline")) end
+    local token, u = get("token"), uid()
+    local todo = {}
+    for _i, it in ipairs(list) do
+        if #todo >= 60 then break end
+        local link = M.linkFor(it.file)
+        if not (link and link.status) then todo[#todo + 1] = { it = it, id = link and link.id } end
+    end
+    if #todo == 0 then return cb({ sent = 0, already = 0, unmatched = 0, links = {}, left = 0 }) end
+    local left = math.max(0, #list - 60)
+    Async().run(function()
+        local ffiutil = require("ffi/util")
+        local out = { sent = 0, already = 0, unmatched = 0, links = {}, left = left }
+        for _i, t in ipairs(todo) do
+            local it = t.it
+            local id, title, author, pages = t.id, it.title, it.author, nil
+            if not id then
+                local short = tostring(it.title or ""):gsub(":.+", "")
+                local found = graphql(token, [[query ($q: String!) { search(query: $q, query_type: "Book", per_page: 5, page: 1) { ids } }]],
+                    { q = short .. " " .. (it.author or "") })
+                local books = found and hydrate(token, idList(found.search and found.search.ids, 5)) or {}
+                local a_last = norm(it.author):match("(%S+)$") or ""
+                for _k, b in ipairs(books) do
+                    local same_title = norm(b.title) == norm(it.title) or norm(b.title) == norm(short)
+                    if same_title and a_last ~= "" and b.author and norm(b.author):find(a_last, 1, true) then
+                        id, title, author, pages = b.id, b.title, b.author, b.pages
+                        break
+                    end
+                end
+            end
+            if not id then
+                out.unmatched = out.unmatched + 1
+            else
+                local have = graphql(token, [[query ($u: Int!, $b: Int!) {
+                  user_books(where: {user_id: {_eq: $u}, book_id: {_eq: $b}}, limit: 1) { id status_id }
+                }]], { u = u, b = id })
+                local ub = have and first(have.user_books)
+                local link = { id = id, title = title, author = author, pages = pages }
+                if ub then
+                    out.already = out.already + 1
+                    link.entry, link.status = ub.id, ub.status_id
+                elseif have then
+                    local object = { book_id = id, status_id = it.done and 3 or 2 }
+                    if it.done and it.finished_on then object.last_read_date = it.finished_on end
+                    local res = graphql(token, [[mutation ($o: UserBookCreateInput!) {
+                      insert_user_book(object: $o) { error user_book { id status_id } }
+                    }]], { o = object })
+                    local r = res and res.insert_user_book
+                    if r and not r.error and r.user_book then
+                        out.sent = out.sent + 1
+                        link.entry, link.status = r.user_book.id, r.user_book.status_id
+                        -- how far along, for a book you're in the middle of
+                        if not it.done and it.percent and it.percent > 0 and pages and pages > 1 then
+                            local page = math.max(1, math.min(pages - 1, math.floor(it.percent * pages + 0.5)))
+                            graphql(token, [[mutation ($id: Int!, $p: Int!, $d: date) {
+                              insert_user_book_read(user_book_id: $id, user_book_read: {progress_pages: $p, started_at: $d}) { error user_book_read { id } }
+                            }]], { id = r.user_book.id, p = page, d = os.date("%Y-%m-%d") })
+                            link.sent = it.percent
+                        end
+                    end
+                end
+                if link.status then out.links[it.file] = link end
+            end
+            ffiutil.usleep(350000) -- (gently: Hardcover counts requests by the minute)
+        end
+        return out
+    end, function(ok, out, why)
+        if not ok or type(out) ~= "table" then return cb(nil, say(ok and why or out)) end
+        local links = get("links", {})
+        for file, link in pairs(out.links) do links[file] = link end
+        set("links", links)
+        M.links_gen = (M.links_gen or 0) + 1
+        M.forget("shelf") M.forget("stats")
+        cb(out)
+    end, 420)
 end
 
 -- ---------------------------------------------------------------- covers

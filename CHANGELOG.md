@@ -2,6 +2,23 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.12.0
+
+Hardcover becomes a social hub, and the book window loses most of its tabs.
+
+- **A friends list.** Hardcover's Friends tab is a row a reader, those reading now first: the cover of what they're on, the book, and how far along they are (a bar, the percentage, the page). A tap opens **their page**: reading now, finished lately with their stars, their counts, and a key to their figures.
+- **On home's covers.** A book of yours that a reader you follow is reading says so across the top of its cover: "42% · Ana" ("★ 5 · Tomás" when they've finished it, "+2" when more friends have it). Matched by the book's Hardcover link, else its title. Hardcover's settings turn it off.
+- **A start-menu card: Friends reading.** Who's reading what, and how far, in the start menu (add it in the start menu's editor). A tap on a reader opens their page.
+- **On a book's page**: the friends who have it, as keys with how far they are; a tap opens their page.
+- **Insights is an app.** The summary you pull down on home has one page now, and an **Insights** key where "Reading calendar" was (the calendar is a key on Insights). Insights shows your reading as a dashboard: this device's statistics, and a second page of your Hardcover figures (books and pages, this year month by month, the last years, your ratings, the authors you read most, your goal). **The list at the top switches to any reader you follow** and shows theirs.
+- **Send this device's reading history to Hardcover** (Hardcover's settings): the books you've finished here, with the day you finished them, and the ones you're in the middle of, with how far. Only a book Hardcover has under the same title and author is sent, and a book already on your shelves there is left as it is. Reading time itself can't be sent: Hardcover has no place for it.
+- **FOR YOU's hero shows the book.** A recommendation in the hero has its description, and Hardcover's rating when the hero is set to show Hardcover ratings.
+- **Recommendations say why.** Hardcover's picks are scored: a book high in the "similar" lists of several books you rated 4 or more comes first.
+- **The book window has three tabs, not eight.** About (Description · Reviews · Similar · Hardcover, as a row of keys inside it), Highlights and Tags when the book has them, and Edit (Details · Cover). It opens on the description as before, and anything that asked for a particular tab lands on its key.
+- Home was timed again with all of this: the cover badges add about a millisecond to drawing home, and nothing new runs while it sits idle.
+
+Hardcover knows the page a reader is on, not the chapter: the friends list shows the percentage and the page.
+
 ## 1.11.2
 
 - **Hardcover's ratings and reviews on the store's books.** Signed in to Hardcover, a book's page in the store shows its rating there ("★ 4.3 · 1.3k ratings on Hardcover · 2 reviews"), and a page of what its readers say: reviews (none marked as spoilers), then the quotes readers liked most, with a key to Hardcover's own page for it (your shelf and rating). Shown only when it's certainly the same book (the same title and author).

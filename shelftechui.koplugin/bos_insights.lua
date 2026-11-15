@@ -1,6 +1,6 @@
 --[[
-Insights (Aleph ideas C3 + D4): the second page of the reading summary you
-pull down on home (swipe it sideways, or tap INSIGHTS).
+Insights (Aleph ideas C3 + D4): the device's half of the Insights app
+(bos_insights_app; the summary you pull down on home has a key to it).
 
   ┌ LAST 26 WEEKS ······························· 112 DAYS READ ┐
   │ ▢▤■▢■▤ … one square a day: blank, some (pinstripes), a lot   │
@@ -18,7 +18,6 @@ From KOReader's reading statistics; the goal is Bookshelf's yearly reading
 goal (its micro-module's setting).
 --]]
 
-local Blitbuffer = require("ffi/blitbuffer")
 local Geom = require("ui/geometry")
 local Widget = require("ui/widget/widget")
 local logger = require("logger")
