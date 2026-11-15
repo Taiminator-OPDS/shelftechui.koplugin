@@ -377,7 +377,8 @@ function Store:init()
     if self.from_search then self.field_w = self.field_w - key_w - S(10) - Look.SHADOW_SMALL end
     self.input = InputText:new{
         text = "", hint = _("Search your books and the store"),
-        width = self.field_w - S(40) - S(8), face = tface(15),
+        -- (room on the right for the × that clears it)
+        width = self.field_w - S(40) - S(8) - S(40), face = tface(15),
         bordersize = 0, margin = 0, padding = S(4),
         parent = self, focused = false,
         edit_callback = function(edited) if edited then self:onTyped() end end,
@@ -762,13 +763,36 @@ function Store:openBook(book)
         v.state = "looking"
         self:push(v)
         self:lookFor(v)
+        self:askHardcover(v)
         return
     end
     v.state = "details"
     self:push(v)
+    self:askHardcover(v)
     local bd = bookdrop()
     if bd and bd.rememberBook then pcall(bd.rememberBook, bd, book) end
     self:hydrate(v, book)
+end
+
+--- What Hardcover's readers make of the book (when you're signed in
+--- there): its rating, reviews and most liked quotes, for the book's page.
+--- Only when it's certainly the same book (the same title and author).
+function Store:askHardcover(v)
+    local okH, HC = pcall(require, "bos_hardcover")
+    if not okH or not HC.signedIn() or not HC.connected() then return end
+    local function got(id)
+        HC.book(id, function(full)
+            if not full or self.closed then return end
+            v.hc = full
+            if self:view() == v then self:redraw("ui") end
+        end)
+    end
+    if v.pick and v.pick.hc then return got(v.pick.hc) end
+    local b = v.book
+    if not (b and b.title and b.author and b.author ~= "") then return end
+    HC.match(b.title, (b.author:gsub("%s*[,;&].*$", "")), function(hb, sure)
+        if hb and sure then got(hb.id) end
+    end)
 end
 
 --- The book's details and files, from its library.
@@ -993,7 +1017,17 @@ function Store:paintBar(bb)
     local isz = self.input:getSize()
     self.input:paintTo(bb, fx + gw, y + math.floor((h - isz.h) / 2))
     self.field_rect = Geom:new{ x = fx, y = y - S(6), w = fw, h = h + S(12) }
-    -- the key on the right: clear what's typed, else the store's settings
+    -- × inside the field, at its right end, once something is typed (as on
+    -- a phone): it clears the field
+    self.clear_rect = nil
+    if (self.input:getText() or "") ~= "" then
+        local d = S(28)
+        local cx, cy = fx + fw - S(10) - d, y + math.floor((h - d) / 2)
+        Look.disc(bb, cx + math.floor(d / 2), cy + math.floor(d / 2), math.floor(d / 2), Look.GRAY)
+        Look.label(bb, "\u{00D7}", cx, cy - S(1), d, d, 16, { align = "center", color = WHITE })
+        self.clear_rect = Geom:new{ x = fx + fw - S(48), y = y - S(6), w = S(48) + S(6), h = h + S(12) }
+    end
+    -- the key on the right: the store's settings
     local kx = fx + fw + Look.SHADOW_SMALL + S(10)
     if self.from_search then
         -- the storefront's key (filled while it's the storefront you're on)
@@ -1004,14 +1038,9 @@ function Store:paintBar(bb)
         end
         kx = kx + h + Look.SHADOW_SMALL + S(10)
     end
-    if (self.input:getText() or "") ~= "" then
-        local rc = Look.button(bb, kx, y, h, h, "\u{00D7}", { size = 16 })
-        self:hit(Geom:new{ x = rc.x - S(4), y = 0, w = W - rc.x + S(4), h = y + h + S(10) }, function() self:clear() end)
-    else
-        local rc = glyphKey(bb, kx, y, h, h, UI.GLYPH.cog)
-        self.cog_rect = Geom:new{ x = rc.x, y = rc.y, w = h, h = h }
-        self:hit(Geom:new{ x = rc.x - S(4), y = 0, w = W - rc.x + S(4), h = y + h + S(10) }, function() self:settings() end)
-    end
+    local rc = glyphKey(bb, kx, y, h, h, UI.GLYPH.cog)
+    self.cog_rect = Geom:new{ x = rc.x, y = rc.y, w = h, h = h }
+    self:hit(Geom:new{ x = rc.x - S(4), y = 0, w = W - rc.x + S(4), h = y + h + S(10) }, function() self:settings() end)
 end
 
 function Store:clear()
@@ -1404,12 +1433,60 @@ function Store:paintBook(bb, v, bottom)
     local b = v.book
     local cw = math.floor(w * 0.34)
     local ch = math.floor(cw * 1.5)
-    if v.page == 2 then
+    -- its pages: the book; the rest of a long description; what Hardcover's
+    -- readers say
+    local hc = v.hc
+    local hc_says = hc and (#hc.reviews > 0 or #hc.quotes > 0)
+    local plist = { "main" }
+    if v.long then plist[#plist + 1] = "about" end
+    if hc_says then plist[#plist + 1] = "hc" end
+    v.pages = #plist
+    v.page = math.max(1, math.min(v.page or 1, #plist))
+    local function pageOf(name) for i, n in ipairs(plist) do if n == name then return i end end end
+    local function stars(r) return "\u{2605} " .. (string.format("%.1f", r):gsub("%.0$", "")) end
+    if plist[v.page] == "about" then
         -- the rest of the description
         Look.heading(bb, _("About this book"), x, y, w, S(26))
         Page.wrap(bb, b.description or "", Look.serif(14), x, y + S(38), w, math.floor((bottom - y - S(110)) / S(23)), S(23))
-        v.pages = 2
-        self:paintFooter(bb, v, 2, bottom)
+        self:paintFooter(bb, v, #plist, bottom)
+        return
+    end
+    if plist[v.page] == "hc" then
+        -- reviews (none with spoilers), then the quotes readers liked most
+        local right = hc.rating and hc.rating > 0 and (stars(hc.rating) .. " · " .. T(_("%1 ratings"), hc.ratings)) or nil
+        Look.heading(bb, _("On Hardcover"), x, y, w, S(26), right)
+        local yy = y + S(40)
+        local room_end = bottom - S(118)
+        local function block(text, face, by_line)
+            local lh = S(22)
+            local max = math.floor((room_end - yy - S(26)) / lh)
+            if max < 2 then return false end
+            local hgt = Page.wrap(bb, text, face, x + S(14), yy, w - S(14), math.min(max, 7), lh)
+            bb:paintRect(x, yy + S(3), S(3), hgt - S(2), Look.INK)
+            Look.label(bb, by_line, x + S(14), yy + hgt + S(3), w - S(14), S(18), 9, { color = Look.GRAY })
+            yy = yy + hgt + S(34)
+            return true
+        end
+        for _i, r in ipairs(hc.reviews) do
+            local who = r.who and (r.who.name or r.who.username) or ""
+            local by_line = (r.rating and (stars(r.rating) .. "  ·  ") or "") .. who
+            if (r.likes or 0) > 0 then by_line = by_line .. "  ·  " .. T(r.likes == 1 and _("%1 like") or _("%1 likes"), r.likes) end
+            if not block(r.text, Look.serif(14), by_line) then break end
+        end
+        if #hc.quotes > 0 and room_end - yy > S(110) then
+            Look.label(bb, _("Quotes readers liked"), x, yy - S(6), w, S(18), 9, {})
+            yy = yy + S(20)
+            for _i, qt in ipairs(hc.quotes) do
+                local who = qt.who and (qt.who.name or qt.who.username) or ""
+                local by_line = who .. ((qt.likes or 0) > 0 and ("  ·  " .. T(qt.likes == 1 and _("%1 like") or _("%1 likes"), qt.likes)) or "")
+                if not block(qt.text, Look.serif(14, false, true), by_line) then break end
+            end
+        end
+        self:paintFooter(bb, v, #plist, bottom)
+        -- your shelf and rating for it, and all of it: Hardcover's own page
+        local ow = S(210)
+        local ro = Look.button(bb, x + w - ow - Look.SHADOW_SMALL, bottom - S(106), ow, S(40), _("Open in Hardcover") .. "  ›", { size = 11 })
+        self:hit(ro, function() require("bos_hardcover_ui").openBook(hc) end)
         return
     end
     drawCover(bb, b, x, y, cw, ch)
@@ -1433,9 +1510,22 @@ function Store:paintBook(bb, v, bottom)
     end
     if b.language and b.language ~= "" then
         Look.label(bb, tostring(b.language), tx, ty, tw, S(18), 9, { color = Look.GRAY })
+        ty = ty + S(24)
     end
     -- the key
     local ky = y + ch - S(52) - S(56)
+    -- Hardcover's readers: ★ 4.3 · 1.3k ratings · 2 reviews ›
+    if hc and hc.rating and hc.rating > 0 and ty + S(22) <= ky - S(4) then
+        local n = hc.ratings >= 1000 and (string.format("%.1fk", hc.ratings / 1000):gsub("%.0k", "k")) or tostring(hc.ratings)
+        local text = stars(hc.rating) .. "  ·  " .. T(_("%1 ratings on Hardcover"), n)
+        if #hc.reviews > 0 then text = text .. "  ·  " .. T(#hc.reviews == 1 and _("%1 review") or _("%1 reviews"), #hc.reviews) end
+        text = text .. "  \u{203A}"
+        Look.label(bb, text, tx, ty, tw, S(20), 10, {})
+        self:hit(Geom:new{ x = tx, y = ty - S(6), w = tw, h = S(32) }, function()
+            if pageOf("hc") then v.page = pageOf("hc") self:redraw("ui")
+            else require("bos_hardcover_ui").openBook(hc) end
+        end)
+    end
     local kh = S(50)
     local acq = b.acquisitions and b.acquisitions[1]
     local path = acq and destination(b, acq)
@@ -1493,15 +1583,23 @@ function Store:paintBook(bb, v, bottom)
     local foot = S(70)
     local lines = math.max(1, math.floor((bottom - ay - foot) / S(23)))
     local desc = b.description
-    v.pages = 1
     if type(desc) == "string" and desc ~= "" then
         desc = desc:gsub("<[^>]+>", ""):gsub("&amp;", "&"):gsub("&quot;", '"'):gsub("&#39;", "'"):gsub("&nbsp;", " ")
         b.description = desc
         local full = Page.wrap(nil, desc, Look.serif(14), 0, 0, w, nil, S(23))
         Page.wrap(bb, desc, Look.serif(14), x, ay, w, lines, S(23))
-        if full > lines * S(23) then
+        local long = full > lines * S(23)
+        if long ~= (v.long or false) then
+            -- (known only once it's measured: the pages are counted again)
+            v.long = long
+            UIManager:nextTick(function() if not self.closed and self:view() == v then self:redraw("ui") end end)
+        end
+        if long then
             local r = Look.button(bb, x, bottom - S(56), S(170), S(40), _("Read more") .. "  ›", { size = 11 })
-            self:hit(r, function() v.pages = 2 v.page = 2 self:redraw("ui") end)
+            self:hit(r, function() v.long = true v.page = 2 self:redraw("ui") end)
+        elseif hc_says then
+            local r = Look.button(bb, x, bottom - S(56), S(170), S(40), _("Reviews") .. "  ›", { size = 11 })
+            self:hit(r, function() v.page = pageOf("hc") or 1 self:redraw("ui") end)
         end
     else
         local note = (v.state == "details" or v.state == "looking") and _("Getting the description…")
@@ -1523,6 +1621,10 @@ function Store:onSTap(_, ges)
     local pos = ges.pos
     -- the keyboard's own taps never get here; a tap in the field is the
     -- text input's (it shows the keyboard): make the list ready for it
+    if self.clear_rect and inside(pos, self.clear_rect) then
+        self:clear()
+        return true
+    end
     if inside(pos, self.field_rect) then
         if not self:keyboardUp() then self:showKeyboard() end
         return true

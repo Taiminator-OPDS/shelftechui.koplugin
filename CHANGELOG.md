@@ -2,6 +2,11 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.11.2
+
+- **Hardcover's ratings and reviews on the store's books.** Signed in to Hardcover, a book's page in the store shows its rating there ("★ 4.3 · 1.3k ratings on Hardcover · 2 reviews"), and a page of what its readers say: reviews (none marked as spoilers), then the quotes readers liked most, with a key to Hardcover's own page for it (your shelf and rating). Shown only when it's certainly the same book (the same title and author).
+- **The × that clears a search is inside the search field**, at its right end, as on a phone. The key beside the field is always the store's settings now, so there's one cross on the bar, not two.
+
 ## 1.11.1
 
 - **Hardcover's recommendations everywhere.** Signed in to Hardcover, the day's picks start with books like the ones you rated highest there, then what the readers you follow are reading, then what's popular (never a book on your shelves or on the device). They're in the store's Recommended row, in FOR YOU on home and in a book's Recommendations tab, taken in turn with the ones from your own reading.
