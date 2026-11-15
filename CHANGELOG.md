@@ -2,6 +2,19 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.11.0
+
+- **Hardcover.** A new app for [hardcover.app](https://hardcover.app), in ShelfTechUI's look (a toolbar and Quick Settings control, Settings → Connect → Hardcover, and an action for gestures):
+  - **Friends**: what the readers you follow are reading and have just finished, with their ratings.
+  - **Reading, Want, Read**: your shelves, with how far along you are and your stars.
+  - **Popular**: this month's most read on Hardcover. **Search** finds any book.
+  - **A book's page**: put it on a shelf with one tap, rate it by half stars, read about it, see the **quotes readers liked most** and reviews (those marked as spoilers are left out), and go to the store to find it in your libraries.
+- **It keeps up as you read**, as a Kindle does with Goodreads. Opening a book puts it on your Reading shelf; closing it sends how far along you are; finishing it moves it to Read and asks for your rating. What can't be sent without Wi-Fi waits and goes when the device is next connected (Wi-Fi is never turned on for it). Each of these can be turned off in Hardcover's settings.
+- **Share a highlight as a quote**: "Hardcover" in the highlight menu.
+- **A Hardcover tab when you hold a book** on home: your shelf and rating for it, quotes and reviews. The book is found by its title and author; when that isn't certain it asks "Is it this one?", and "Not this book?" lets you choose.
+- **Signing in**: the device shows a QR code to a page of Transfer's, where you get a key from Hardcover (with the right permissions already ticked) and paste it; it's kept only on the device. With an app ID from Hardcover (Hardcover's settings → App ID) signing in is a short link code approved on a phone instead, like linking a Kindle to Goodreads.
+- Nothing waits on Hardcover: every request runs in the background, and covers are fetched a few at a time and kept for a month.
+
 ## 1.10.2
 
 - **The Transfer control is back.** It had gone from the toolbar and Quick Settings (and couldn't be added again) since 1.10.0; it's where you put it.

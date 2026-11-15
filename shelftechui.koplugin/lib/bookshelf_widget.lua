@@ -24955,6 +24955,12 @@ function BookshelfWidget:_showBookDetail(book, opts)
         local t = require("bos_bookdetail").recsTab(self, book, function() return modal end)
         if t then tabs[#tabs + 1] = t end
     end)
+    -- ShelfTechUI: this book on Hardcover (bos_hardcover_ui): your shelf
+    -- and rating for it, the quotes readers liked most, reviews.
+    pcall(function()
+        local t = require("bos_hardcover_ui").tab(self, book, function() return modal end)
+        if t then tabs[#tabs + 1] = t end
+    end)
 
     -- Edit next: the actions tab is reached for less often than Description/
     -- Reviews/Tags, so it sits toward the end of the strip rather than hogging

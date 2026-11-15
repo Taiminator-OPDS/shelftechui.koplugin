@@ -90,14 +90,19 @@ function M.ip()
     return ip_cache.ip
 end
 
-function M.url(with_code)
+function M.url(with_code, page)
     local ip = M.ip()
     if not ip then return nil end
     local port = M.port()
-    local u = "http://" .. ip .. (port == 80 and "" or (":" .. port)) .. "/"
+    local u = "http://" .. ip .. (port == 80 and "" or (":" .. port)) .. "/" .. (page or "")
     if with_code and M.code() then u = u .. "?k=" .. M.code() end
     return u
 end
+
+--- Hardcover's sign-in (bos_hardcover_ui): while `fn` is set, the page at
+--- /hardcover takes an API key pasted in a browser and hands it to
+--- fn(key, answer), which says answer(ok, name or why) when it's checked.
+function M.hardcover(fn) Server.setKeyTaker(fn) end
 
 -- ---------------------------------------------------------------- the server
 

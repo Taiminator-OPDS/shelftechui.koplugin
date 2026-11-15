@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Hardcover · ShelfTechUI</title>
+<style>
+:root{--ink:#111;--paper:#fff;--mid:#666;--light:#d8d8d8;--line:2px;--shadow:4px 4px 0 var(--ink)}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--paper);color:var(--ink)}
+body{font:15px/1.45 ui-monospace,"SFMono-Regular","Cascadia Mono","Roboto Mono",Menlo,Consolas,monospace;-webkit-text-size-adjust:100%}
+main{max-width:720px;margin:0 auto;padding:16px 16px 48px}
+.cap{text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+.band{position:relative;height:30px;margin:4px 0 18px;background:repeating-linear-gradient(to bottom,var(--ink) 0 2px,transparent 2px 6px)}
+.band span{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:var(--paper);padding:2px 14px;white-space:nowrap;font-size:14px}
+.sub{display:flex;justify-content:space-between;gap:12px;color:var(--mid);font-size:12px;margin:-8px 0 18px}
+.box{border:var(--line) solid var(--ink);background:var(--paper);box-shadow:var(--shadow)}
+button,.key{font:inherit;font-size:13px;text-transform:uppercase;letter-spacing:.05em;font-weight:700;color:var(--ink);background:var(--paper);border:var(--line) solid var(--ink);box-shadow:3px 3px 0 var(--ink);padding:10px 14px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px}
+button:active,.key:active{transform:translate(3px,3px);box-shadow:none}
+button.on{background:var(--ink);color:var(--paper)}
+button:disabled{opacity:.45;cursor:default}
+.drop{padding:22px 18px;text-align:center}
+.drop.over{background:repeating-linear-gradient(135deg,var(--paper) 0 8px,#eee 8px 16px)}
+.drop p{margin:8px 0 14px;color:var(--mid)}
+.drop .big{font-size:18px;color:var(--ink);margin:0}
+#queue{margin-top:16px;display:flex;flex-direction:column;gap:10px}
+.up{padding:10px 12px}
+.up .row{display:flex;justify-content:space-between;gap:10px;font-size:13px}
+.up .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar{margin-top:8px;height:14px;border:var(--line) solid var(--ink);padding:2px}
+.bar i{display:block;height:100%;width:0;background:repeating-linear-gradient(to bottom,var(--ink) 0 2px,transparent 2px 4px);transition:width .2s}
+.up.done .bar i{background:var(--ink)}
+.up.err{border-style:dashed}
+h2{font-size:13px;margin:30px 0 10px;display:flex;align-items:center;gap:10px}
+h2::after{content:"";flex:1;border-bottom:2px dotted var(--ink)}
+.crumbs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.crumbs button{text-transform:none;letter-spacing:0;min-height:34px;padding:4px 10px;font-size:12px;box-shadow:2px 2px 0 var(--ink)}
+.crumbs button.back{margin-left:auto;border-style:dashed}
+.list{padding:0}
+.item{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--light)}
+.item:last-child{border-bottom:0}
+.item .ic{flex:none;width:30px;height:40px;border:var(--line) solid var(--ink);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;text-transform:uppercase;box-shadow:2px 2px 0 var(--ink)}
+.item.folder .ic{width:34px;height:28px;box-shadow:none;border-top-width:6px}
+.item .what{flex:1;min-width:0}
+.item .t{font-family:Georgia,"Iowan Old Style","Palatino Linotype",serif;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item .m{font-size:11px;color:var(--mid);text-transform:uppercase;letter-spacing:.04em}
+.item button,.item .key{min-height:36px;padding:4px 10px;font-size:12px;box-shadow:2px 2px 0 var(--ink)}
+.item.folder{cursor:pointer}
+.empty{padding:22px 14px;color:var(--mid);font-style:italic;font-family:Georgia,serif}
+.tools{display:flex;gap:10px;margin:0 0 12px;flex-wrap:wrap}
+.login{max-width:380px;margin:12vh auto 0;padding:22px}
+.login input{width:100%;font:inherit;font-size:30px;letter-spacing:.35em;text-align:center;border:var(--line) solid var(--ink);padding:10px;margin:14px 0 16px;background:var(--paper);color:var(--ink)}
+.login p{color:var(--mid);margin:0}
+.wrong{color:var(--ink);font-weight:700;margin-top:10px!important}
+.foot{margin-top:28px;color:var(--mid);font-size:11px;text-align:center;text-transform:uppercase;letter-spacing:.06em}
+.toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);padding:10px 16px;font-size:13px;display:none;z-index:9}
+@media (max-width:420px){.item .m{font-size:10px}.drop{padding:18px 12px}}
+.item .m2{display:none}
+.oops{border:2px dashed var(--ink);padding:12px;margin:12px 0;font-size:13px}
+/* a monitor: sending on the left (it stays put), the device's folders on
+   the right, with a column each for size and date */
+@media (min-width:980px){
+  main{max-width:1500px;padding:24px 40px 56px}
+  .cols{display:grid;grid-template-columns:minmax(300px,380px) minmax(0,1fr);gap:44px;align-items:start}
+  .side{position:sticky;top:20px;max-height:calc(100vh - 40px);overflow:auto;padding:0 6px 6px 0}
+  .side h2:first-child,.main h2:first-child{margin-top:0}
+  .drop{padding:44px 22px}
+  .item{padding:9px 16px}
+  .item .t{font-size:17px}
+  .item .m{display:none}
+  .item .m2{display:block;flex:none;width:110px;text-align:right;font-size:12px;color:var(--mid);text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+  .item .m2.d{width:130px}
+  .item:hover{background:#f3f3f3}
+  .foot{text-align:left}
+}
+.steps{max-width:620px;margin:0 auto}
+.step{padding:18px;margin:0 0 22px}
+.step .n{display:inline-block;border:var(--line) solid var(--ink);width:30px;height:30px;line-height:26px;text-align:center;font-weight:700;margin-right:10px}
+.step h3{display:inline;font-size:15px;text-transform:uppercase;letter-spacing:.05em}
+.step p{color:var(--mid);margin:12px 0}
+textarea{width:100%;min-height:110px;font:inherit;font-size:13px;border:var(--line) solid var(--ink);padding:10px;resize:vertical;background:var(--paper);color:var(--ink);word-break:break-all}
+.say{font-weight:700;margin-top:12px;min-height:22px}
+</style>
+</head>
+<body>
+<main id="app">
+<div class="band"><span class="cap">ShelfTechUI · Hardcover</span></div>
+<div class="steps">
+  <div class="box step">
+    <span class="n">1</span><h3>Get a key from Hardcover</h3>
+    <p>This opens Hardcover with the right permissions already ticked. Sign in if it asks, press <b>Create</b>, then copy the key it shows.</p>
+    <a class="key" id="get" href="#" target="_blank" rel="noopener">Open Hardcover</a>
+  </div>
+  <div class="box step">
+    <span class="n">2</span><h3>Paste it here</h3>
+    <p>The key goes to your e-reader over this Wi-Fi and is kept only there.</p>
+    <textarea id="key" placeholder="Paste the key" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
+    <div style="margin-top:12px"><button class="on" id="go">Connect the e-reader</button></div>
+    <div class="say" id="say"></div>
+  </div>
+  <div class="foot"><a href="/" id="back" style="color:inherit">Back to Transfer</a></div>
+</div>
+</main>
+<script>
+(function(){
+"use strict";
+var CODE="";
+try{var m=/[?&]k=(\d+)/.exec(location.search);if(m)CODE=m[1];
+  if(CODE)sessionStorage.setItem("stui_k",CODE);else CODE=sessionStorage.getItem("stui_k")||""}catch(e){}
+try{if(location.search)history.replaceState(null,"","/hardcover")}catch(e){}
+function $(id){return document.getElementById(id)}
+function api(method,url,body,cb){var x=new XMLHttpRequest();x.open(method,url);if(CODE)x.setRequestHeader("X-Stui-Code",CODE);
+  x.onload=function(){var j={};try{j=JSON.parse(x.responseText)}catch(e){}cb(x.status,j)};
+  x.onerror=function(){cb(0,{error:"The e-reader didn't answer. Is Transfer still on?"})};x.send(body||null)}
+function say(t){$("say").textContent=t}
+api("GET","/api/hardcover",null,function(st,j){
+  if(st===403){say("Open this page with the code on the e-reader's screen first.");location.href="/";return}
+  if(j.url)$("get").href=j.url;
+  if(j.state==="closed")say("The e-reader isn't waiting for a key. Open Hardcover on it, then come back here.");
+  if(j.state==="ok")say("Connected. You can close this page.");
+});
+function watch(){api("GET","/api/hardcover",null,function(st,j){
+  if(j.state==="checking"){setTimeout(watch,1200);return}
+  $("go").disabled=false;
+  if(j.state==="ok")say("Connected"+(j.message?" as "+j.message:"")+". Look at your e-reader. You can close this page.");
+  else if(j.state==="error")say(j.message||"Hardcover didn't accept that key.");
+  else say("The e-reader stopped waiting. Open Hardcover on it and try again.")})}
+$("go").onclick=function(){
+  var k=$("key").value.replace(/\s+/g,"").replace(/^Bearer/i,"");
+  if(k.length<20){say("Paste the whole key first.");return}
+  $("go").disabled=true;say("Checking with Hardcover…");
+  api("POST","/api/hardcover",k,function(st,j){
+    if(st!==200){$("go").disabled=false;say(j.error||"The e-reader didn't take it.");return}
+    setTimeout(watch,1200)})};
+})();
+</script>
+</body>
+</html>

@@ -172,6 +172,15 @@ local CATALOGUE = {
         says = { home = _("The store: recommendations from what you read, shelves to browse, and search across your libraries.") },
     },
     {
+        -- Hardcover (bos_hardcover_ui): your shelves and your friends' reading
+        id = "hardcover", name = _("Hardcover"), glyph = "\u{F0C0}",
+        available = function() return true end,
+        home = { tap = function() require("bos_hardcover_ui").open() end },
+        qs = { tap = function() require("bos_hardcover_ui").open() end, closes = true },
+        says = { home = _("Hardcover: your shelves, what your friends are reading, and what's popular."),
+                 qs = _("Hardcover: your shelves, what your friends are reading, and what's popular.") },
+    },
+    {
         id = "dictionary", name = _("Dictionary"), glyph = UI.GLYPH.dictionary,
         available = function() return true end,
         home = { tap = event("ShowDictionaryLookup") },

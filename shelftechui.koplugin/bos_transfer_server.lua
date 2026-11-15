@@ -313,13 +313,23 @@ end
 
 -- ---------------------------------------------------------------- the page
 
-local page_cache
-local function page()
-    if page_cache then return page_cache end
-    local f = io.open(PLUGIN_DIR .. "/transfer/index.html", "rb")
-    page_cache = f and f:read("*a") or "<!doctype html><title>Transfer</title><p>The page is missing from this build."
+local page_cache = {}
+local function page(name)
+    name = name or "index"
+    if page_cache[name] then return page_cache[name] end
+    local f = io.open(PLUGIN_DIR .. "/transfer/" .. name .. ".html", "rb")
+    page_cache[name] = f and f:read("*a") or "<!doctype html><title>Transfer</title><p>The page is missing from this build."
     if f then f:close() end
-    return page_cache
+    return page_cache[name]
+end
+
+-- Hardcover's sign-in borrows the server: a key pasted on /hardcover is
+-- handed to whoever asked for it (bos_hardcover_ui), and the page is told
+-- how it went.
+local key_taker, key_state = nil, { state = "idle" }
+function M.setKeyTaker(fn)
+    key_taker = fn
+    key_state = { state = "idle" }
 end
 
 -- (Lax, not Strict: a QR scanner or another app opening the address is a
@@ -453,8 +463,11 @@ local function route(c)
     local path, query = target:match("^([^?]*)%??(.*)$")
     local q = parseQuery(query)
     -- the QR code's address: signed in, then the page
-    if method == "GET" and path == "/" and q.k then
+    if method == "GET" and (path == "/" or path == "/hardcover") and q.k then
         if S.code and q.k == S.code then
+            if path == "/hardcover" then
+                return respond(c, 200, "text/html; charset=utf-8", page("hardcover"), { COOKIE() })
+            end
             -- (the page itself, not a redirect: one request, nothing for a
             -- phone's browser to lose on the way; the page takes the code
             -- out of its address)
@@ -472,6 +485,15 @@ local function route(c)
     end
     if method == "GET" and (path == "/" or path == "/index.html") then
         return respond(c, 200, "text/html; charset=utf-8", page())
+    elseif method == "GET" and path == "/hardcover" then
+        return respond(c, 200, "text/html; charset=utf-8", page("hardcover"))
+    elseif method == "GET" and path == "/api/hardcover" then
+        return json(c, 200, { state = key_taker and key_state.state or "closed", message = key_state.message or "",
+            url = require("bos_hardcover").KEY_URL })
+    elseif method == "POST" and path == "/api/hardcover" then
+        if not key_taker then return fail(c, 409, "The e-reader isn't waiting for a key. Open Hardcover on it first.") end
+        c.want_key = true
+        return
     elseif method == "GET" and path == "/api/list" then return list(c, q)
     elseif method == "POST" and path == "/api/upload" then return startUpload(c, q)
     elseif method == "GET" and path == "/api/file" then
@@ -508,6 +530,18 @@ end
 --- The code typed into the sign-in page (once all of the form is here).
 local function checkForm(c)
     if #c.buf < c.form_len then return end
+    if c.want_key then
+        local key = c.buf:sub(1, c.form_len)
+        key_state = { state = "checking" }
+        json(c, 200, { ok = true })
+        local taker = key_taker
+        if taker then
+            pcall(taker, key, function(ok, text)
+                key_state = { state = ok and "ok" or "error", message = text or "" }
+            end)
+        end
+        return
+    end
     local f = parseQuery(c.buf)
     local code = (f.code or ""):gsub("%s", "")
     if S.code and code == S.code then
@@ -534,7 +568,7 @@ local function parseHead(c)
     if not ok then
         logger.warn("ShelfTechUI: transfer:", err)
         respond(c, 500, nil, "Something went wrong")
-    elseif c.want_form then
+    elseif c.want_form or c.want_key then
         c.state = "form"
         c.form_len = math.min(tonumber(c.headers["content-length"]) or 0, 4096)
         -- (a short form usually comes in the same packet as the head)
@@ -663,7 +697,7 @@ function M.start(opts)
         wide = opts.code ~= nil,
         on_received = opts.on_received, on_change = opts.on_change, on_visit = opts.on_visit, device = opts.device,
         conns = {}, moving = 0, last_activity = now() }
-    page_cache = nil
+    page_cache = {}
     UIManager:scheduleIn(IDLE_EVERY, poll)
     return opts.port
 end

@@ -30,7 +30,7 @@ local S = UI.S
 
 local Page = {}
 
-Page.VERSION = "1.10.2"
+Page.VERSION = "1.11.0"
 
 -- Dispatcher's sub-menus edit tables in place and flag `caller.updated`.
 local saver = setmetatable({}, { __newindex = function() Store.save() end })
@@ -844,6 +844,23 @@ function Page.sections(plugin)
             callback = function() require("bos_store").open() end,
         },
     } }
+    table.insert(connect.items, { heading = _("Hardcover") })
+    table.insert(connect.items, {
+        text = _("Hardcover"),
+        description = _("Your shelves on hardcover.app, what the readers you follow are reading, and the quotes and reviews of a book. Books you read here are put on your shelves, with how far along you are. Also a toolbar and Quick Settings control, and a tab when you hold a book."),
+        mandatory_func = function()
+            local HC = require("bos_hardcover")
+            local u = HC.user()
+            return HC.signedIn() and (u and (u.name or u.username) or _("On")) or _("Sign in")
+        end,
+        callback = function() require("bos_hardcover_ui").open() end,
+    })
+    table.insert(connect.items, {
+        text = _("Hardcover settings"),
+        description = _("What's sent as you read (shelves, progress, a rating at the end), who sees the quotes you share, and the tab on a book's window."),
+        keep_menu_open = true,
+        callback = function() require("bos_hardcover_ui").settings() end,
+    })
     do
         -- which libraries, formats and language the store asks for
         local bd = require("bos_online").bookdrop()

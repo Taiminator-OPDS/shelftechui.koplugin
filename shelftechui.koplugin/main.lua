@@ -382,6 +382,9 @@ function BookshelfOS:onDispatcherRegisterActions()
     Dispatcher:registerAction("stui_wrapped", {
         category = "none", event = "StuiWrapped", title = _("ShelfTechUI: Wrapped (your year in books)"), general = true,
     })
+    Dispatcher:registerAction("stui_hardcover", {
+        category = "none", event = "StuiHardcover", title = _("ShelfTechUI: Hardcover"), general = true,
+    })
     Dispatcher:registerAction("stui_store", {
         category = "none", event = "StuiStore", title = _("ShelfTechUI: Store"), general = true,
     })
@@ -453,6 +456,7 @@ local function pokeHome() pcall(function() require("bos_home").poke() end) end
 
 function BookshelfOS:onNetworkConnected()
     pokeHome()
+    pcall(function() require("bos_hardcover_sync").online() end)
     UIManager:scheduleIn(10, function() pcall(function() require("bos_update").autoCheck() end) end)
 end
 function BookshelfOS:onNetworkDisconnected() pokeHome() end
@@ -491,6 +495,11 @@ function BookshelfOS:onStuiHomeLayout()
     return true
 end
 
+function BookshelfOS:onStuiHardcover()
+    require("bos_hardcover_ui").open()
+    return true
+end
+
 function BookshelfOS:onStuiStore()
     require("bos_store").open()
     return true
@@ -522,6 +531,7 @@ function BookshelfOS:onReaderReady()
     if not self.ui.document then return end
     pcall(function() require("bos_pins").attach(self.ui) end)
     pcall(function() require("bos_pins").installHighlightButton(self.ui) end)
+    pcall(function() require("bos_hardcover_sync").opened(self.ui) end)
 end
 
 function BookshelfOS:onPageUpdate()
@@ -529,6 +539,7 @@ function BookshelfOS:onPageUpdate()
 end
 
 function BookshelfOS:onCloseDocument()
+    pcall(function() require("bos_hardcover_sync").closing(self.ui) end)
     if self.toolbar then self.toolbar:onCloseDocument() end
     pcall(function() require("bos_pins").detach(self.ui) end)
 end
