@@ -448,9 +448,21 @@ function BookshelfOS:onStuiTransferToggle()
     return true
 end
 
+-- Home's toolbar keeps up with the device (bos_home)
+local function pokeHome() pcall(function() require("bos_home").poke() end) end
+
 function BookshelfOS:onNetworkConnected()
+    pokeHome()
     UIManager:scheduleIn(10, function() pcall(function() require("bos_update").autoCheck() end) end)
 end
+function BookshelfOS:onNetworkDisconnected() pokeHome() end
+function BookshelfOS:onCharging() pokeHome() end
+function BookshelfOS:onNotCharging() pokeHome() end
+function BookshelfOS:onUsbPlugIn() pokeHome() end
+function BookshelfOS:onUsbPlugOut() pokeHome() end
+function BookshelfOS:onFrontlightStateChanged() pokeHome() end
+function BookshelfOS:onToggleNightMode() pokeHome() end
+function BookshelfOS:onTimeFormatChanged() pokeHome() end
 
 --- Wrapped's card, only over home itself (not a book, not a dialog).
 function BookshelfOS.wrappedNote()
@@ -465,6 +477,7 @@ function BookshelfOS.wrappedNote()
 end
 
 function BookshelfOS:onResume()
+    pokeHome()
     if not self.ui.document then UIManager:scheduleIn(3, function() BookshelfOS.wrappedNote() end) end
 end
 

@@ -1091,7 +1091,8 @@ function Store:rowHeight(cw) return S(34) + math.floor(cw * 1.5) + S(44) + S(16)
 function Store:paintHome(bb, v, bottom)
     local W, pad = self.dimen.w, self.pad
     local x, w = pad, W - 2 * pad
-    local cols, gap = 4, S(16)
+    -- five covers across: two shelves and Browse fit the first page
+    local cols, gap = 5, S(14)
     local cw = math.floor((w - (cols - 1) * gap - Look.SHADOW_SMALL) / cols)
     local ch = math.floor(cw * 1.5)
     local rh = self:rowHeight(cw)
@@ -1099,9 +1100,12 @@ function Store:paintHome(bb, v, bottom)
     local foot = S(60)
     local avail = bottom - self.body_y - foot
     local blocks = {}
+    -- Browse first (as a Kindle's and a Kobo's store open on their
+    -- categories): a compact grid of keys, then the rows of covers
+    local ccols = w >= S(520) and 4 or 3
+    local cat_rows = math.ceil(#self.categories / ccols)
+    blocks[#blocks + 1] = { cats = true, h = S(34) + cat_rows * S(50) + S(12) }
     for _i, row in ipairs(self.rows or {}) do blocks[#blocks + 1] = { row = row, h = rh } end
-    local cat_rows = math.ceil(#self.categories / 2)
-    blocks[#blocks + 1] = { cats = true, h = S(34) + cat_rows * S(58) + S(10) }
     local pages, cur, used = {}, {}, 0
     for _i, b in ipairs(blocks) do
         if used + b.h > avail and #cur > 0 then
@@ -1156,12 +1160,12 @@ function Store:paintHome(bb, v, bottom)
         elseif b.cats then
             Look.heading(bb, _("Browse"), x, y, w, S(26))
             local cy = y + S(34)
-            local cgap = S(14)
-            local bw2 = math.floor((w - cgap - Look.SHADOW_SMALL) / 2)
+            local cgap = S(10)
+            local bw2 = math.floor((w - (ccols - 1) * cgap - Look.SHADOW_SMALL) / ccols)
             for i, c in ipairs(self.categories) do
                 local k = i - 1
-                local bx, by = x + (k % 2) * (bw2 + cgap), cy + math.floor(k / 2) * S(58)
-                local r = Look.button(bb, bx, by, bw2, S(46), c[1] .. "  ›", { size = 12 })
+                local bx, by = x + (k % ccols) * (bw2 + cgap), cy + math.floor(k / ccols) * S(50)
+                local r = Look.button(bb, bx, by, bw2, S(40), c[1], { size = 11 })
                 self:hit(r, function() self:openShelf(c[1], c[2]) end)
             end
             y = y + b.h

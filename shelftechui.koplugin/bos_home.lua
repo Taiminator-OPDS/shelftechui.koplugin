@@ -30,6 +30,7 @@ local function buildBar(self)
     local HorizontalGroup = require("ui/widget/horizontalgroup")
     local HorizontalSpan = require("ui/widget/horizontalspan")
     local bar = StatusBar:new{ width = self.width - 2 * pad, chips = chips }
+    Home.bar = bar
     return VerticalGroup:new{
         align = "left",
         VerticalSpan:new{ width = math.floor(pad * 0.75) },
@@ -76,6 +77,7 @@ function Home.install()
     BW._rebuild = function(self, ...)
         Home.live = self
         Home.h = 0
+        Home.bar, Home.above = nil, nil
         local bar
         if enabled() then
             local okB, b = pcall(buildBar, self)
@@ -102,6 +104,7 @@ function Home.install()
                 if bar.free then pcall(bar.free, bar) end
             end
         end
+        Home.watch()
         return unpack(res, 1, res.n)
     end
 
@@ -134,12 +137,102 @@ function Home.install()
         end
     end)
 
+    -- the shelf paints only what's dirty: when a window over it closes, the
+    -- bar's strip is often left as it was. So after the shelf paints, the
+    -- bar is asked whether it still says what's true (once per burst of paints)
+    if type(BW.paintTo) == "function" then
+        local orig_paint = BW.paintTo
+        BW.paintTo = function(self, ...)
+            local res = table.pack(orig_paint(self, ...))
+            if self == Home.live then Home.painted() end
+            return unpack(res, 1, res.n)
+        end
+    end
+
     -- the footer row itself keeps its own height
     local orig_footer = BW._buildFooterRow
     BW._buildFooterRow = function(self, content_w, total_pages, footer_h)
         return orig_footer(self, content_w, total_pages, footer_h - (Home.h or 0))
     end
     return true
+end
+
+-- ---------------------------------------------------------------------------
+-- The bar keeps up: the time each minute, the battery as it changes, and
+-- charging, Wi-Fi and the light when the device says so (Home.poke, from the
+-- plugin's event handlers). Nothing is painted unless what a chip shows has
+-- changed, and never under another window.
+-- ---------------------------------------------------------------------------
+
+local function shelfOnStack()
+    for _i, win in ipairs(UIManager._window_stack or {}) do
+        if win.widget == Home.live then return true end
+    end
+    return false
+end
+
+--- Paint the bar again if what it shows has changed.
+function Home.sync()
+    local bar, shelf = Home.bar, Home.live
+    if not (bar and shelf and bar.dimen and bar.dimen.x) then return end
+    if not bar:onTop() then return end
+    local ok, sig = pcall(bar.signature, bar)
+    if not ok then return end
+    -- (Dash has a line of its own above the bar: the time and the battery)
+    local above = false
+    if Home.above then
+        local okA, v = pcall(Home.above)
+        above = okA and v or false
+    end
+    if sig == bar._sig and not above then Home.tried = nil return end
+    -- (asked for once per change: if the shelf isn't painting just now, it
+    -- isn't asked again and again)
+    local what = sig .. (above and os.date("%H%M") or "")
+    if Home.tried == what then return end
+    Home.tried = what
+    if above then
+        local Geom = require("ui/geometry")
+        UIManager:setDirty(shelf, "ui", Geom:new{ x = 0, y = 0, w = shelf.width, h = bar.dimen.y + bar.dimen.h })
+        return
+    end
+    -- the whole shelf is painted (the chips may have moved: what's behind
+    -- them is drawn again), only the bar's strip of the screen is refreshed
+    UIManager:setDirty(shelf, "ui", bar.dimen)
+end
+
+--- The shelf was just painted: soon, see that the bar is still right.
+function Home.painted()
+    if not Home.bar or Home.checking then return end
+    Home.checking = true
+    UIManager:scheduleIn(0.3, function()
+        Home.checking = false
+        Home.sync()
+    end)
+end
+
+local function minute()
+    if not (Home.bar and shelfOnStack()) then Home.ticking = false return end
+    Home.sync()
+    UIManager:scheduleIn(61 - os.time() % 60, minute)
+end
+
+--- Start the minute's tick (once; it stops by itself when home is closed).
+function Home.watch()
+    if not Home.bar then return end
+    UIManager:unschedule(minute)
+    Home.ticking = true
+    UIManager:scheduleIn(61 - os.time() % 60, minute)
+end
+
+--- Something changed (charging, Wi-Fi, the light, waking up): look now, and
+--- once more when the device has settled.
+function Home.poke()
+    if not Home.bar then return end
+    pcall(function() require("bos_status").invalidate() end)
+    UIManager:unschedule(Home.sync)
+    UIManager:scheduleIn(0.3, Home.sync)
+    UIManager:scheduleIn(2.5, function() Home.sync() end)
+    if not Home.ticking then Home.watch() end
 end
 
 --- Rebuild the live shelf (after the bar's setting changes).

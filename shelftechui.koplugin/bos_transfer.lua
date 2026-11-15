@@ -209,7 +209,11 @@ function M.start()
     local device = ""
     pcall(function() device = Device.model or "" end)
     local ok, why = Server.start{ root = folder, port = M.port(), code = code, device = device,
-        on_received = onReceived, on_change = onChange }
+        on_received = onReceived, on_change = onChange,
+        on_visit = function(ip)
+            M.status = T(_("Opened from %1"), ip)
+            if M._page then M._page:refresh("ui") end
+        end }
     if not ok then
         code = nil
         if why == "busy" then
@@ -294,23 +298,15 @@ end
 --- Changing a setting restarts a running server, so it takes effect at once.
 local function apply(page, change)
     local was = M.isRunning()
-    if not was then
-        change()
-        page:refresh("ui")
-        return
-    end
-    -- seen at once; the restart (a second or two on an e-reader) after
-    pcall(function() require("ui/widget/notification"):notify(_("Applying…")) end)
-    UIManager:forceRePaint()
-    UIManager:nextTick(function()
-        M.stop(true)
-        change()
+    if was then M.stop(true) end
+    change()
+    if was then
         local ok, why = M.start()
         if not ok then
             UIManager:show(require("ui/widget/infomessage"):new{ text = why, icon = "notice-warning" })
         end
-        if not page.closed then page:refresh("ui") end
-    end)
+    end
+    if not page.closed then page:refresh("ui") end
 end
 
 function M.show()
@@ -401,7 +397,7 @@ function M.show()
             return br
         end
         local folder = M.folder()
-        row(_("Folder shared"), #folder > 26 and ("…" .. folder:sub(-25)) or folder, function()
+        row(_("Opens in"), #folder > 26 and ("…" .. folder:sub(-25)) or folder, function()
             pickFolder(function() apply(self, function() end) end)
         end)
         local stops = {}
@@ -416,17 +412,15 @@ function M.show()
             self:refresh("ui")
         end)
         row(_("Ask for a code"), M.noPassword() and _("No") or _("Yes"), function()
-            if M.noPassword() then
-                apply(self, function() set("allow_no_password", false) end)
-                return
-            end
-            local ConfirmBox = require("ui/widget/confirmbox")
-            UIManager:show(ConfirmBox:new{
-                text = _("Without a code, anyone on this Wi-Fi who finds the address can add, download and delete files in the shared folder while Transfer is on.\n\nStop asking for a code?"),
-                ok_text = _("Stop asking"),
-                ok_callback = function() apply(self, function() set("allow_no_password", true) end) end,
-            })
+            -- (a plain switch: what turning it off means is said below it)
+            local off = not M.noPassword()
+            apply(self, function() set("allow_no_password", off) end)
         end)
+        Page.wrap(bb, M.noPassword()
+            and _("Without a code, anyone on this Wi-Fi can open the page: it stays inside the folder it opens in.")
+            or _("With a code, the page can reach every folder on the device."),
+            Page.serif(13, false, true), x, y, w, 2, S(18))
+        y = y + S(44)
         row(_("Port"), tostring(M.port()), function()
             askPort(function() apply(self, function() end) end)
         end)
@@ -445,7 +439,7 @@ function M.show()
         on_more = function(self, rect)
             require("bos_ui").openList({
                 { text = _("About Transfer"), callback = function()
-                    UIManager:show(InfoMessage:new{ text = _("Transfer is a small web server inside KOReader, on only while you want it: a browser on the same Wi-Fi can send books to the shared folder, download them and delete them. Nothing goes over the internet. It takes the place of FilebrowserPlus, keeping its folder, port and timer.") })
+                    UIManager:show(InfoMessage:new{ text = _("Transfer is a small web server inside KOReader, on only while you want it: a browser on the same Wi-Fi can send books, download them and delete them. The page opens in the folder you choose and, while a code is asked for, can go to any folder on the device (and show hidden ones). Nothing goes over the internet. It takes the place of FilebrowserPlus, keeping its folder, port and timer.") })
                 end },
             }, rect)
         end }

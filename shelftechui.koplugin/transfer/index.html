@@ -36,7 +36,8 @@ button:disabled{opacity:.45;cursor:default}
 h2{font-size:13px;margin:30px 0 10px;display:flex;align-items:center;gap:10px}
 h2::after{content:"";flex:1;border-bottom:2px dotted var(--ink)}
 .crumbs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
-.crumbs button{min-height:34px;padding:4px 10px;font-size:12px;box-shadow:2px 2px 0 var(--ink)}
+.crumbs button{text-transform:none;letter-spacing:0;min-height:34px;padding:4px 10px;font-size:12px;box-shadow:2px 2px 0 var(--ink)}
+.crumbs button.back{margin-left:auto;border-style:dashed}
 .list{padding:0}
 .item{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--light)}
 .item:last-child{border-bottom:0}
@@ -87,20 +88,23 @@ if(window.STUI_LOGIN){
   return;
 }
 
+// (the QR code's address carried the code: not kept in the address bar)
+try{if(location.search)history.replaceState(null,"","/")}catch(e){}
 // ------------------------------------------------------------ the page
-var dir="",info=null;
+var dir="",info=null,hidden=false;
 var head=h("div",{},[band("ShelfTechUI · Transfer")]);
 var sub=h("div",{"class":"sub"},[h("span",{id:"dev"}),h("span",{id:"free"})]);
 var pick=h("input",{type:"file",multiple:"",style:"display:none",onchange:function(){send(pick.files);pick.value=""}});
 var drop=h("div",{"class":"box drop"},[
   h("p",{"class":"big cap",text:"Send books"}),
-  h("p",{text:"Drop files here, or choose them. They go into the folder below."}),
+  h("p",{text:"Drop files here, or choose them. They go into the folder open below."}),
   h("button",{"class":"on",onclick:function(){pick.click()}},["Choose files"]),pick]);
 var queue=h("div",{id:"queue"});
 var crumbs=h("div",{"class":"crumbs"});
 var tools=h("div",{"class":"tools"},[
   h("button",{onclick:newFolder},["+ New folder"]),
-  h("button",{onclick:function(){load(dir)}},["Refresh"])]);
+  h("button",{onclick:function(){load(dir)}},["Refresh"]),
+  h("button",{id:"hid",onclick:function(){hidden=!hidden;load(dir)}},["Hidden: off"])]);
 var list=h("div",{"class":"box list"});
 app.appendChild(head);app.appendChild(sub);app.appendChild(drop);app.appendChild(queue);
 app.appendChild(h("h2",{"class":"cap",text:"On the e-reader"}));
@@ -115,15 +119,25 @@ function api(method,url,cb){var x=new XMLHttpRequest();x.open(method,url);x.onlo
 function q(o){var p=[];for(var k in o)p.push(encodeURIComponent(k)+"="+encodeURIComponent(o[k]));return p.join("&")}
 
 function load(d){
-  api("GET","/api/list?"+q({dir:d}),function(st,j){
+  api("GET","/api/list?"+q({dir:d,hidden:hidden?"1":"0"}),function(st,j){
     if(st!==200){toast(j.error||"That folder can't be read.");return}
     dir=j.dir||"";info=j;
     $("#dev").textContent=(j.device||"E-reader");
     $("#free").textContent=j.free?size(j.free)+" free":"";
+    $("#hid").textContent="Hidden: "+(hidden?"on":"off");
     crumbs.innerHTML="";
-    var parts=dir?dir.split("/"):[];
-    crumbs.appendChild(h("button",{"class":parts.length?"":"on",onclick:function(){load("")}},["Home folder"]));
-    parts.forEach(function(p,i){var to=parts.slice(0,i+1).join("/");crumbs.appendChild(h("button",{"class":i===parts.length-1?"on":"",onclick:function(){load(to)}},[p]))});
+    if(j.wide){
+      // the whole device: every folder above this one, from the top
+      var segs=j.abs.split("/").filter(Boolean),home=j.home.replace(/\/+$/,"");
+      crumbs.appendChild(h("button",{"class":segs.length?"":"on",onclick:function(){load("/")}},["Device"]));
+      segs.forEach(function(p,i){var to="/"+segs.slice(0,i+1).join("/");
+        crumbs.appendChild(h("button",{"class":i===segs.length-1?"on":"",title:to===home?"The home folder":"",onclick:function(){load(to)}},[(to===home?"\u2302 ":"")+p]))});
+      if(j.abs.replace(/\/+$/,"")!==home)crumbs.appendChild(h("button",{"class":"back",onclick:function(){load("")}},["\u2302 Home folder"]));
+    }else{
+      var parts=dir?dir.split("/"):[];
+      crumbs.appendChild(h("button",{"class":parts.length?"":"on",onclick:function(){load("")}},["Home folder"]));
+      parts.forEach(function(p,i){var to=parts.slice(0,i+1).join("/");crumbs.appendChild(h("button",{"class":i===parts.length-1?"on":"",onclick:function(){load(to)}},[p]))});
+    }
     list.innerHTML="";
     if(!j.folders.length&&!j.files.length){list.appendChild(h("div",{"class":"empty",text:"Nothing here yet. Send a book, and it shows up here and on the e-reader."}));return}
     j.folders.forEach(function(f){

@@ -2,6 +2,15 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.10.1
+
+- **Home's toolbar keeps up.** The battery shows charging within a second of plugging in (and stops when unplugged), the clock moves each minute, and Wi-Fi, the light and night mode show their state as it changes, also after waking up. Only the toolbar's strip is refreshed, only when something it shows has changed, and never over another window.
+- **FOR YOU fills your grid.** It shows as many picks a day as home holds swiped up: columns × rows as you set them (3 × 2 gives six), taken in turn from your series, authors and genres. Covers for the extra picks are fetched once.
+- **The store opens on Browse.** The Browse keys are at the top of the first page, in a compact grid, above Recommended and Recently viewed; rows show five covers.
+- **Transfer reaches every folder.** While a code is asked for, the page can go anywhere on the device: a path bar from "Device" down, a key back to the home folder, and a switch for hidden files. Without a code it stays inside the folder it opens in.
+- **Transfer and phones.** The QR code's address now answers with the page itself (no redirect), the sign-in survives being opened from a scanner app, and a browser that tries https first is turned round at once instead of being left waiting. The Transfer page on the device says "Opened from …" when a browser reaches it: if a phone's visit never shows there, the phone isn't reaching the device (see the notes).
+- **"Ask for a code" is a plain switch.** One tap, either way, with what it means written under it (it used to open a confirmation box, which didn't answer on some devices). Changing a Transfer setting takes effect at once.
+
 ## 1.10.0
 
 - **Transfer has its own server.** The File Browser program is gone: Transfer is now a small web server of ShelfTechUI's own, inside KOReader, so it runs on every device KOReader does and there is nothing separate to fail to start. Open Transfer, scan the QR code, and the page opens on your phone or computer.

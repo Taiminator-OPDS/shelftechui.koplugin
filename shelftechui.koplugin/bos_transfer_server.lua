@@ -7,7 +7,7 @@ calls the page makes:
   GET  /                       the page (or, when a code is asked, the
                                page that asks for it)
   GET  /?k=CODE                the address in the QR code: signs the
-                               browser in and goes on to the page
+                               browser in and is the page
   POST /login                  the code typed in (form field "code")
   GET  /api/list?dir=…         a folder: its folders and files, as JSON
   POST /api/upload?dir=…&name=…  a file, sent as the request's body;
@@ -17,8 +17,10 @@ calls the page makes:
                                or an empty folder
   POST /api/mkdir?dir=…&name=…  a new folder
 
-Everything stays inside the shared folder: a path that tries to leave it
-("..", an absolute path) is refused.
+Paths: "Comics/Saga 01.cbz" is inside the shared folder (where the page
+opens); "/mnt/us/documents" is anywhere on the device, which is allowed
+only while a code is asked for (without one the page stays inside the
+shared folder, since anyone on the Wi-Fi could open it). ".." is refused.
 
 It never blocks KOReader: the sockets are non-blocking, the server is
 looked at by a timer on KOReader's own loop (every 0.2 s while idle, at
@@ -26,7 +28,7 @@ once while something is moving), and each look moves at most a few
 hundred kilobytes per connection before giving KOReader its turn back. A
 book of 50 MB comes in a slice at a time while the page still turns.
 
-  M.start{ root, port, code, on_received(path), on_change() }  → true | nil, why
+  M.start{ root, port, code, on_received(path), on_change(), on_visit(ip) }  → true | nil, why
   M.stop()
   M.running()       → port | nil
   M.busy()          → true while a file is coming in or going out
@@ -93,10 +95,13 @@ local function toJSON(v)
     return "null"
 end
 
---- A path inside the shared folder, or nil. `rel` is what the page sent:
---- "" (the folder itself), "Comics", "Comics/Saga 01.cbz"…
+--- The path the page means, or nil. `rel` is what it sent: "" (the shared
+--- folder itself), "Comics", "Comics/Saga 01.cbz"… or, with a leading
+--- slash, a path anywhere on the device ("/", "/mnt/us/fonts").
 local function inside(rel)
     rel = tostring(rel or ""):gsub("\\", "/")
+    local anywhere = rel:sub(1, 1) == "/"
+    if anywhere and not S.wide then return nil end
     local parts = {}
     for p in rel:gmatch("[^/]+") do
         if p == ".." then return nil end
@@ -106,6 +111,7 @@ local function inside(rel)
         if p:find("%z") then return nil end
     end
     local clean = table.concat(parts, "/")
+    if anywhere then return "/" .. clean, "/" .. clean end
     return S.root .. (clean ~= "" and ("/" .. clean) or ""), clean
 end
 
@@ -177,6 +183,10 @@ local function page()
     return page_cache
 end
 
+-- (Lax, not Strict: a QR scanner or another app opening the address is a
+-- visit "from elsewhere", and a Strict cookie isn't sent back after it)
+local function COOKIE() return "Set-Cookie: stui_t=" .. S.code .. "; Path=/; HttpOnly; SameSite=Lax" end
+
 local function signedIn(c)
     if not S.code then return true end
     local cookie = c.headers["cookie"] or ""
@@ -195,8 +205,9 @@ local function list(c, q)
     if not dir or lfs.attributes(dir, "mode") ~= "directory" then return fail(c, 404, "No such folder") end
     local folders, files = {}, {}
     for name in lfs.dir(dir) do
-        -- (KOReader's own: dot files, and the .sdr folders of book settings)
-        if name ~= "." and name ~= ".." and not name:match("^%.") and not name:match("%.sdr$") then
+        -- (KOReader's own: dot files, and the .sdr folders of book settings,
+        -- unless the page asks for hidden things too)
+        if name ~= "." and name ~= ".." and (q.hidden == "1" or (not name:match("^%.") and not name:match("%.sdr$"))) then
             local a = lfs.attributes(dir .. "/" .. name)
             if a then
                 if a.mode == "directory" then
@@ -211,11 +222,12 @@ local function list(c, q)
     table.sort(files, function(a, b) return a.mtime > b.mtime end)
     local free
     pcall(function()
-        local u = require("util").diskUsage(S.root)
+        local u = require("util").diskUsage(dir)
         free = u and u.available
     end)
     folders.__array, files.__array = true, true
-    json(c, 200, { dir = rel, folders = folders, files = files, free = free or false, device = S.device or "" })
+    json(c, 200, { dir = rel, folders = folders, files = files, free = free or false, device = S.device or "",
+        abs = rel:sub(1, 1) == "/" and rel or dir, home = S.root, wide = S.wide and true or false })
 end
 
 local function startUpload(c, q)
@@ -226,7 +238,7 @@ local function startUpload(c, q)
     if not len then return fail(c, 411, "Length required") end
     if len > MAX_UPLOAD then return fail(c, 413, "Too large") end
     -- room for it?
-    local okU, u = pcall(function() return require("util").diskUsage(S.root) end)
+    local okU, u = pcall(function() return require("util").diskUsage(dir) end)
     if okU and u and u.available and len > u.available - 4 * 1024 * 1024 then return fail(c, 507, "Not enough room on the device") end
     -- the same name: "Name (2).epub"
     local path = dir .. "/" .. name
@@ -265,7 +277,7 @@ end
 
 local function delete(c, q)
     local path, rel = inside(q.path)
-    if not path or rel == "" then return fail(c, 400, "Bad path") end
+    if not path or rel == "" or rel == "/" or path == S.root then return fail(c, 400, "Bad path") end
     local mode = lfs.attributes(path, "mode")
     if mode == "file" then
         local ok = os.remove(path)
@@ -300,7 +312,10 @@ local function route(c)
     -- the QR code's address: signed in, then the page
     if method == "GET" and path == "/" and q.k then
         if S.code and q.k == S.code then
-            return respond(c, 302, "text/plain", "", { "Location: /", "Set-Cookie: stui_t=" .. S.code .. "; Path=/; HttpOnly; SameSite=Strict" })
+            -- (the page itself, not a redirect: one request, nothing for a
+            -- phone's browser to lose on the way; the page takes the code
+            -- out of its address)
+            return respond(c, 200, "text/html; charset=utf-8", page(), { COOKIE() })
         end
         return loginPage(c, true)
     end
@@ -348,7 +363,7 @@ local function checkForm(c)
     local f = parseQuery(c.buf)
     local code = (f.code or ""):gsub("%s", "")
     if S.code and code == S.code then
-        respond(c, 302, "text/plain", "", { "Location: /", "Set-Cookie: stui_t=" .. S.code .. "; Path=/; HttpOnly; SameSite=Strict" })
+        respond(c, 302, "text/plain", "", { "Location: /", COOKIE() })
     else
         loginPage(c, true)
     end
@@ -396,6 +411,10 @@ local function step(c)
                 moved = moved + #data
                 if c.state == "head" then
                     c.buf = c.buf .. data
+                    -- a browser trying https first (a phone's often does):
+                    -- hung up on at once, so it falls back to http without
+                    -- waiting out its patience
+                    if c.buf:byte(1) == 22 then close(c) break end
                     parseHead(c)
                 elseif c.state == "body" then
                     local okW = c.up.f:write(data)
@@ -445,6 +464,13 @@ local function poll()
         sock:settimeout(0)
         pcall(function() sock:setoption("tcp-nodelay", true) end)
         S.conns[#S.conns + 1] = { sock = sock, state = "head", buf = "", seen = now() }
+        -- who came (the Transfer page says so: if a phone's visit never
+        -- shows there, it isn't reaching this device at all)
+        local okP, peer = pcall(sock.getpeername, sock)
+        if okP and peer and peer ~= S.visitor then
+            S.visitor = peer
+            if S.on_visit then pcall(S.on_visit, peer) end
+        end
     end
     local moved = 0
     for k = #S.conns, 1, -1 do
@@ -482,7 +508,8 @@ function M.start(opts)
     server:listen(16)
     server:settimeout(0)
     S = { server = server, port = opts.port, root = opts.root:gsub("/+$", ""), code = opts.code,
-        on_received = opts.on_received, on_change = opts.on_change, device = opts.device,
+        wide = opts.code ~= nil,
+        on_received = opts.on_received, on_change = opts.on_change, on_visit = opts.on_visit, device = opts.device,
         conns = {}, moving = 0, last_activity = now() }
     page_cache = nil
     UIManager:scheduleIn(IDLE_EVERY, poll)

@@ -30,7 +30,7 @@ local S = UI.S
 
 local Page = {}
 
-Page.VERSION = "1.10.0"
+Page.VERSION = "1.10.1"
 
 -- Dispatcher's sub-menus edit tables in place and flag `caller.updated`.
 local saver = setmetatable({}, { __newindex = function() Store.save() end })
@@ -1025,7 +1025,7 @@ function Page.items()
                     },
                     {
                         text = _("Add the For you shelf to home again"),
-                        description = _("If you removed it: the FOR YOU shelf, with today's three recommendations."),
+                        description = _("If you removed it: the FOR YOU shelf, with today's recommendations (as many as home's grid holds)."),
                         keep_menu_open = true,
                         callback = function()
                             Store.set("foryou_seeded", nil)

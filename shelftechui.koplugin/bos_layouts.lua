@@ -301,6 +301,7 @@ local function drawTop(bw, bb, W, pad)
         if ok and type(lvl) == "number" then right = lvl .. "%" end
     end
     if right then Look.label(bb, right, pad, y, W - 2 * pad, line_h, 11, { align = "right", color = Look.GRAY }) end
+    st.top_says = clock .. (right or "")
     y = y + line_h + S(6)
     local bh, kw, gap = S(40), S(46), S(10)
     local x = pad
@@ -329,6 +330,22 @@ local function drawTop(bw, bb, W, pad)
         end
         if st.bar then
             st.bar:paintTo(bb, x, y)
+            -- (the bar that's kept up to date: bos_home)
+            local okH, Home = pcall(require, "bos_home")
+            if okH then
+                Home.bar, Home.live = st.bar, bw
+                -- Dash's own line above the bar (time, battery) counts too
+                Home.above = function()
+                    local now = os.date(G_reader_settings:isTrue("twelve_hour_clock") and "%I:%M %p" or "%H:%M"):gsub("^0", "")
+                    local lvl = ""
+                    if Device:hasBattery() then
+                        pcall(function() lvl = Device:getPowerDevice():getCapacity() .. "%" end)
+                    end
+                    return (now .. lvl) ~= st.top_says
+                end
+                if not Home.ticking then Home.watch() end
+                Home.painted()
+            end
             bar_h = math.max(bh, st.bar:getSize().h)
         end
     end

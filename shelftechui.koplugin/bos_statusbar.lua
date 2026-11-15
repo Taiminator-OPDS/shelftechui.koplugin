@@ -175,7 +175,36 @@ function StatusBar:paintField(bb, c, x, y, w)
     c._rect = Geom:new{ x = sel and x - sh or x, y = sel and y - sh or y, w = w + sh, h = h + sh }
 end
 
+--- What the chips show right now (text, glyph, on or off), as one string:
+--- when it changes, the bar is laid out and painted again.
+function StatusBar:signature()
+    local t = {}
+    for i, c in ipairs(self.chips) do
+        if c.spacer or c.field then
+            t[i] = ""
+        else
+            local on = false
+            if c.active and not c.no_fill_home then
+                local ok, v = pcall(c.active)
+                on = ok and v and true or false
+            end
+            t[i] = tostring(glyphOf(c)) .. "|" .. tostring((self:chipText(c))) .. "|" .. (on and "1" or "0")
+        end
+    end
+    return table.concat(t, "\n")
+end
+
 function StatusBar:paintTo(bb, x, y)
+    -- a chip's text changed width (9:59 → 10:00, 100% → 99%): lay out again
+    local sig = self:signature()
+    if sig ~= self._sig then
+        if self._sig then
+            local h = self.height
+            self:layout()
+            self.height = h
+        end
+        self._sig = sig
+    end
     self.dimen = Geom:new{ x = x, y = y, w = self.width, h = self.height }
     for r, row in ipairs(self.rows) do
         -- spacers share the free room; without one the row sits on the right
