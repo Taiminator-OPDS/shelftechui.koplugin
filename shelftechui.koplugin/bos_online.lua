@@ -174,6 +174,15 @@ function M.fetch()
         local pop = subjectPicks(g, have)
         if #pop > 0 then table.insert(rows, { id = "genres", title = T(_("Popular in %1"), g), items = pop }) end
     end
+    -- from Hardcover, when you're signed in there (bos_hardcover): books like
+    -- the ones you rated highest, then what the readers you follow are
+    -- reading, then what's popular
+    local okH, hc = pcall(function() return require("bos_hardcover").recommendNow(have, norm) end)
+    if okH and type(hc) == "table" and #hc > 0 then
+        table.insert(rows, 1, { id = "hardcover", title = _("From Hardcover"), items = hc })
+    elseif not okH then
+        logger.warn("ShelfTechUI: Hardcover picks:", hc)
+    end
     local s = store()
     s:saveSetting("rows", rows)
     s:saveSetting("day", os.date("%Y-%m-%d"))
@@ -218,7 +227,7 @@ function M.daily(day)
     local y, m, d = day:match("(%d+)-(%d+)-(%d+)")
     local n = math.floor(os.time({ year = tonumber(y) or 2000, month = tonumber(m) or 1, day = tonumber(d) or 1, hour = 12 }) / 86400)
     local lists = {}
-    for _i, which in ipairs{ "series", "authors", "genres" } do
+    for _i, which in ipairs{ "hardcover", "series", "authors", "genres" } do
         local l = {}
         for _j, p in ipairs(M.rowItems(which)) do if not M.owned(p) then l[#l + 1] = p end end
         if #l > 0 then lists[#lists + 1] = l end
@@ -247,7 +256,7 @@ function M.rowItems(which)
     if which == "daily" then return M.daily() end
     if which == "all" then
         -- one from each list in turn, so it isn't all one author
-        local lists = { M.rowItems("series"), M.rowItems("authors"), M.rowItems("genres") }
+        local lists = { M.rowItems("hardcover"), M.rowItems("series"), M.rowItems("authors"), M.rowItems("genres") }
         local out, seen, i = {}, {}, 1
         while true do
             local any = false
@@ -447,7 +456,8 @@ function M.coverPath(item, size)
     if lfs.attributes(path, "mode") == "file" then return path end
     if not (M.enabled() and connected()) then return nil end
     local ok, res = pcall(function()
-        return require("lib/bookshelf_cover_fetch").download(COVERS .. "/b/id/" .. item.cover_i .. "-" .. (size or "M") .. ".jpg",
+        -- (a pick from Hardcover carries its cover's own address)
+        return require("lib/bookshelf_cover_fetch").download(item.cover_url or (COVERS .. "/b/id/" .. item.cover_i .. "-" .. (size or "M") .. ".jpg"),
             path, nil, nil, { block_timeout = 8, total_timeout = 15 })
     end)
     return ok and res or nil

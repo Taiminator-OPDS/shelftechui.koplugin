@@ -2,6 +2,12 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.11.1
+
+- **Hardcover's recommendations everywhere.** Signed in to Hardcover, the day's picks start with books like the ones you rated highest there, then what the readers you follow are reading, then what's popular (never a book on your shelves or on the device). They're in the store's Recommended row, in FOR YOU on home and in a book's Recommendations tab, taken in turn with the ones from your own reading.
+- **The search screen starts with recommendations.** Tapping the search field shows covers you might want in the room above the keyboard, as large as fits; a tap opens one. Typing takes over as before.
+- **Transfer: the usual reasons a phone can't open the page are on its screen** ("Same Wi-Fi, and any VPN off"), with the steps a tap away, a VPN first.
+
 ## 1.11.0
 
 - **Hardcover.** A new app for [hardcover.app](https://hardcover.app), in ShelfTechUI's look (a toolbar and Quick Settings control, Settings → Connect → Hardcover, and an action for gestures):

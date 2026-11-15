@@ -1186,6 +1186,72 @@ end
 
 -- a list of books -----------------------------------------------------------
 
+--- Recommendations, as covers, in the room between y and bottom (the
+--- search screen before anything is typed). Returns false when there are
+--- none to show.
+function Store:paintSuggestions(bb, x, y, w, bottom)
+    local Online = require("bos_online")
+    if not self.suggest then
+        local list, seen = {}, {}
+        local function add(items)
+            for _j, p in ipairs(items) do
+                if p.key and not seen[p.key] and not Online.owned(p) then
+                    seen[p.key] = true
+                    list[#list + 1] = { title = p.title, author = p.author, year = p.year, pick = p }
+                end
+            end
+        end
+        add(Online.daily())
+        add(Online.rowItems("all"))
+        self.suggest = list
+    end
+    local list = self.suggest
+    if #list == 0 then return false end
+    local gap = S(14)
+    local head, label_h = S(26), S(24)
+    local room = bottom - y - head
+    -- four, five or six across: whichever fills the room best (bigger
+    -- covers when it's a tie)
+    local cols, cw, ch, rh, best = 5, 0, 0, 0, -1
+    for _i, n in ipairs{ 4, 5, 6 } do
+        local w1 = math.floor((w - (n - 1) * gap - Look.SHADOW_SMALL) / n)
+        local h1 = math.floor(w1 * 1.5)
+        local r1 = h1 + label_h + S(10)
+        local used = math.floor(room / r1) * r1
+        if used > best then cols, cw, ch, rh, best = n, w1, h1, r1, used end
+    end
+    if best <= 0 then
+        -- little room above the keyboard: smaller covers, one row
+        ch = room - label_h - S(10)
+        if ch < S(60) then return false end
+        cw = math.floor(ch / 1.5)
+        cols = math.max(5, math.floor((w + gap) / (cw + gap)))
+        rh = ch + label_h + S(10)
+    end
+    local rows = math.max(1, math.floor(room / rh))
+    Look.label(bb, _("Recommended for you"), x, y - S(4), w, S(18), 9, {})
+    y = y + head - S(6)
+    local shown = {}
+    for k = 1, math.min(#list, rows * cols) do
+        local b = list[k]
+        b.cover_path = b.cover_path or Online.cachedCoverPath(b.pick, "M")
+        shown[#shown + 1] = b.pick
+        local cx = x + ((k - 1) % cols) * (cw + gap)
+        local cy = y + math.floor((k - 1) / cols) * rh
+        drawCover(bb, b, cx, cy, cw, ch)
+        Page.wrap(bb, b.title or "", tface(10, true), cx, cy + ch + S(6), cw, 1, S(16))
+        self:hit(Geom:new{ x = cx - S(4), y = cy - S(4), w = cw + S(8), h = rh - S(2) }, function() self:openBook(b) end)
+    end
+    -- their covers, fetched once if they aren't on file
+    if not self.suggest_covers then
+        self.suggest_covers = true
+        Online.fetchCovers(shown, function()
+            if not self.closed then self:redraw("ui") end
+        end, #shown)
+    end
+    return true
+end
+
 function Store:paintResults(bb, v, bottom)
     local W, pad = self.dimen.w, self.pad
     local x, w = pad, W - 2 * pad
@@ -1259,6 +1325,9 @@ function Store:paintResults(bb, v, bottom)
             msg = _("The libraries couldn't be reached:") .. "\n" .. table.concat(v.errors, "\n")
         elseif v.empty then msg = v.empty
         else msg = _("Nothing found. Try fewer words, or another spelling.") end
+        -- nothing typed yet: recommendations fill the room (a tap opens
+        -- one); typing takes over as before
+        if v.typed and #q < 3 and #mine == 0 and self:paintSuggestions(bb, x, y, w, bottom) then return end
         Page.wrap(bb, msg, Look.serif(15, false, true), x, y + S(10), w, 8, S(24), Look.GRAY)
         if v.offline and not wifi_busy then
             local r = Look.button(bb, x, y + S(70), S(220), S(46), _("Turn on Wi-Fi"), { size = 12, on = true })

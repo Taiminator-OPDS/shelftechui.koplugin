@@ -400,6 +400,9 @@ function M.show()
     if M._page then return end
     local Page = require("bos_page")
     local InfoMessage = require("ui/widget/infomessage")
+    local function phoneHelp()
+        UIManager:show(InfoMessage:new{ text = _("When the page opens, this screen says \"Opened from…\". If it never does, the phone isn't reaching this device:\n\n1. Turn off any VPN on the phone (on a Pixel, \"VPN by Google\" too: Settings › Network & internet › VPN).\n2. The phone must be on the same Wi-Fi as this device (not mobile data, not a guest network).\n3. iPhone: use Safari, or allow your browser in Settings › Privacy & Security › Local Network.\n4. Type the address into the browser instead of scanning.\n5. Some routers keep Wi-Fi devices apart (\"client isolation\", \"AP isolation\"): turn that off, or use a computer.") })
+    end
     -- opening the page is asking for it: on at once
     -- (the page shows first, "Starting…"; the server starts just after)
     local why
@@ -470,7 +473,16 @@ function M.show()
             else msg = _("No Wi-Fi address yet. Connect to Wi-Fi: the address appears here.") end
             Page.wrap(bb, msg, Page.serif(17, false, true), tx, y + S(60), tw, 5, S(26))
         end
-        y = y + card_h + Look.SHADOW + S(22)
+        y = y + card_h + Look.SHADOW + S(12)
+        -- (the usual reasons a phone says the page can't be reached, where
+        -- they'll be seen)
+        if on then
+            local tip = _("Phone can't open it? Same Wi-Fi, and any VPN off") .. "  \u{203A}"
+            Look.label(bb, tip, x, y, w, S(24), 10, { color = Look.GRAY })
+            self:hit(Geom:new{ x = x, y = y - S(4), w = w, h = S(32) }, function() phoneHelp() end)
+            y = y + S(24)
+        end
+        y = y + S(10)
 
         -- settings, each one row: NAME ........ [value]
         Page.heading(bb, _("Settings"), x, y, w)
@@ -528,8 +540,7 @@ function M.show()
         end,
         on_more = function(self, rect)
             require("bos_ui").openList({
-                { text = _("A phone can't open it?"), callback = function()
-                    UIManager:show(InfoMessage:new{ text = _("When the page opens, this screen says \"Opened from…\". If it never does, the phone isn't reaching this device:\n\n1. The phone must be on the same Wi-Fi as this device (not mobile data, not a guest network).\n2. Turn off any VPN on the phone.\n3. iPhone: use Safari, or allow your browser in Settings › Privacy & Security › Local Network.\n4. Type the address into the browser instead of scanning.\n5. Some routers keep Wi-Fi devices apart (\"client isolation\", \"AP isolation\"): turn that off, or use a computer.") })
+                { text = _("A phone can't open it?"), callback = function() phoneHelp()
                 end },
                 { text = _("About Transfer"), callback = function()
                     UIManager:show(InfoMessage:new{ text = _("Transfer is a small web server inside KOReader, on only while you want it: a browser on the same Wi-Fi can send books, download them and delete them. The page opens in the folder you choose and, while a code is asked for, can go to any folder on the device (and show hidden ones). Nothing goes over the internet. It takes the place of FilebrowserPlus, keeping its folder, port and timer.") })

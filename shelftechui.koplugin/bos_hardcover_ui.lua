@@ -245,6 +245,8 @@ function App:signedIn()
     self.data, self.err, self.loading = {}, {}, {}
     self:load(self.tab)
     self:refresh("ui")
+    -- recommendations (the store's row, FOR YOU) take Hardcover's from now on
+    pcall(function() require("bos_online").refreshInBackground(true) end)
 end
 
 --- Begin (or begin again) the way of signing in that's chosen.

@@ -554,6 +554,72 @@ function M.goal(cb)
     end)
 end
 
+--- Recommendations from Hardcover, here and now (so: only in a background
+--- process; bos_online's daily fetch calls it). Books like the ones you
+--- rated highest and are reading, then what the readers you follow are
+--- reading, then this month's popular ones; never a book on your shelves
+--- or on the device (`have`: titles, normalised by `norm`). Returns picks
+--- in bos_online's shape.
+function M.recommendNow(have, norm_title)
+    if not (M.signedIn() and connected()) then return {} end
+    local token, u = get("token"), uid()
+    if not u then return {} end
+    have = have or {}
+    norm_title = norm_title or function(t) return tostring(t or ""):lower() end
+    local mine = {}
+    local all = graphql(token, "query ($u: Int!) { user_books(where: {user_id: {_eq: $u}}, limit: 1000) { book_id } }", { u = u })
+    for _i, ub in ipairs(all and all.user_books or {}) do mine[ub.book_id] = true end
+    local ids, seen, why = {}, {}, {}
+    local function add(id, because)
+        id = tonumber(id)
+        if id and not mine[id] and not seen[id] and #ids < 36 then seen[id] = true ids[#ids + 1] = id why[id] = because end
+    end
+    -- like what you rated highest (and what you're reading)
+    local seeds = graphql(token, [[query ($u: Int!) {
+      user_books(where: {user_id: {_eq: $u}, status_id: {_in: [2, 3]}},
+          order_by: [{rating: desc_nulls_last}, {updated_at: desc_nulls_last}], limit: 12) {
+        book { id cached_similar_book_ids }
+      }
+    }]], { u = u })
+    local lists = {}
+    for _i, ub in ipairs(seeds and seeds.user_books or {}) do
+        local sim = type(ub.book) == "table" and ub.book.cached_similar_book_ids
+        if type(sim) == "table" then
+            local l = {}
+            for _k, v in ipairs(sim) do l[#l + 1] = type(v) == "table" and (v.id or v.book_id) or v end
+            if #l > 0 then lists[#lists + 1] = l end
+        end
+    end
+    for i = 1, 8 do
+        for _k, l in ipairs(lists) do if l[i] then add(l[i], "similar") end end
+    end
+    -- what the readers you follow are reading
+    if #ids < 24 then
+        local fr = graphql(token, [[query ($u: Int!) {
+          followed_users(where: {user_id: {_eq: $u}}, limit: 40) {
+            followed_user { user_books(where: {status_id: {_in: [2, 3]}}, order_by: {updated_at: desc_nulls_last}, limit: 3) { book_id } }
+          }
+        }]], { u = u })
+        for _i, f in ipairs(fr and fr.followed_users or {}) do
+            for _k, ub in ipairs(type(f.followed_user) == "table" and f.followed_user.user_books or {}) do add(ub.book_id, "friends") end
+        end
+    end
+    -- and what's popular
+    if #ids < 24 then
+        local tr = graphql(token, "{ books_trending(duration: month, limit: 30) { ids } }")
+        for _i, id in ipairs(tr and tr.books_trending and tr.books_trending.ids or {}) do add(id, "popular") end
+    end
+    local books = hydrate(token, ids) or {}
+    local out = {}
+    for _i, b in ipairs(books) do
+        if b.title ~= "" and not have[norm_title(b.title)] then
+            out[#out + 1] = { online = true, key = "hc:" .. b.id, title = b.title, author = b.author, year = b.year,
+                cover_i = b.image and ("hc" .. b.id) or nil, cover_url = b.image, hc = b.id, because = why[b.id] }
+        end
+    end
+    return out
+end
+
 -- ---------------------------------------------------------------- writing
 
 --- Put a book on a shelf (or move it). cb(entry).
