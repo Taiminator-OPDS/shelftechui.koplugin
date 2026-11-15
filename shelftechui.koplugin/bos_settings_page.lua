@@ -30,7 +30,7 @@ local S = UI.S
 
 local Page = {}
 
-Page.VERSION = "1.9.2"
+Page.VERSION = "1.10.0"
 
 -- Dispatcher's sub-menus edit tables in place and flag `caller.updated`.
 local saver = setmetatable({}, { __newindex = function() Store.save() end })
@@ -832,8 +832,7 @@ function Page.sections(plugin)
         { heading = _("Transfer") },
         {
             text = _("Transfer"),
-            description = _("Send books to this device from a browser on the same Wi-Fi. Opening it turns it on and shows a QR code; its folder, password and timer are on the same page. Also a Quick Settings tile."),
-            enabled_func = function() return Transfer.available() end,
+            description = _("Send books to this device from a browser on the same Wi-Fi. Opening it turns it on and shows a QR code; its folder, code and timer are on the same page. Also a Quick Settings tile."),
             mandatory_func = function() return Transfer.isRunning() and _("On") or _("Off") end,
             callback = function() Transfer.show() end,
         },

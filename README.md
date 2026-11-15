@@ -15,7 +15,7 @@ ShelfTechUI is a fork of AndyHazz's Bookshelf home screen
 | **Library** | Start menu | Search, sort, filter, A–Z, select several to set status or add to a collection |
 | **Online picks** (opt-in) | Settings → For you | From Open Library, Wi-Fi only, once a day: missing from your series, more by your authors, popular in your genres; FIND hands off to Bookdrop; + WANT |
 | **Store** | First shelf in FOR YOU | Bookdrop, built in: its home, search, categories and manga reader as tiles. The manga reader downloads its runtime (about 25 MB) the first time you open it |
-| **Transfer** | Quick Settings tile, start menu, Settings → Connect | Send books from a browser on the same Wi-Fi (the File Browser server; takes over from FilebrowserPlus, with its settings and password). Opening it turns it on and shows a QR code; folder, timer, password and port are on the same page |
+| **Transfer** | Quick Settings tile, start menu, Settings → Connect | Send books from a browser on the same Wi-Fi, and download or delete them: a small web server inside KOReader with a page in ShelfTechUI's look. Opening it turns it on and shows a QR code (scanning it signs the phone in; typed by hand, the address asks for the code on the page); folder, timer, code and port are on the same page |
 | **Reading summary** | Swipe down on home | Today, plus an **Insights** page: 26 weeks day by day, the year's goal, when you'll finish, when you read, records |
 | **Reading toolbar** | Tap the page | Home and Search keys, the book card (cover, chapter, progress, when you'll finish, bookmark key), Also reading; a track with chapter ticks; CONTENTS · NOTEBOOK · PAGES; GLIMPSE · PIN · STATS, each with a figure under its name: the pictures you've passed of those in the book, how many pages are pinned, and a reading figure that changes each time (streak, today, this week, time left in the chapter, pages an hour, books this year) |
 | **Glimpse** | GLIMPSE on the toolbar | Erik Fanki's viewer for the maps, family trees and other pictures in the book, from anywhere in it, without losing your place; in the retro look. Settings → Glimpse |
@@ -35,7 +35,7 @@ ShelfTechUI is a fork of AndyHazz's Bookshelf home screen
 
 **By hand:**
 
-1. **Delete** `bookshelf.koplugin` and `bookshelfos.koplugin` from `koreader/plugins` (ShelfTechUI includes both; with them still there it only asks you to remove them). Delete `glimpse.koplugin`, `bookdrop.koplugin` and `filebrowserplus.koplugin` too: all three are built in now (start ShelfTechUI once before deleting FilebrowserPlus, so its password is taken over). Also delete the older `shortcutstoolbar`, `kobotoolbar` and `settingshub` plugins if you still have them.
+1. **Delete** `bookshelf.koplugin` and `bookshelfos.koplugin` from `koreader/plugins` (ShelfTechUI includes both; with them still there it only asks you to remove them). Delete `glimpse.koplugin`, `bookdrop.koplugin` and `filebrowserplus.koplugin` too: all three are built in now (Transfer keeps FilebrowserPlus's folder, port and timer). Also delete the older `shortcutstoolbar`, `kobotoolbar` and `settingshub` plugins if you still have them.
 2. Download `shelftechui.koplugin.zip` from the [latest release](https://github.com/Taiminator-OPDS/shelftechui.koplugin/releases/latest) and unzip it into `koreader/plugins` (you get `koreader/plugins/shelftechui.koplugin`).
 3. Restart KOReader.
 
@@ -46,7 +46,7 @@ Your Bookshelf settings (shelves, chips, start menu, themes) and your Bookshelf 
 - **Bookshelf** by AndyHazz — AGPL-3.0, included in full (`bookshelf_main.lua`, `lib/`, `micromodules/`, `assets/`, `fonts/`, `locale/`). ShelfTechUI changes: the retro look is applied at run time by `stui_retro.lua`; Bookshelf's self-updater is switched off (it would install stock Bookshelf beside ShelfTechUI).
 - **Glimpse** by Erik Fanki — AGPL-3.0, included (`glimpse/`), restyled in the retro look; its self-updater is removed (it would replace the bundled copy with stock Glimpse).
 - **Bookdrop** — AGPL-3.0, included (`bookdrop/`, see `bookdrop/NOTICE`): its Z-Library client is ported from zlibrary.koplugin (AGPL-3.0), and its manga reader is RakuYomi (AGPL-3.0, `bookdrop/manga/`), whose per-device runtime is downloaded on first use rather than shipped.
-- **Transfer** — takes over from **FilebrowserPlus** by Neeraj Patel (derived from KOReader's filebrowser.koplugin, AGPL-3.0) and runs the **File Browser** server (Apache-2.0, `transfer/NOTICE`). The bundled server is for 32-bit ARM e-readers (Kobo, Kindle, PocketBook).
+- **Transfer** — takes the place of **FilebrowserPlus** by Neeraj Patel (derived from KOReader's filebrowser.koplugin, AGPL-3.0), keeping its settings. Its server is ShelfTechUI's own, in Lua (no File Browser program any more), so it runs on every device KOReader does.
 - **Kobo-style toolbar** by Lina (nessnos) — MIT, see `THIRD_PARTY_NOTICES.md`.
 - Inspired by **Shortcuts Toolbar** (xusoo) and **KoboUI** (nessnos), and by ideas from **Aleph** (BookOrbit): ShelfTechUI's versions are its own, written from the ideas; no Aleph code is used.
 - Theme fonts: **Cinzel**, **EB Garamond**, **Share Tech Mono**, **Orbitron**, **Zilla Slab**, **Cormorant SC**, **Libre Caslon Text**: SIL OFL 1.1, see `fonts/CREDITS.md` and `fonts/OFL-themes.txt`.

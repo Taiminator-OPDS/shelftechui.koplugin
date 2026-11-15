@@ -1,30 +1,24 @@
 --[[
 Transfer: send books to the device (and take files off it) from any browser
-on the same Wi-Fi, with the File Browser web server (filebrowser.org; the
-binary is in transfer/). It takes over from FilebrowserPlus by Neeraj Patel
-(itself derived from KOReader's filebrowser.koplugin, AGPL-3.0): the same
-server, settings and saved password, on one ShelfTechUI page.
+on the same Wi-Fi. A small web server of ShelfTechUI's own, inside KOReader
+(bos_transfer_server), with a page in ShelfTechUI's look (transfer/index.html).
+It takes the place of the FilebrowserPlus plugin (and the File Browser program
+it ran), keeping its settings: the folder, the port, the timer, on at start.
 
-  Transfer.show(ui)      the page: a QR code and address while it's on, and
-                         its few settings; opening it turns the server on
+  Transfer.show()        the page: a QR code, the address and a code while
+                         it's on, and its few settings; opening it turns it on
   Transfer.toggle()      on / off without the page (Quick Settings, gestures)
-  Transfer.isRunning()   cheap: no process is started to find out
+  Transfer.isRunning()
 
-Compared with FilebrowserPlus:
-  * one page instead of a menu row with a hidden long-press menu
-  * opening the page starts the server (one tap from Quick Settings or the
-    start menu) and shows the QR code at once
-  * the folder is picked with KOReader's folder chooser, not typed
-  * whether it's running is read from /proc, not by starting `kill` each
-    time a menu is drawn; the server is reconfigured only when a setting
-    changed, not on every start; nothing sleeps the interface
-  * its data (password database, log) lives in koreader/settings/stui_transfer
-    so a plugin update never wipes it; the log is trimmed when it grows
+The QR code's address signs the phone in. Typed by hand, the address asks
+for the 6-digit code on the page (a new one each time Transfer is turned
+on), unless "Ask for a code" is off.
 
-Settings keep FilebrowserPlus's keys, so nothing has to be set up again.
+The address is this device's Wi-Fi one: taken from the wireless interface
+(it used to be the first address KOReader listed, which on a Kindle can be
+its USB network's, so the QR code led nowhere).
 --]]
 
-local DataStorage = require("datastorage")
 local Device = require("device")
 local Geom = require("ui/geometry")
 local UIManager = require("ui/uimanager")
@@ -34,31 +28,18 @@ local T = require("ffi/util").template
 local _ = require("gettext")
 
 local Look = require("bos_look")
+local Server = require("bos_transfer_server")
 local Screen = Device.screen
 local BLACK, WHITE = Look.BLACK, Look.WHITE
 local S = Look.S
 
 local M = {}
 
-local PLUGIN_DIR = (debug.getinfo(1, "S").source:match("^@(.*)/[^/]*$") or ".")
-local BIN = PLUGIN_DIR .. "/transfer/filebrowser"
-local PID_FILE = "/tmp/filebrowserplus_koreader.pid" -- FilebrowserPlus's: a server it started is ours too
-local USER, DEFAULT_PASS = "admin", "admin12345678"
-
-local function dataDir()
-    local dir = DataStorage:getSettingsDir() .. "/stui_transfer"
-    if lfs.attributes(dir, "mode") ~= "directory" then lfs.mkdir(dir) end
-    return dir
-end
+local OLD_PID_FILE = "/tmp/filebrowserplus_koreader.pid" -- FilebrowserPlus's server, if one's still running
 
 local function exists(path) return lfs.attributes(path, "mode") ~= nil end
 
-local function quote(s) return "'" .. tostring(s):gsub("'", "'\\''") .. "'" end
-
---- Is the server's program here, for this device?
-function M.available()
-    return exists(BIN)
-end
+--- Always here: the server is part of ShelfTechUI.
 
 -- ---------------------------------------------------------------- settings
 
@@ -78,102 +59,89 @@ end
 function M.autoStop() return tonumber(get("auto_stop_minutes", 30)) or 30 end
 function M.noPassword() return get("allow_no_password", false) == true end
 
--- ---------------------------------------------------------------- the server
+-- ---------------------------------------------------------------- the address
 
-local function readPid()
-    local f = io.open(PID_FILE, "r")
-    if not f then return nil end
-    local pid = f:read("*n")
-    f:close()
-    return pid
-end
-
---- Running? (From /proc: nothing is started to find out.)
-function M.isRunning()
-    local pid = readPid()
-    if not pid then return false end
-    if exists("/proc/" .. pid) then return true end
-    os.remove(PID_FILE)
-    return false
-end
-
--- (asking the system is slow on a Kindle: once every 20 s is plenty)
+--- This device's address on the Wi-Fi: the wireless interface's IPv4 (the
+--- first, when it has several), else any interface that isn't the USB
+--- network's. Asked at most every 5 s.
 local ip_cache = { at = 0 }
 function M.ip()
-    if os.time() - ip_cache.at < 20 then return ip_cache.ip end
-    local ok, info = pcall(function() return Device.retrieveNetworkInfo and Device:retrieveNetworkInfo() end)
-    local ip
-    if ok and info then
-        if type(info) == "table" then ip = info.ip else ip = tostring(info):match("(%d+%.%d+%.%d+%.%d+)") end
-    end
-    ip_cache.at, ip_cache.ip = os.time(), ip
-    return ip
+    if os.time() - ip_cache.at < 5 and ip_cache.at > 0 then return ip_cache.ip end
+    local best, other
+    local ok, err = pcall(function()
+        local NetInfo = require("ffi/netinfo")
+        local ni = NetInfo:new()
+        local list = ni:retrieve()
+        ni:free()
+        for _i, iface in ipairs(list) do
+            local v4 = iface.ipv4 and iface.ipv4:match("^([%d%.]+)")
+            if v4 and v4 ~= "127.0.0.1" and not v4:match("^169%.254%.") then
+                local name = tostring(iface.name or "")
+                if iface.wireless or name:match("^wlan") or name:match("^wl") then
+                    best = best or v4
+                elseif not name:match("^usb") and not name:match("^rndis") and not name:match("^lo") then
+                    other = other or v4
+                end
+            end
+        end
+    end)
+    if not ok then logger.warn("ShelfTechUI: transfer address:", err) end
+    ip_cache.at, ip_cache.ip = os.time(), best or other
+    return ip_cache.ip
 end
 
-function M.url()
+function M.url(with_code)
     local ip = M.ip()
     if not ip then return nil end
     local port = M.port()
-    return "http://" .. ip .. (port == 80 and "" or (":" .. port))
+    local u = "http://" .. ip .. (port == 80 and "" or (":" .. port)) .. "/"
+    if with_code and M.code() then u = u .. "?k=" .. M.code() end
+    return u
 end
 
-local function paths()
-    local dir = dataDir()
-    return dir .. "/filebrowser.db", dir .. "/config.json", dir .. "/transfer.log"
-end
+-- ---------------------------------------------------------------- the server
 
-local function run(args)
-    local db, cfg = paths()
-    return os.execute(string.format("%s -d %s -c %s %s > /dev/null 2>&1", quote(BIN), quote(db), quote(cfg), args))
-end
+local code -- this time's code (nil: none asked)
+function M.code() return Server.running() and code or nil end
 
---- FilebrowserPlus's database (your password), taken over once, while that
---- plugin is still installed.
-function M.migrate()
-    local db = paths()
-    if exists(db) then return true end
-    local old = PLUGIN_DIR:match("^(.*)/[^/]+$")
-    old = old and (old .. "/filebrowserplus.koplugin/filebrowser.db")
-    if old and exists(old) then
-        local fi = io.open(old, "rb")
-        local fo = fi and io.open(db, "wb")
-        if fi and fo then
-            fo:write(fi:read("*a"))
-            fo:close() fi:close()
-            return true
-        end
-        if fi then fi:close() end
-    end
-    return false
-end
-
---- First run: FilebrowserPlus's database if it's there, else a fresh one
---- with the default login.
-local function ensureDatabase()
-    if M.migrate() then return true end
-    run("config init")
-    local ok = run(string.format("users add %s %s --perm.admin", USER, DEFAULT_PASS)) == 0
-    if ok then set("stui_default_login", true) end
-    return ok
-end
+function M.isRunning() return Server.running() ~= nil end
 
 local function firewall(open)
     if not Device:isKindle() then return end
     local flag = open and "-A" or "-D"
     local port = M.port()
-    os.execute(string.format("iptables %s INPUT -p tcp --dport %d -m conntrack --ctstate NEW,ESTABLISHED -j ACCEPT", flag, port))
-    os.execute(string.format("iptables %s OUTPUT -p tcp --sport %d -m conntrack --ctstate ESTABLISHED -j ACCEPT", flag, port))
+    os.execute(string.format("iptables %s INPUT -p tcp --dport %d -m conntrack --ctstate NEW,ESTABLISHED -j ACCEPT 2>/dev/null", flag, port))
+    os.execute(string.format("iptables %s OUTPUT -p tcp --sport %d -m conntrack --ctstate ESTABLISHED -j ACCEPT 2>/dev/null", flag, port))
+end
+
+--- FilebrowserPlus's server, if one is still running from before: it holds
+--- the port.
+local function stopOldServer()
+    local f = io.open(OLD_PID_FILE, "r")
+    if not f then return end
+    local pid = f:read("*n")
+    f:close()
+    if pid and exists("/proc/" .. pid) then
+        os.execute("kill " .. pid .. " 2>/dev/null")
+        for _i = 1, 10 do
+            if not exists("/proc/" .. pid) then break end
+            require("ffi/util").usleep(100000)
+        end
+        if exists("/proc/" .. pid) then os.execute("kill -9 " .. pid .. " 2>/dev/null") end
+    end
+    os.remove(OLD_PID_FILE)
 end
 
 local stop_at
 local function autoStopCheck()
     if not M.isRunning() or not stop_at then return end
-    if os.time() >= stop_at then
+    -- never in the middle of a file coming in or going out
+    if os.time() >= stop_at and not Server.busy() and os.time() - Server.lastActivity() > 30 then
         M.stop(true)
         pcall(function() require("ui/widget/notification"):notify(_("Transfer turned itself off")) end)
         return
     end
-    UIManager:scheduleIn(math.min(60, math.max(1, stop_at - os.time())), autoStopCheck)
+    UIManager:scheduleIn(math.min(60, math.max(5, stop_at - os.time())), autoStopCheck)
 end
 
 local function armAutoStop()
@@ -186,69 +154,91 @@ end
 --- Minutes until it turns itself off (nil: it won't).
 function M.minutesLeft()
     if not stop_at then return nil end
-    return math.max(0, math.ceil((stop_at - os.time()) / 60))
+    return math.max(1, math.ceil((stop_at - os.time()) / 60))
 end
 
---- Starts the server. Returns true, or false and why.
+-- Books that came in: home sees them (once the sending has stopped for a
+-- moment, so a dozen books make one refresh, not twelve).
+local received = {}
+local function refreshLibrary()
+    if Server.busy() then UIManager:scheduleIn(2, refreshLibrary) return end
+    local n = #received
+    received = {}
+    pcall(function()
+        local Repo = require("lib/bookshelf_book_repository")
+        if Repo.invalidateWalkCache then Repo.invalidateWalkCache() end
+        if Repo.invalidateLightMeta then Repo.invalidateLightMeta() end
+    end)
+    pcall(function() require("bos_recs").invalidate() end)
+    pcall(function() require("bos_home").refresh() end)
+    if n > 0 then
+        pcall(function() require("ui/widget/notification"):notify(n == 1 and _("1 book received") or T(_("%1 books received"), n)) end)
+    end
+end
+
+local function onReceived(path)
+    table.insert(received, path)
+    M.status = T(_("Received: %1"), (path:match("([^/]+)$") or path))
+    if M._page then M._page:refresh("ui") end
+    UIManager:unschedule(refreshLibrary)
+    UIManager:scheduleIn(2, refreshLibrary)
+    armAutoStop() -- (in use: the timer starts again)
+end
+
+local function onChange()
+    UIManager:unschedule(refreshLibrary)
+    UIManager:scheduleIn(2, refreshLibrary)
+end
+
 function M.start()
-    if not M.available() then return false, _("The transfer server isn't in this build.") end
     if M.isRunning() then
         if not stop_at then armAutoStop() end
         return true
     end
-    if lfs.attributes(BIN, "mode") == "file" then os.execute("chmod +x " .. quote(BIN)) end
-    if not ensureDatabase() then return false, _("The transfer server could not be set up.") end
     local folder = M.folder()
     if not exists(folder) then
-        os.execute("mkdir -p " .. quote(folder))
+        os.execute("mkdir -p '" .. folder:gsub("'", "'\\''") .. "'")
         if not exists(folder) then return false, T(_("The folder %1 can't be made."), folder) end
     end
-    -- sign-in method: only when it changed (each change is a slow start of the program)
-    local want = M.noPassword() and "noauth" or "json"
-    if get("stui_auth", nil) ~= want then
-        if run("config set --auth.method=" .. want) == 0 then set("stui_auth", want) end
+    stopOldServer()
+    code = nil
+    if not M.noPassword() then
+        math.randomseed(os.time() + math.floor(os.clock() * 1e6))
+        code = string.format("%06d", math.random(0, 999999))
     end
-    local db, cfg, log = paths()
-    local size = lfs.attributes(log, "size")
-    if size and size > 256 * 1024 then os.remove(log) end
+    local device = ""
+    pcall(function() device = Device.model or "" end)
+    local ok, why = Server.start{ root = folder, port = M.port(), code = code, device = device,
+        on_received = onReceived, on_change = onChange }
+    if not ok then
+        code = nil
+        if why == "busy" then
+            return false, T(_("Port %1 is in use by something else. Choose another in Transfer's settings."), M.port())
+        end
+        return false, T(_("Transfer couldn't start: %1"), tostring(why))
+    end
     firewall(true)
-    local cmd = string.format("nohup %s -a 0.0.0.0 -r %s -p %d -l %s -d %s -c %s > /dev/null 2>&1 & echo $! > %s",
-        quote(BIN), quote(folder), M.port(), quote(log), quote(db), quote(cfg), quote(PID_FILE))
-    if os.execute(cmd) ~= 0 then
-        firewall(false)
-        return false, _("The transfer server did not start.")
-    end
+    M.status = nil
     armAutoStop()
-    logger.info("ShelfTechUI: transfer server on port", M.port(), "for", folder)
+    logger.info("ShelfTechUI: transfer on port", M.port(), "for", folder)
     return true
-end
-
---- Stops the server and waits (briefly) until it has let go of its
---- database: a setting changed straight after must not find it locked.
-local function killAndWait(pid)
-    if not pid then return end
-    os.execute("kill " .. pid .. " 2>/dev/null")
-    local ffiutil = require("ffi/util")
-    for i = 1, 40 do
-        if not exists("/proc/" .. pid) then return end
-        if i == 30 then os.execute("kill -9 " .. pid .. " 2>/dev/null") end
-        ffiutil.usleep(50000)
-    end
 end
 
 function M.stop(quiet)
     UIManager:unschedule(autoStopCheck)
     stop_at = nil
-    killAndWait(readPid())
-    os.remove(PID_FILE)
-    firewall(false)
+    if M.isRunning() then
+        Server.stop()
+        firewall(false)
+    end
+    code = nil
+    M.status = nil
     if not quiet then
         pcall(function() require("ui/widget/notification"):notify(_("Transfer is off")) end)
     end
     if M._page then M._page:refresh("ui") end
 end
 
---- On / off without the page.
 function M.toggle()
     if M.isRunning() then return M.stop() end
     local ok, why = M.start()
@@ -258,18 +248,16 @@ function M.toggle()
         return
     end
     local url = M.url()
-    UIManager:show(InfoMessage:new{ timeout = 4,
-        text = url and T(_("Transfer is on.\n%1"), url) or _("Transfer is on. Connect to Wi-Fi to use it.") })
+    UIManager:show(InfoMessage:new{ timeout = 5,
+        text = url and (T(_("Transfer is on.\n%1"), url) .. (M.code() and ("\n" .. T(_("Code: %1"), M.code())) or ""))
+            or _("Transfer is on. Connect to Wi-Fi to use it.") })
 end
 
---- A server left running by an earlier KOReader session keeps its timer.
+--- At start: on, if it's set to be.
 function M.resume()
-    if M.available() then pcall(M.migrate) end
-    if M.isRunning() and not stop_at then armAutoStop() end
+    stopOldServer()
     if get("autostart", false) == true and not M.isRunning() then M.start() end
 end
-
--- ---------------------------------------------------------------- the page
 
 local AUTO_STOPS = { { 15, _("15 min") }, { 30, _("30 min") }, { 60, _("1 hour") }, { 0, _("Never") } }
 
@@ -278,43 +266,6 @@ local function pickFolder(done)
         set("dataPath", path)
         done()
     end, _("Folder to share"))
-end
-
---- A new password (12 characters or more, as File Browser asks).
-local function askPassword(done)
-    local InputDialog = require("ui/widget/inputdialog")
-    local InfoMessage = require("ui/widget/infomessage")
-    local dlg
-    dlg = InputDialog:new{
-        title = _("New password"),
-        description = T(_("For signing in as %1 from the browser. At least 12 characters."), USER),
-        input = "", text_type = "password",
-        buttons = { {
-            { text = _("Cancel"), id = "close", callback = function() UIManager:close(dlg) end },
-            { text = _("Save"), is_enter_default = true, callback = function()
-                local pw = dlg:getInputText() or ""
-                if #pw < 12 then
-                    UIManager:show(InfoMessage:new{ text = _("At least 12 characters, please."), timeout = 3 })
-                    return
-                end
-                UIManager:close(dlg)
-                done(pw)
-            end },
-        } },
-    }
-    UIManager:show(dlg)
-    dlg:onShowKeyboard()
-end
-
---- Sets the password (the server is stopped for it, then started again).
-function M.setPassword(pw)
-    local was = M.isRunning()
-    if was then M.stop(true) end
-    ensureDatabase()
-    local ok = run(string.format("users update %s --password=%s", USER, quote(pw))) == 0
-    if ok then set("stui_default_login", pw == DEFAULT_PASS) end
-    if was then M.start() end
-    return ok
 end
 
 local function askPort(done)
@@ -366,10 +317,6 @@ function M.show()
     if M._page then return end
     local Page = require("bos_page")
     local InfoMessage = require("ui/widget/infomessage")
-    if not M.available() then
-        UIManager:show(InfoMessage:new{ text = _("The transfer server isn't in this build of ShelfTechUI.") })
-        return
-    end
     -- opening the page is asking for it: on at once
     -- (the page shows first, "Starting…"; the server starts just after)
     local why
@@ -380,7 +327,8 @@ function M.show()
         local x = self.pad
         local W = Screen:getWidth()
         local on = M.isRunning()
-        local url = on and M.url()
+        local url = on and M.url(true)
+        local shown = on and M.url()
         -- [ON · turns off in 28 min]                         [TURN OFF]
         local bw = S(150)
         local state = starting and _("Starting…") or (on and _("On") or _("Off"))
@@ -414,12 +362,18 @@ function M.show()
             end
             if qr_cache.widget then qr_cache.widget:paintTo(bb, qx, qy) end
             Look.label(bb, _("Scan, or type in a browser"), tx, y + S(22), tw, S(20), 10, { color = Look.GRAY })
-            Page.wrap(bb, url, Page.serif(20, true), tx, y + S(48), tw, 3, S(28))
+            Page.wrap(bb, shown, Page.serif(20, true), tx, y + S(48), tw, 3, S(28))
             Look.label(bb, _("Same Wi-Fi as this device"), tx, y + S(140), tw, S(20), 10, { color = Look.GRAY })
-            if not M.noPassword() then
-                Look.label(bb, _("Sign in"), tx, y + S(172), tw, S(20), 10, { color = Look.GRAY })
-                local login = get("stui_default_login", false) and (USER .. " / " .. DEFAULT_PASS) or T(_("%1 / your password"), USER)
-                Look.label(bb, login, tx, y + S(194), tw, S(22), 12, { keep_case = true })
+            if M.code() then
+                -- typed in instead of scanning: the browser asks for this
+                Look.label(bb, _("Code"), tx, y + S(170), tw, S(20), 10, { color = Look.GRAY })
+                local big = require("ui/widget/textwidget"):new{ text = M.code(), face = Page.serif(26, true), fgcolor = BLACK }
+                big:paintTo(bb, tx, y + S(192))
+                big:free()
+            end
+            -- what's coming in
+            if M.status then
+                Look.label(bb, M.status, x + S(22), y + card_h - S(30), w - Look.SHADOW - S(44), S(20), 10, { keep_case = true })
             end
         else
             Look.box(bb, qx, qy, q, q, { border = Look.LINE })
@@ -461,45 +415,18 @@ function M.show()
             if M.isRunning() then armAutoStop() end
             self:refresh("ui")
         end)
-        local pw_row = row(_("Password"), M.noPassword() and _("Not asked")
-            or (get("stui_default_login", false) and _("Default") or _("Your own")), function()
-            local function flip() apply(self, function() set("allow_no_password", not M.noPassword()) end) end
-            local items = {
-                { text = _("Change the password…"), callback = function()
-                    askPassword(function(pw)
-                        pcall(function() require("ui/widget/notification"):notify(_("Saving the password…")) end)
-                        UIManager:forceRePaint()
-                        UIManager:nextTick(function()
-                            local ok = M.setPassword(pw)
-                            UIManager:show(InfoMessage:new{ timeout = 3, text = ok
-                                and _("Password changed.") or _("The password could not be changed.") })
-                            if not self.closed then self:refresh("ui") end
-                        end)
-                    end)
-                end },
-            }
+        row(_("Ask for a code"), M.noPassword() and _("No") or _("Yes"), function()
             if M.noPassword() then
-                table.insert(items, { text = _("Ask for the password again"), callback = flip })
-            else
-                table.insert(items, { text = _("Stop asking for a password…"), callback = function()
-                    local ConfirmBox = require("ui/widget/confirmbox")
-                    UIManager:show(ConfirmBox:new{
-                        text = _("Without a password, anyone on this Wi-Fi can read, change and delete the files in the shared folder while Transfer is on.\n\nStop asking for a password?"),
-                        ok_text = _("Stop asking"), ok_callback = flip,
-                    })
-                end })
+                apply(self, function() set("allow_no_password", false) end)
+                return
             end
-            table.insert(items, { text = T(_("Back to the default (%1)"), DEFAULT_PASS), callback = function()
-                UIManager:nextTick(function()
-                    local ok = M.setPassword(DEFAULT_PASS)
-                    UIManager:show(InfoMessage:new{ timeout = 3, text = ok
-                        and T(_("The login is %1 / %2 again."), USER, DEFAULT_PASS) or _("The password could not be reset.") })
-                    if not self.closed then self:refresh("ui") end
-                end)
-            end })
-            require("bos_ui").openList(items, self._pw_rect)
+            local ConfirmBox = require("ui/widget/confirmbox")
+            UIManager:show(ConfirmBox:new{
+                text = _("Without a code, anyone on this Wi-Fi who finds the address can add, download and delete files in the shared folder while Transfer is on.\n\nStop asking for a code?"),
+                ok_text = _("Stop asking"),
+                ok_callback = function() apply(self, function() set("allow_no_password", true) end) end,
+            })
         end)
-        self._pw_rect = pw_row
         row(_("Port"), tostring(M.port()), function()
             askPort(function() apply(self, function() end) end)
         end)
@@ -518,7 +445,7 @@ function M.show()
         on_more = function(self, rect)
             require("bos_ui").openList({
                 { text = _("About Transfer"), callback = function()
-                    UIManager:show(InfoMessage:new{ text = _("Transfer runs the File Browser web server (filebrowser.org) on this device while it's on. It takes over from the FilebrowserPlus plugin by Neeraj Patel, with the same settings and password.") })
+                    UIManager:show(InfoMessage:new{ text = _("Transfer is a small web server inside KOReader, on only while you want it: a browser on the same Wi-Fi can send books to the shared folder, download them and delete them. Nothing goes over the internet. It takes the place of FilebrowserPlus, keeping its folder, port and timer.") })
                 end },
             }, rect)
         end }

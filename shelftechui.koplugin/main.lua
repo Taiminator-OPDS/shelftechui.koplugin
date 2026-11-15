@@ -223,7 +223,7 @@ function BookshelfOS:init()
         -- once: a Transfer tile in Quick Settings
         pcall(function()
             local Store = require("bos_settings_store")
-            if Store.get("transfer_tile_added") or not require("bos_transfer").available() then return end
+            if Store.get("transfer_tile_added") then return end
             Store.set("transfer_tile_added", true)
             local Controls = require("bos_controls")
             local list = { unpack(Store.get("qs_controls") or Controls.DEFAULTS.qs) }

@@ -576,8 +576,6 @@ local function swap(staging)
         os.rename(prev, dir)
         return false, "rename"
     end
-    -- the Transfer server must stay runnable
-    pcall(os.execute, "chmod +x " .. require("lib/bookshelf_http").shellQuote(dir .. "/transfer/filebrowser") .. " 2>/dev/null")
     return true
 end
 

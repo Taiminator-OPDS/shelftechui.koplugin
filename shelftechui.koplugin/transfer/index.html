@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Transfer · ShelfTechUI</title>
+<!--STATE-->
+<style>
+:root{--ink:#111;--paper:#fff;--mid:#666;--light:#d8d8d8;--line:2px;--shadow:4px 4px 0 var(--ink)}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--paper);color:var(--ink)}
+body{font:15px/1.45 ui-monospace,"SFMono-Regular","Cascadia Mono","Roboto Mono",Menlo,Consolas,monospace;-webkit-text-size-adjust:100%}
+main{max-width:720px;margin:0 auto;padding:16px 16px 48px}
+.cap{text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+.band{position:relative;height:30px;margin:4px 0 18px;background:repeating-linear-gradient(to bottom,var(--ink) 0 2px,transparent 2px 6px)}
+.band span{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:var(--paper);padding:2px 14px;white-space:nowrap;font-size:14px}
+.sub{display:flex;justify-content:space-between;gap:12px;color:var(--mid);font-size:12px;margin:-8px 0 18px}
+.box{border:var(--line) solid var(--ink);background:var(--paper);box-shadow:var(--shadow)}
+button,.key{font:inherit;font-size:13px;text-transform:uppercase;letter-spacing:.05em;font-weight:700;color:var(--ink);background:var(--paper);border:var(--line) solid var(--ink);box-shadow:3px 3px 0 var(--ink);padding:10px 14px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px}
+button:active,.key:active{transform:translate(3px,3px);box-shadow:none}
+button.on{background:var(--ink);color:var(--paper)}
+button:disabled{opacity:.45;cursor:default}
+.drop{padding:22px 18px;text-align:center}
+.drop.over{background:repeating-linear-gradient(135deg,var(--paper) 0 8px,#eee 8px 16px)}
+.drop p{margin:8px 0 14px;color:var(--mid)}
+.drop .big{font-size:18px;color:var(--ink);margin:0}
+#queue{margin-top:16px;display:flex;flex-direction:column;gap:10px}
+.up{padding:10px 12px}
+.up .row{display:flex;justify-content:space-between;gap:10px;font-size:13px}
+.up .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar{margin-top:8px;height:14px;border:var(--line) solid var(--ink);padding:2px}
+.bar i{display:block;height:100%;width:0;background:repeating-linear-gradient(to bottom,var(--ink) 0 2px,transparent 2px 4px);transition:width .2s}
+.up.done .bar i{background:var(--ink)}
+.up.err{border-style:dashed}
+h2{font-size:13px;margin:30px 0 10px;display:flex;align-items:center;gap:10px}
+h2::after{content:"";flex:1;border-bottom:2px dotted var(--ink)}
+.crumbs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.crumbs button{min-height:34px;padding:4px 10px;font-size:12px;box-shadow:2px 2px 0 var(--ink)}
+.list{padding:0}
+.item{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--light)}
+.item:last-child{border-bottom:0}
+.item .ic{flex:none;width:30px;height:40px;border:var(--line) solid var(--ink);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;text-transform:uppercase;box-shadow:2px 2px 0 var(--ink)}
+.item.folder .ic{width:34px;height:28px;box-shadow:none;border-top-width:6px}
+.item .what{flex:1;min-width:0}
+.item .t{font-family:Georgia,"Iowan Old Style","Palatino Linotype",serif;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item .m{font-size:11px;color:var(--mid);text-transform:uppercase;letter-spacing:.04em}
+.item button,.item .key{min-height:36px;padding:4px 10px;font-size:12px;box-shadow:2px 2px 0 var(--ink)}
+.item.folder{cursor:pointer}
+.empty{padding:22px 14px;color:var(--mid);font-style:italic;font-family:Georgia,serif}
+.tools{display:flex;gap:10px;margin:0 0 12px;flex-wrap:wrap}
+.login{max-width:380px;margin:12vh auto 0;padding:22px}
+.login input{width:100%;font:inherit;font-size:30px;letter-spacing:.35em;text-align:center;border:var(--line) solid var(--ink);padding:10px;margin:14px 0 16px;background:var(--paper);color:var(--ink)}
+.login p{color:var(--mid);margin:0}
+.wrong{color:var(--ink);font-weight:700;margin-top:10px!important}
+.foot{margin-top:28px;color:var(--mid);font-size:11px;text-align:center;text-transform:uppercase;letter-spacing:.06em}
+.toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);padding:10px 16px;font-size:13px;display:none;z-index:9}
+@media (max-width:420px){.item .m{font-size:10px}.drop{padding:18px 12px}}
+</style>
+</head>
+<body>
+<main id="app"></main>
+<div id="toast" class="box toast"></div>
+<script>
+(function(){
+"use strict";
+var $=function(s,el){return (el||document).querySelector(s)};
+var app=$("#app");
+function h(tag,attrs,kids){var e=document.createElement(tag);for(var k in (attrs||{})){if(k==="text")e.textContent=attrs[k];else if(k.slice(0,2)==="on")e.addEventListener(k.slice(2),attrs[k]);else e.setAttribute(k,attrs[k])}(kids||[]).forEach(function(c){if(c)e.appendChild(typeof c==="string"?document.createTextNode(c):c)});return e}
+function band(t){return h("div",{"class":"band"},[h("span",{"class":"cap",text:t})])}
+function size(n){if(n==null||n===false)return"";if(n<1024)return n+" B";if(n<1048576)return(n/1024).toFixed(0)+" KB";if(n<1073741824)return(n/1048576).toFixed(1)+" MB";return(n/1073741824).toFixed(2)+" GB"}
+function when(t){if(!t)return"";var d=new Date(t*1000);return d.toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"})}
+function toast(t){var e=$("#toast");e.textContent=t;e.style.display="block";clearTimeout(toast._t);toast._t=setTimeout(function(){e.style.display="none"},2600)}
+function ext(n){var m=/\.([^.]+)$/.exec(n);return m?m[1].slice(0,4):""}
+
+// ------------------------------------------------------------ sign in
+if(window.STUI_LOGIN){
+  var wrong=window.STUI_LOGIN==="wrong";
+  var form=h("form",{method:"post",action:"/login","class":"box login"},[
+    band("Transfer"),
+    h("p",{text:"Type the code shown on the e-reader's Transfer page."}),
+    h("input",{name:"code",inputmode:"numeric",autocomplete:"one-time-code",maxlength:"8",required:"",autofocus:""}),
+    h("button",{"class":"on",type:"submit",style:"width:100%"},["Open"]),
+    wrong?h("p",{"class":"wrong",text:"That code isn't the one on the e-reader. Try again."}):null
+  ]);
+  app.appendChild(form);
+  return;
+}
+
+// ------------------------------------------------------------ the page
+var dir="",info=null;
+var head=h("div",{},[band("ShelfTechUI · Transfer")]);
+var sub=h("div",{"class":"sub"},[h("span",{id:"dev"}),h("span",{id:"free"})]);
+var pick=h("input",{type:"file",multiple:"",style:"display:none",onchange:function(){send(pick.files);pick.value=""}});
+var drop=h("div",{"class":"box drop"},[
+  h("p",{"class":"big cap",text:"Send books"}),
+  h("p",{text:"Drop files here, or choose them. They go into the folder below."}),
+  h("button",{"class":"on",onclick:function(){pick.click()}},["Choose files"]),pick]);
+var queue=h("div",{id:"queue"});
+var crumbs=h("div",{"class":"crumbs"});
+var tools=h("div",{"class":"tools"},[
+  h("button",{onclick:newFolder},["+ New folder"]),
+  h("button",{onclick:function(){load(dir)}},["Refresh"])]);
+var list=h("div",{"class":"box list"});
+app.appendChild(head);app.appendChild(sub);app.appendChild(drop);app.appendChild(queue);
+app.appendChild(h("h2",{"class":"cap",text:"On the e-reader"}));
+app.appendChild(crumbs);app.appendChild(tools);app.appendChild(list);
+app.appendChild(h("div",{"class":"foot",text:"Same Wi-Fi only · it turns itself off on the e-reader"}));
+
+["dragenter","dragover"].forEach(function(ev){document.addEventListener(ev,function(e){e.preventDefault();drop.classList.add("over")})});
+["dragleave","drop"].forEach(function(ev){document.addEventListener(ev,function(e){e.preventDefault();if(ev==="drop"||e.target===document.documentElement)drop.classList.remove("over")})});
+document.addEventListener("drop",function(e){if(e.dataTransfer&&e.dataTransfer.files.length)send(e.dataTransfer.files)});
+
+function api(method,url,cb){var x=new XMLHttpRequest();x.open(method,url);x.onload=function(){var j={};try{j=JSON.parse(x.responseText)}catch(e){}if(x.status===403){location.reload();return}cb(x.status,j)};x.onerror=function(){cb(0,{error:"The e-reader didn't answer. Is Transfer still on?"})};x.send()}
+function q(o){var p=[];for(var k in o)p.push(encodeURIComponent(k)+"="+encodeURIComponent(o[k]));return p.join("&")}
+
+function load(d){
+  api("GET","/api/list?"+q({dir:d}),function(st,j){
+    if(st!==200){toast(j.error||"That folder can't be read.");return}
+    dir=j.dir||"";info=j;
+    $("#dev").textContent=(j.device||"E-reader");
+    $("#free").textContent=j.free?size(j.free)+" free":"";
+    crumbs.innerHTML="";
+    var parts=dir?dir.split("/"):[];
+    crumbs.appendChild(h("button",{"class":parts.length?"":"on",onclick:function(){load("")}},["Home folder"]));
+    parts.forEach(function(p,i){var to=parts.slice(0,i+1).join("/");crumbs.appendChild(h("button",{"class":i===parts.length-1?"on":"",onclick:function(){load(to)}},[p]))});
+    list.innerHTML="";
+    if(!j.folders.length&&!j.files.length){list.appendChild(h("div",{"class":"empty",text:"Nothing here yet. Send a book, and it shows up here and on the e-reader."}));return}
+    j.folders.forEach(function(f){
+      var to=(dir?dir+"/":"")+f.name;
+      list.appendChild(h("div",{"class":"item folder",onclick:function(e){if(e.target.tagName!=="BUTTON")load(to)}},[
+        h("div",{"class":"ic"}),
+        h("div",{"class":"what"},[h("div",{"class":"t",text:f.name}),h("div",{"class":"m",text:"Folder"})]),
+        h("button",{title:"Delete this folder",onclick:function(){del(to,f.name,true)}},["×"])]))});
+    j.files.forEach(function(f){
+      var p=(dir?dir+"/":"")+f.name;
+      list.appendChild(h("div",{"class":"item"},[
+        h("div",{"class":"ic",text:ext(f.name)}),
+        h("div",{"class":"what"},[h("div",{"class":"t",text:f.name}),h("div",{"class":"m",text:size(f.size)+" · "+when(f.mtime)})]),
+        h("a",{"class":"key",href:"/api/file?"+q({path:p}),download:f.name,title:"Download"},["↓"]),
+        h("button",{title:"Delete",onclick:function(){del(p,f.name,false)}},["×"])]))});
+  });
+}
+
+function del(p,name,folder){
+  if(!confirm((folder?"Delete the folder ":"Delete ")+"“"+name+"” from the e-reader?"+(folder?"":"\n\nIts reading position and highlights go too."))) return;
+  api("POST","/api/delete?"+q({path:p}),function(st,j){if(st!==200)toast(j.error||"It couldn't be deleted.");else{toast("Deleted");load(dir)}});
+}
+function newFolder(){
+  var n=prompt("Name of the new folder");if(!n)return;
+  api("POST","/api/mkdir?"+q({dir:dir,name:n}),function(st,j){if(st!==200)toast(j.error||"It couldn't be made.");else load(dir)});
+}
+
+// one at a time, each with its own bar
+var waiting=[],busy=false;
+function send(files){
+  Array.prototype.forEach.call(files,function(f){
+    var row=h("div",{"class":"box up"},[h("div",{"class":"row"},[h("span",{"class":"name",text:f.name}),h("span",{"class":"st",text:"Waiting"})]),h("div",{"class":"bar"},[h("i")])]);
+    queue.appendChild(row);waiting.push({f:f,row:row,to:dir});
+  });
+  next();
+}
+function next(){
+  if(busy||!waiting.length)return;
+  busy=true;var job=waiting.shift(),st=$(".st",job.row),bar=$(".bar i",job.row);
+  var x=new XMLHttpRequest();
+  x.open("POST","/api/upload?"+q({dir:job.to,name:job.f.name}));
+  x.upload.onprogress=function(e){if(e.lengthComputable){var p=Math.round(e.loaded*100/e.total);bar.style.width=p+"%";st.textContent=p+"% of "+size(e.total)}};
+  x.onload=function(){var j={};try{j=JSON.parse(x.responseText)}catch(e){}
+    if(x.status===200){bar.style.width="100%";job.row.classList.add("done");st.textContent="On the e-reader";if(job.to===dir)load(dir)}
+    else{job.row.classList.add("err");st.textContent=j.error||"Not sent"}
+    busy=false;next();
+    setTimeout(function(){if(job.row.classList.contains("done"))job.row.remove()},6000)};
+  x.onerror=function(){job.row.classList.add("err");st.textContent="Not sent: the e-reader didn't answer";busy=false;next()};
+  st.textContent="Sending";
+  x.send(job.f);
+}
+load("");
+})();
+</script>
+</body>
+</html>

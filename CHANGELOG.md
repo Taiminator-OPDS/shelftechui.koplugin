@@ -2,6 +2,16 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.10.0
+
+- **Transfer has its own server.** The File Browser program is gone: Transfer is now a small web server of ShelfTechUI's own, inside KOReader, so it runs on every device KOReader does and there is nothing separate to fail to start. Open Transfer, scan the QR code, and the page opens on your phone or computer.
+- **The address is the Wi-Fi one.** The QR code used to carry the first address the device reported, which on some devices (a Kindle with its USB network) isn't the Wi-Fi's: the phone was sent nowhere. It's now taken from the wireless connection.
+- **A page in ShelfTechUI's look.** Drop books on it or choose them (several at once, with progress for each), browse the folder, make folders, download a book back, delete one. A book with the same name as one already there is kept as "Name (2)".
+- **A code in place of the password.** Each time Transfer turns on it shows a new six-digit code. Scanning the QR code signs you in by itself; typing the address asks for the code. "Ask for a code" in Transfer's settings turns it off.
+- **Books appear by themselves.** A couple of seconds after the last book arrives, home refreshes and says how many came. Transfer never turns itself off in the middle of a transfer.
+- **A smaller download.** Without the File Browser program the plugin is about 4 MB (it was about 13 MB).
+- Wrapped's sharing uses the same more dependable way of opening its port.
+
 ## 1.9.2
 
 - **The update window is fixed.** It was KOReader's confirmation box, which grows with its text: a release with long notes made it taller than the screen, so its frame was drawn over itself (borders inside borders) and its keys were cut off at the bottom. It's now a window of ShelfTechUI's own, in your theme: as tall as what it says and never more than about two thirds of the screen, with What's new shown a page at a time (‹ ›, or swipe) and Not now / Update and restart always inside it.

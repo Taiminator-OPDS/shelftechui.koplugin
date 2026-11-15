@@ -194,9 +194,10 @@ function M.start(list, r, on_open)
     local socket = require("socket")
     local server, port
     for _i, p in ipairs(PORTS) do
-        local srv = socket.tcp()
+        -- (IPv4 by name: see bos_transfer_server)
+        local srv = (socket.tcp4 or socket.tcp)()
         srv:setoption("reuseaddr", true)
-        if srv:bind("*", p) and srv:listen(8) then server, port = srv, p break end
+        if srv:bind("0.0.0.0", p) and srv:listen(8) then server, port = srv, p break end
         srv:close()
     end
     if not server then return nil, "port" end
