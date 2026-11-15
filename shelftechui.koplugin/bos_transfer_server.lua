@@ -13,6 +13,8 @@ calls the page makes:
   POST /api/upload?dir=…&name=…  a file, sent as the request's body;
                                written to "name.part", then renamed
   GET  /api/file?path=…        a file, to download
+  GET  /api/zip?path=…         a folder and all that's in it, as a zip
+                               made on the way out
   POST /api/delete?path=…      a file (and its KOReader sidecar folder),
                                or an empty folder
   POST /api/mkdir?dir=…&name=…  a new folder
@@ -172,6 +174,143 @@ local function sendFile(c, path, name)
     c.counted = true
 end
 
+-- ---------------------------------------------------------------- a folder, as a zip
+
+-- A folder is sent as a zip made on the way out: files stored as they are
+-- (books are compressed already), each followed by its checksum, the index
+-- at the end. Nothing is written to the device and nothing is held in
+-- memory but the piece being sent.
+
+local bit = require("bit")
+local crc32
+do
+    local ok, z = pcall(function()
+        local ffi = require("ffi")
+        require("ffi/zlib_h")
+        local lib = ffi.loadlib and ffi.loadlib("z", 1) or ffi.load("z")
+        return function(crc, str) return tonumber(lib.crc32(crc, str, #str)) end
+    end)
+    if ok and z and pcall(z, 0, "x") then
+        crc32 = z
+    else
+        local tab = {}
+        for i = 0, 255 do
+            local c = i
+            for _k = 1, 8 do
+                c = bit.band(c, 1) == 1 and bit.bxor(bit.rshift(c, 1), 0xEDB88320) or bit.rshift(c, 1)
+            end
+            tab[i] = c
+        end
+        crc32 = function(crc, str)
+            local c = bit.bnot(crc)
+            for i = 1, #str do
+                c = bit.bxor(bit.rshift(c, 8), tab[bit.band(bit.bxor(c, str:byte(i)), 0xFF)])
+            end
+            c = bit.bnot(c)
+            return c < 0 and c + 4294967296 or c
+        end
+    end
+end
+
+local function le16(n) return string.char(n % 256, math.floor(n / 256) % 256) end
+local function le32(n)
+    return string.char(n % 256, math.floor(n / 256) % 256, math.floor(n / 65536) % 256, math.floor(n / 16777216) % 256)
+end
+
+local function dosTime(t)
+    local d = os.date("*t", t or os.time())
+    if d.year < 1980 then d = { year = 1980, month = 1, day = 1, hour = 0, min = 0, sec = 0 } end
+    return d.hour * 2048 + d.min * 32 + math.floor(d.sec / 2), (d.year - 1980) * 512 + d.month * 32 + d.day
+end
+
+local ZIP_MAX_FILES = 5000
+local ZIP_MAX_BYTES = 4 * 1024 * 1024 * 1024 - 64 * 1024 * 1024
+
+--- Everything in `dir`, as { name (inside the zip), path, size, mtime, dir }.
+local function walk(dir, prefix, hidden, out, total)
+    local names = {}
+    for name in lfs.dir(dir) do
+        if name ~= "." and name ~= ".." and not name:match("%.part$")
+            and (hidden or (not name:match("^%.") and not name:match("%.sdr$"))) then names[#names + 1] = name end
+    end
+    table.sort(names)
+    local had = false
+    for _i, name in ipairs(names) do
+        local a = lfs.attributes(dir .. "/" .. name)
+        if a and a.mode == "directory" then
+            had = true
+            total = walk(dir .. "/" .. name, prefix .. name .. "/", hidden, out, total)
+        elseif a and a.mode == "file" then
+            had = true
+            out[#out + 1] = { name = prefix .. name, path = dir .. "/" .. name, size = a.size or 0, mtime = a.modification }
+            total = total + (a.size or 0)
+        end
+        if #out > ZIP_MAX_FILES or total > ZIP_MAX_BYTES then return total end
+    end
+    -- (an empty folder is kept as one)
+    if not had and prefix ~= "" then out[#out + 1] = { name = prefix, dir = true, size = 0 } end
+    return total
+end
+
+local function sendZip(c, dir, label, hidden)
+    local entries = {}
+    local total = walk(dir, label .. "/", hidden, entries, 0)
+    if #entries == 0 then return fail(c, 409, "That folder is empty") end
+    if #entries > ZIP_MAX_FILES then return fail(c, 413, "Too many files for one download: download its folders one at a time") end
+    if total > ZIP_MAX_BYTES then return fail(c, 413, "More than 4 GB: download its folders one at a time") end
+    local head = { "HTTP/1.1 200 OK", "Content-Type: application/zip", "Cache-Control: no-store", "Connection: close",
+        "Content-Disposition: attachment; filename=\"" .. label:gsub('[^%w%._%- ]', "_") .. ".zip\"; filename*=UTF-8''"
+            .. label:gsub("[^%w%._%-]", function(ch) return string.format("%%%02X", ch:byte()) end) .. ".zip" }
+    c.out = table.concat(head, "\r\n") .. "\r\n\r\n"
+    c.out_pos = 1
+    c.state = "send"
+    S.moving = S.moving + 1
+    c.counted = true
+    local i, offset, central, f, cur = 0, 0, {}, nil, nil
+    local done = false
+    local function emit(str) offset = offset + #str return str end
+    -- the next piece to send (nil: that was all)
+    c.more = function()
+        if done then return nil end
+        if f then
+            local chunk = f:read(CHUNK)
+            if chunk and #chunk > 0 then
+                cur.crc = crc32(cur.crc, chunk)
+                cur.sent = cur.sent + #chunk
+                return emit(chunk)
+            end
+            f:close()
+            f, c.file_out = nil, nil
+            -- its checksum and size, now that they're known
+            return emit("PK\7\8" .. le32(cur.crc) .. le32(cur.sent) .. le32(cur.sent))
+        end
+        if cur then
+            local t, d = dosTime(cur.e.mtime)
+            central[#central + 1] = "PK\1\2" .. le16(20) .. le16(20) .. le16(cur.flags) .. le16(0) .. le16(t) .. le16(d)
+                .. le32(cur.crc) .. le32(cur.sent) .. le32(cur.sent) .. le16(#cur.e.name) .. le16(0) .. le16(0)
+                .. le16(0) .. le16(0) .. le32(cur.e.dir and 16 or 0) .. le32(cur.at) .. cur.e.name
+            cur = nil
+        end
+        i = i + 1
+        local e = entries[i]
+        if not e then
+            done = true
+            local cd = table.concat(central)
+            return cd .. "PK\5\6" .. le16(0) .. le16(0) .. le16(#central) .. le16(#central) .. le32(#cd) .. le32(offset) .. le16(0)
+        end
+        local t, d = dosTime(e.mtime)
+        -- (bit 11: the name is UTF-8; bit 3: sizes follow the data)
+        cur = { e = e, crc = 0, sent = 0, at = offset, flags = e.dir and 0x0800 or 0x0808 }
+        if not e.dir then
+            f = io.open(e.path, "rb")
+            c.file_out = f -- (closed with the connection if it's cut)
+            if not f then cur.flags = 0x0800 end -- (unreadable: kept as an empty file)
+        end
+        return emit("PK\3\4" .. le16(20) .. le16(cur.flags) .. le16(0) .. le16(t) .. le16(d) .. le32(0) .. le32(0) .. le32(0)
+            .. le16(#e.name) .. le16(0) .. e.name)
+    end
+end
+
 -- ---------------------------------------------------------------- the page
 
 local page_cache
@@ -187,10 +326,14 @@ end
 -- visit "from elsewhere", and a Strict cookie isn't sent back after it)
 local function COOKIE() return "Set-Cookie: stui_t=" .. S.code .. "; Path=/; HttpOnly; SameSite=Lax" end
 
-local function signedIn(c)
+--- Signed in: the cookie, or the code itself (the page sends it with every
+--- call and puts it on its download links, so nothing depends on a phone's
+--- browser keeping a cookie).
+local function signedIn(c, q)
     if not S.code then return true end
     local cookie = c.headers["cookie"] or ""
-    return cookie:find("stui_t=" .. S.code, 1, true) ~= nil
+    if cookie:find("stui_t=" .. S.code, 1, true) then return true end
+    return c.headers["x-stui-code"] == S.code or (q and q.k == S.code) or false
 end
 
 local function loginPage(c, wrong)
@@ -323,7 +466,7 @@ local function route(c)
         c.want_form = true
         return
     end
-    if not signedIn(c) then
+    if not signedIn(c, q) then
         if path:match("^/api/") then return fail(c, 403, "Sign in first") end
         return loginPage(c, false)
     end
@@ -335,6 +478,11 @@ local function route(c)
         local p, rel = inside(q.path)
         if not p or lfs.attributes(p, "mode") ~= "file" then return fail(c, 404, "Not found") end
         return sendFile(c, p, rel:match("([^/]+)$") or "file")
+    elseif method == "GET" and path == "/api/zip" then
+        local p, rel = inside(q.path)
+        if not p or lfs.attributes(p, "mode") ~= "directory" then return fail(c, 404, "No such folder") end
+        local label = p:match("([^/]+)/*$") or "e-reader"
+        return sendZip(c, p, label, q.hidden == "1")
     elseif method == "POST" and path == "/api/delete" then return delete(c, q)
     elseif method == "POST" and path == "/api/mkdir" then return mkdir(c, q)
     elseif method == "GET" and path == "/favicon.ico" then return respond(c, 404, "text/plain", "")
@@ -430,7 +578,11 @@ local function step(c)
             if not data or #data == 0 or err == "timeout" then break end
         elseif c.state == "send" then
             if c.out_pos > #c.out then
-                if c.file_out then
+                if c.more then
+                    local chunk = c.more()
+                    if chunk then c.out, c.out_pos = chunk, 1
+                    else close(c) break end
+                elseif c.file_out then
                     local chunk = c.file_out:read(CHUNK)
                     if chunk then c.out, c.out_pos = chunk, 1
                     else close(c) break end

@@ -30,7 +30,7 @@ local S = UI.S
 
 local Page = {}
 
-Page.VERSION = "1.10.1"
+Page.VERSION = "1.10.2"
 
 -- Dispatcher's sub-menus edit tables in place and flag `caller.updated`.
 local saver = setmetatable({}, { __newindex = function() Store.save() end })
@@ -828,7 +828,7 @@ function Page.sections(plugin)
     table.insert(look.items, note)
 
     local Transfer = require("bos_transfer")
-    local connect = { id = "stui_connect", name = _("Connect"), icon = "wifi.open.100", items = {
+    local connect = { id = "stui_connect", name = _("Connect"), icon = require("bos_ui").PLUGIN_DIR .. "icons/connect.svg", items = {
         { heading = _("Transfer") },
         {
             text = _("Transfer"),

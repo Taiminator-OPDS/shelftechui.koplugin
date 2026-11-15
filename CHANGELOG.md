@@ -2,6 +2,14 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.10.2
+
+- **The Transfer control is back.** It had gone from the toolbar and Quick Settings (and couldn't be added again) since 1.10.0; it's where you put it.
+- **Download a whole folder.** Every folder on the Transfer page has a ↓, and "↓ This folder" downloads the one that's open: one zip file, made as it's sent, with everything inside (up to 4 GB and 5,000 files at a time).
+- **The Transfer page on a monitor.** On a wide screen, sending is on the left and stays put; the device's folders take the rest, with a column each for size and date. On a phone it's as it was.
+- **Transfer and phones, again.** Signing in no longer depends on the phone's browser keeping a cookie (the page carries the code itself). While Transfer is on, the device's Wi-Fi is kept awake, so a phone that has never talked to it gets an answer at the first try. The Transfer screen names the Wi-Fi network the phone must be on, says "Opened from…" when a browser reaches it, and has "A phone can't open it?" under ⋯ with what to check. A browser that can't show the page says why instead of showing nothing.
+- **Connect has its own icon** in Settings (a globe), no longer the Wi-Fi sign.
+
 ## 1.10.1
 
 - **Home's toolbar keeps up.** The battery shows charging within a second of plugging in (and stops when unplugged), the clock moves each minute, and Wi-Fi, the light and night mode show their state as it changes, also after waking up. Only the toolbar's strip is refreshed, only when something it shows has changed, and never over another window.

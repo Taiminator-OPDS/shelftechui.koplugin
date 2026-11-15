@@ -57,12 +57,34 @@ h2::after{content:"";flex:1;border-bottom:2px dotted var(--ink)}
 .foot{margin-top:28px;color:var(--mid);font-size:11px;text-align:center;text-transform:uppercase;letter-spacing:.06em}
 .toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);padding:10px 16px;font-size:13px;display:none;z-index:9}
 @media (max-width:420px){.item .m{font-size:10px}.drop{padding:18px 12px}}
+.item .m2{display:none}
+.oops{border:2px dashed var(--ink);padding:12px;margin:12px 0;font-size:13px}
+/* a monitor: sending on the left (it stays put), the device's folders on
+   the right, with a column each for size and date */
+@media (min-width:980px){
+  main{max-width:1500px;padding:24px 40px 56px}
+  .cols{display:grid;grid-template-columns:minmax(300px,380px) minmax(0,1fr);gap:44px;align-items:start}
+  .side{position:sticky;top:20px;max-height:calc(100vh - 40px);overflow:auto;padding:0 6px 6px 0}
+  .side h2:first-child,.main h2:first-child{margin-top:0}
+  .drop{padding:44px 22px}
+  .item{padding:9px 16px}
+  .item .t{font-size:17px}
+  .item .m{display:none}
+  .item .m2{display:block;flex:none;width:110px;text-align:right;font-size:12px;color:var(--mid);text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+  .item .m2.d{width:130px}
+  .item:hover{background:#f3f3f3}
+  .foot{text-align:left}
+}
 </style>
 </head>
 <body>
-<main id="app"></main>
+<main id="app"><noscript><p class="oops">This page needs JavaScript turned on in the browser.</p></noscript></main>
 <div id="toast" class="box toast"></div>
 <script>
+// (a browser that trips on something says so, instead of showing nothing)
+window.onerror=function(msg,src,line){try{var d=document.createElement("div");d.className="oops";
+  d.textContent="This browser couldn't show the page ("+msg+", line "+line+"). Try another browser on this device.";
+  document.getElementById("app").appendChild(d)}catch(e){}};
 (function(){
 "use strict";
 var $=function(s,el){return (el||document).querySelector(s)};
@@ -88,8 +110,14 @@ if(window.STUI_LOGIN){
   return;
 }
 
-// (the QR code's address carried the code: not kept in the address bar)
+// The code: from the QR code's address, kept for this tab and sent with
+// every call (so signing in doesn't depend on the browser keeping a cookie);
+// it isn't left in the address bar.
+var CODE="";
+try{var m=/[?&]k=(\d+)/.exec(location.search);if(m)CODE=m[1];
+  if(CODE)sessionStorage.setItem("stui_k",CODE);else CODE=sessionStorage.getItem("stui_k")||""}catch(e){}
 try{if(location.search)history.replaceState(null,"","/")}catch(e){}
+function signed(u){return CODE?u+(u.indexOf("?")<0?"?":"&")+"k="+CODE:u}
 // ------------------------------------------------------------ the page
 var dir="",info=null,hidden=false;
 var head=h("div",{},[band("ShelfTechUI · Transfer")]);
@@ -104,18 +132,25 @@ var crumbs=h("div",{"class":"crumbs"});
 var tools=h("div",{"class":"tools"},[
   h("button",{onclick:newFolder},["+ New folder"]),
   h("button",{onclick:function(){load(dir)}},["Refresh"]),
+  h("a",{"class":"key",id:"zipall",href:"#",title:"Everything in this folder, as one zip file"},["↓ This folder"]),
   h("button",{id:"hid",onclick:function(){hidden=!hidden;load(dir)}},["Hidden: off"])]);
 var list=h("div",{"class":"box list"});
-app.appendChild(head);app.appendChild(sub);app.appendChild(drop);app.appendChild(queue);
-app.appendChild(h("h2",{"class":"cap",text:"On the e-reader"}));
-app.appendChild(crumbs);app.appendChild(tools);app.appendChild(list);
-app.appendChild(h("div",{"class":"foot",text:"Same Wi-Fi only · it turns itself off on the e-reader"}));
+app.appendChild(head);app.appendChild(sub);
+var foot=h("div",{"class":"foot",text:"Same Wi-Fi only · it turns itself off on the e-reader"});
+app.appendChild(h("div",{"class":"cols"},[
+  h("div",{"class":"side"},[drop,queue]),
+  h("div",{"class":"main"},[h("h2",{"class":"cap",text:"On the e-reader"}),crumbs,tools,list,foot])]));
 
 ["dragenter","dragover"].forEach(function(ev){document.addEventListener(ev,function(e){e.preventDefault();drop.classList.add("over")})});
 ["dragleave","drop"].forEach(function(ev){document.addEventListener(ev,function(e){e.preventDefault();if(ev==="drop"||e.target===document.documentElement)drop.classList.remove("over")})});
 document.addEventListener("drop",function(e){if(e.dataTransfer&&e.dataTransfer.files.length)send(e.dataTransfer.files)});
 
-function api(method,url,cb){var x=new XMLHttpRequest();x.open(method,url);x.onload=function(){var j={};try{j=JSON.parse(x.responseText)}catch(e){}if(x.status===403){location.reload();return}cb(x.status,j)};x.onerror=function(){cb(0,{error:"The e-reader didn't answer. Is Transfer still on?"})};x.send()}
+var bounced=false;
+function api(method,url,cb){var x=new XMLHttpRequest();x.open(method,url);if(CODE)x.setRequestHeader("X-Stui-Code",CODE);x.onload=function(){var j={};try{j=JSON.parse(x.responseText)}catch(e){}
+  if(x.status===403){ // the code changed (Transfer was turned off and on): ask for the new one, once
+    try{sessionStorage.removeItem("stui_k")}catch(e){}
+    if(!bounced){bounced=true;location.href="/"}return}
+  cb(x.status,j)};x.onerror=function(){cb(0,{error:"The e-reader didn't answer. Is Transfer still on?"})};x.send()}
 function q(o){var p=[];for(var k in o)p.push(encodeURIComponent(k)+"="+encodeURIComponent(o[k]));return p.join("&")}
 
 function load(d){
@@ -125,6 +160,8 @@ function load(d){
     $("#dev").textContent=(j.device||"E-reader");
     $("#free").textContent=j.free?size(j.free)+" free":"";
     $("#hid").textContent="Hidden: "+(hidden?"on":"off");
+    $("#zipall").href=signed("/api/zip?"+q({path:dir,hidden:hidden?"1":"0"}));
+    $("#zipall").style.display=(dir==="/"||(!j.folders.length&&!j.files.length))?"none":"";
     crumbs.innerHTML="";
     if(j.wide){
       // the whole device: every folder above this one, from the top
@@ -142,16 +179,19 @@ function load(d){
     if(!j.folders.length&&!j.files.length){list.appendChild(h("div",{"class":"empty",text:"Nothing here yet. Send a book, and it shows up here and on the e-reader."}));return}
     j.folders.forEach(function(f){
       var to=(dir?dir+"/":"")+f.name;
-      list.appendChild(h("div",{"class":"item folder",onclick:function(e){if(e.target.tagName!=="BUTTON")load(to)}},[
+      list.appendChild(h("div",{"class":"item folder",onclick:function(e){if(e.target.tagName!=="BUTTON"&&e.target.tagName!=="A")load(to)}},[
         h("div",{"class":"ic"}),
         h("div",{"class":"what"},[h("div",{"class":"t",text:f.name}),h("div",{"class":"m",text:"Folder"})]),
+        h("div",{"class":"m2",text:"Folder"}),h("div",{"class":"m2 d",text:when(f.mtime)}),
+        h("a",{"class":"key",href:signed("/api/zip?"+q({path:to,hidden:hidden?"1":"0"})),title:"Download this folder as a zip file",onclick:function(e){e.stopPropagation()}},["↓"]),
         h("button",{title:"Delete this folder",onclick:function(){del(to,f.name,true)}},["×"])]))});
     j.files.forEach(function(f){
       var p=(dir?dir+"/":"")+f.name;
       list.appendChild(h("div",{"class":"item"},[
         h("div",{"class":"ic",text:ext(f.name)}),
         h("div",{"class":"what"},[h("div",{"class":"t",text:f.name}),h("div",{"class":"m",text:size(f.size)+" · "+when(f.mtime)})]),
-        h("a",{"class":"key",href:"/api/file?"+q({path:p}),download:f.name,title:"Download"},["↓"]),
+        h("div",{"class":"m2",text:size(f.size)}),h("div",{"class":"m2 d",text:when(f.mtime)}),
+        h("a",{"class":"key",href:signed("/api/file?"+q({path:p})),download:f.name,title:"Download"},["↓"]),
         h("button",{title:"Delete",onclick:function(){del(p,f.name,false)}},["×"])]))});
   });
 }
@@ -179,6 +219,7 @@ function next(){
   busy=true;var job=waiting.shift(),st=$(".st",job.row),bar=$(".bar i",job.row);
   var x=new XMLHttpRequest();
   x.open("POST","/api/upload?"+q({dir:job.to,name:job.f.name}));
+  if(CODE)x.setRequestHeader("X-Stui-Code",CODE);
   x.upload.onprogress=function(e){if(e.lengthComputable){var p=Math.round(e.loaded*100/e.total);bar.style.width=p+"%";st.textContent=p+"% of "+size(e.total)}};
   x.onload=function(){var j={};try{j=JSON.parse(x.responseText)}catch(e){}
     if(x.status===200){bar.style.width="100%";job.row.classList.add("done");st.textContent="On the e-reader";if(job.to===dir)load(dir)}

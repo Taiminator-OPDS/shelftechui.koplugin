@@ -243,6 +243,7 @@ local CATALOGUE = {
         -- Transfer (bos_transfer): a tap opens its page, which turns it on
         -- and shows the QR code; a hold turns it on or off without the page
         id = "transfer", name = _("Transfer"), glyph = UI.GLYPH.upload,
+        available = function() return true end,
         active = function() return require("bos_transfer").isRunning() end,
         home = { tap = function() require("bos_transfer").show() end },
         qs = { tap = function() require("bos_transfer").show() end, closes = true },

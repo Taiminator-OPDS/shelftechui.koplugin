@@ -132,6 +132,86 @@ local function stopOldServer()
     os.remove(OLD_PID_FILE)
 end
 
+-- While Transfer is on, the Wi-Fi is kept awake. An e-reader's Wi-Fi dozes
+-- between page turns to save the battery, and a dozing one can miss the
+-- first knock of a device that hasn't talked to it before (a phone that
+-- just scanned the code), which then says the page can't be reached. So:
+-- power saving off for the Wi-Fi while Transfer is on (back on after), and
+-- a few bytes to the router every few seconds.
+local function wifiName()
+    local name
+    pcall(function()
+        local NetInfo = require("ffi/netinfo")
+        local ni = NetInfo:new()
+        for _i, iface in ipairs(ni:retrieve()) do
+            local n = tostring(iface.name or "")
+            if iface.ipv4 and (iface.wireless or n:match("^wl")) then name = name or n end
+        end
+        ni:free()
+    end)
+    return name
+end
+
+local function gateway()
+    local f = io.open("/proc/net/route", "r")
+    if not f then return nil end
+    local gw
+    for line in f:lines() do
+        local dest, hex = line:match("^%S+%s+(%x+)%s+(%x+)")
+        if dest == "00000000" and hex and hex ~= "00000000" and #hex == 8 then
+            -- (little-endian, as the kernel prints it)
+            gw = string.format("%d.%d.%d.%d", tonumber(hex:sub(7, 8), 16), tonumber(hex:sub(5, 6), 16),
+                tonumber(hex:sub(3, 4), 16), tonumber(hex:sub(1, 2), 16))
+            break
+        end
+    end
+    f:close()
+    return gw
+end
+
+local awake = {}
+local function nudge()
+    if not M.isRunning() then return end
+    pcall(function()
+        awake.gw = awake.gw or gateway()
+        if not awake.gw then return end
+        awake.udp = awake.udp or require("socket").udp()
+        awake.udp:settimeout(0)
+        awake.udp:sendto("stui", awake.gw, 9)
+    end)
+    UIManager:scheduleIn(4, nudge)
+end
+
+local function keepAwake(on)
+    UIManager:unschedule(nudge)
+    if on then
+        awake.gw = nil
+        if Device:isKindle() or Device:isKobo() or Device:isPocketBook() or Device:isCervantes() or Device:isRemarkable() then
+            awake.iface = wifiName()
+            if awake.iface and awake.iface:match("^[%w_%-]+$") then
+                os.execute(string.format("(iw dev %s set power_save off || iwconfig %s power off) >/dev/null 2>&1", awake.iface, awake.iface))
+            end
+        end
+        nudge()
+    else
+        if awake.iface then
+            os.execute(string.format("(iw dev %s set power_save on || iwconfig %s power on) >/dev/null 2>&1", awake.iface, awake.iface))
+            awake.iface = nil
+        end
+        if awake.udp then pcall(function() awake.udp:close() end) awake.udp = nil end
+    end
+end
+
+--- The Wi-Fi network's name, when the device tells (nil otherwise).
+function M.network()
+    local name
+    pcall(function()
+        local net = require("ui/network/manager"):getCurrentNetwork()
+        if type(net) == "table" and type(net.ssid) == "string" and net.ssid ~= "" then name = net.ssid end
+    end)
+    return name
+end
+
 local stop_at
 local function autoStopCheck()
     if not M.isRunning() or not stop_at then return end
@@ -222,6 +302,7 @@ function M.start()
         return false, T(_("Transfer couldn't start: %1"), tostring(why))
     end
     firewall(true)
+    keepAwake(true)
     M.status = nil
     armAutoStop()
     logger.info("ShelfTechUI: transfer on port", M.port(), "for", folder)
@@ -234,6 +315,7 @@ function M.stop(quiet)
     if M.isRunning() then
         Server.stop()
         firewall(false)
+        keepAwake(false)
     end
     code = nil
     M.status = nil
@@ -359,7 +441,10 @@ function M.show()
             if qr_cache.widget then qr_cache.widget:paintTo(bb, qx, qy) end
             Look.label(bb, _("Scan, or type in a browser"), tx, y + S(22), tw, S(20), 10, { color = Look.GRAY })
             Page.wrap(bb, shown, Page.serif(20, true), tx, y + S(48), tw, 3, S(28))
-            Look.label(bb, _("Same Wi-Fi as this device"), tx, y + S(140), tw, S(20), 10, { color = Look.GRAY })
+            -- (the network's name, when the device tells: the phone must be on this one)
+            if qr_cache.net == nil then qr_cache.net = M.network() or false end
+            Look.label(bb, qr_cache.net and T(_("Phone on Wi-Fi: %1"), qr_cache.net) or _("Same Wi-Fi as this device"),
+                tx, y + S(140), tw, S(20), 10, { color = Look.GRAY, keep_case = qr_cache.net and true or nil })
             if M.code() then
                 -- typed in instead of scanning: the browser asks for this
                 Look.label(bb, _("Code"), tx, y + S(170), tw, S(20), 10, { color = Look.GRAY })
@@ -438,6 +523,9 @@ function M.show()
         end,
         on_more = function(self, rect)
             require("bos_ui").openList({
+                { text = _("A phone can't open it?"), callback = function()
+                    UIManager:show(InfoMessage:new{ text = _("When the page opens, this screen says \"Opened from…\". If it never does, the phone isn't reaching this device:\n\n1. The phone must be on the same Wi-Fi as this device (not mobile data, not a guest network).\n2. Turn off any VPN on the phone.\n3. iPhone: use Safari, or allow your browser in Settings › Privacy & Security › Local Network.\n4. Type the address into the browser instead of scanning.\n5. Some routers keep Wi-Fi devices apart (\"client isolation\", \"AP isolation\"): turn that off, or use a computer.") })
+                end },
                 { text = _("About Transfer"), callback = function()
                     UIManager:show(InfoMessage:new{ text = _("Transfer is a small web server inside KOReader, on only while you want it: a browser on the same Wi-Fi can send books, download them and delete them. The page opens in the folder you choose and, while a code is asked for, can go to any folder on the device (and show hidden ones). Nothing goes over the internet. It takes the place of FilebrowserPlus, keeping its folder, port and timer.") })
                 end },
