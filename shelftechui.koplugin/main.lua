@@ -465,6 +465,8 @@ function BookshelfOS:onNetworkConnected()
     UIManager:scheduleIn(10, function() pcall(function() require("bos_update").autoCheck() end) end)
 end
 function BookshelfOS:onNetworkDisconnected() pokeHome() end
+function BookshelfOS:onNetworkConnecting() pokeHome() end
+function BookshelfOS:onNetworkDisconnecting() pokeHome() end
 function BookshelfOS:onCharging() pokeHome() end
 function BookshelfOS:onNotCharging() pokeHome() end
 function BookshelfOS:onUsbPlugIn() pokeHome() end

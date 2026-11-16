@@ -832,7 +832,6 @@ function M.chooseNetwork()
 end
 
 function Menus.wifi(menu, w)
-    local NetworkMgr = require("ui/network/manager")
     local Status = require("bos_status")
     local rows = {}
     -- what Wi-Fi is doing, in words, as it happens (the card stays up to date
@@ -872,14 +871,11 @@ function Menus.wifi(menu, w)
             return ph == "turning_on" or ph == "connecting" or ph == "connected" or ph == "idle"
         end,
         toggle = function()
-            local on = NetworkMgr:isWifiOn()
-            Status.wifiAsked(not on)
+            -- (said at once, done on the next tick: see bos_status.toggleWifi)
+            Status.toggleWifi()
             redraw()
             UIManager:forceRePaint()
-            UIManager:nextTick(function()
-                UIManager:broadcastEvent(Event:new("ToggleWifi"))
-                watch()
-            end)
+            watch()
         end }
     table.insert(rows, check)
     info = InfoRow:new{ width = w, text = status }

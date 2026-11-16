@@ -179,10 +179,10 @@ function TileGrid:onTapTile(_, ges)
     local c = self:tileAt(ges.pos)
     if not c then return false end
     if c.id == "wifi" then
-        -- say where it's going before it gets there
+        -- say where it's going before it gets there (the tap then does that)
         pcall(function()
-            local on = require("ui/network/manager"):isWifiOn()
-            require("bos_status").wifiAsked(not on)
+            local Status = require("bos_status")
+            Status.wifiAsked(not Status.wifiWanted())
         end)
     end
     self:flash(c)

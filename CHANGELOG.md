@@ -2,6 +2,13 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.12.2
+
+- Wi-Fi control (home toolbar and Quick Settings): turning Wi-Fi on no longer freezes the screen on a Kindle or Kobo. It comes back the way it does after sleep: the device joins the network it knows by itself. If it can't join one, a note says to hold the control to choose a network.
+- The Wi-Fi chip and tile always show where Wi-Fi is going (on, connecting, off) and follow it as it changes, including on the home toolbar while it's turning on or off.
+- A second tap while Wi-Fi is still turning on now turns it off again, instead of getting stuck.
+- The network's name is asked for far less often (on a Kindle that lookup can stall while Wi-Fi is busy).
+
 ## 1.12.1
 
 - **Find people.** Hardcover's search now has two keys, Books and People: type a name or a username, and the readers found are listed (the ones you follow already say so). A tap opens a reader's page.

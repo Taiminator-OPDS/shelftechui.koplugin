@@ -34,7 +34,40 @@ local M = {}
 -- Device state (Wi-Fi asked at most every few seconds: it can be slow)
 -- ---------------------------------------------------------------------------
 
-local _net = { t = 0 }
+local function now()
+    local ok, t = pcall(function() return require("socket").gettime() end)
+    return ok and t or os.time()
+end
+
+-- what the device last said about Wi-Fi, and when (t); `ssid_t`: when the
+-- network's name was last asked for (on a Kindle that's a call to the
+-- system's Wi-Fi service, which can stall while it's busy: so rarely)
+local _net = { t = 0, ssid_t = 0 }
+local MAX_AGE, MAX_AGE_BUSY = 4, 0.75
+
+local function readNet(max_age)
+    if now() - _net.t < max_age then return end
+    _net.t = now()
+    local ok = pcall(function()
+        local NM = require("ui/network/manager")
+        local was = _net.connected
+        _net.on = NM:isWifiOn() and true or false
+        _net.connected = _net.on and NM:isConnected() and true or false
+        if not _net.connected then
+            _net.ssid = nil
+        elseif NM.lease_ssid then
+            -- (what KOReader learnt when it joined: costs nothing)
+            _net.ssid = NM.lease_ssid
+        elseif not was or not _net.ssid and now() - _net.ssid_t > 30 then
+            _net.ssid_t = now()
+            local nw = NM:getCurrentNetwork()
+            _net.ssid = type(nw) == "table" and nw.ssid or nil
+        end
+    end)
+    if not ok then _net.on, _net.connected, _net.ssid = false, false, nil end
+end
+
+local _want = nil -- { on = bool, at = time, acted = bool } (below)
 
 function M.state()
     local st = {}
@@ -53,21 +86,8 @@ function M.state()
         end)
     end
     if Device:hasWifiToggle() or Device:isEmulator() then
-        local now = os.time()
-        if now - _net.t >= 4 then
-            _net.t = now
-            local ok = pcall(function()
-                local NM = require("ui/network/manager")
-                _net.on = NM:isWifiOn() and true or false
-                _net.connected = _net.on and NM:isConnected() and true or false
-                _net.ssid = nil
-                if _net.connected then
-                    local nw = NM:getCurrentNetwork()
-                    _net.ssid = type(nw) == "table" and nw.ssid or NM.lease_ssid
-                end
-            end)
-            if not ok then _net.on, _net.connected = false, false end
-        end
+        -- (looked at more often while it's in between)
+        readNet(_want and MAX_AGE_BUSY or MAX_AGE)
         st.wifi_shown = true
         st.wifi_on, st.connected, st.ssid = _net.on, _net.connected, _net.ssid
     end
@@ -80,22 +100,19 @@ function M.invalidate() _net.t = 0 end
 -- few more, and until it's done the device only says "on, not connected".
 -- So what was asked for is remembered for a while, and shown as it happens
 -- (as a phone does): Turning on… → Connecting… → the network's name.
-local _want = nil -- { on = bool, at = time }
 local SETTLE = 40
 
 --- Wi-Fi was just asked to go on (true) or off (false).
 function M.wifiAsked(on)
     _want = { on = on and true or false, at = os.time() }
     _net.t = 0
+    M.watchHome()
 end
 
 --- "off" | "turning_on" | "connecting" | "connected" | "idle" (on, not
 --- connected, nothing asked) | "turning_off", and the network's name.
 function M.wifiPhase()
     if _want and os.time() - _want.at > SETTLE then _want = nil end
-    -- asked afresh only while it's in between (asking can be slow on a
-    -- Kindle; otherwise what was learnt in the last few seconds will do)
-    if _want then _net.t = 0 end
     local st = M.state()
     if _want then
         if _want.on then
@@ -116,16 +133,75 @@ function M.wifiBusy()
     return ph == "turning_on" or ph == "connecting" or ph == "turning_off"
 end
 
---- The phase in words.
-function M.wifiText()
-    local _ = require("gettext")
-    local ph, ssid = M.wifiPhase()
-    if ph == "off" then return _("Off") end
-    if ph == "turning_on" then return _("Turning on…") end
-    if ph == "connecting" then return _("Connecting…") end
-    if ph == "turning_off" then return _("Turning off…") end
-    if ph == "connected" then return ssid or _("Connected") end
-    return _("Not connected")
+--- Whether Wi-Fi is on, or on its way there (what a switch for it shows).
+function M.wifiWanted()
+    local ph = M.wifiPhase()
+    return ph ~= "off" and ph ~= "turning_off"
+end
+
+--- Turn Wi-Fi on (true), off (false), or the other way from what it shows
+--- (nil). Says so at once (wifiAsked) and does it on the next tick.
+---
+--- On a Kindle or a Kobo, on goes the way KOReader brings Wi-Fi back after a
+--- sleep: the radio is switched on and the device joins the network it
+--- knows by itself, while KOReader watches for the connection in the
+--- background. (KOReader's own toggle scans for networks first, and the
+--- scan holds the screen still for several seconds on a Kindle.) If no
+--- network is joined, Wi-Fi goes off again after a while and a note says
+--- to hold the control to choose one.
+function M.toggleWifi(on)
+    if on == nil then
+        -- (a tile asks first, to be drawn the new way before it acts)
+        if _want and not _want.acted and os.time() - _want.at <= 3 then on = _want.on
+        else on = not M.wifiWanted() end
+    end
+    if not (_want and not _want.acted and _want.on == on) then M.wifiAsked(on) end
+    if _want then _want.acted = true end
+    local UIManager = require("ui/uimanager")
+    UIManager:nextTick(function()
+        local ok, err = pcall(function()
+            local NM = require("ui/network/manager")
+            local Event = require("ui/event")
+            if on then
+                if NM:isWifiOn() and NM:isConnected() then return end
+                if Device:hasWifiRestore() and NM.restoreWifiAsync and NM.scheduleConnectivityCheck
+                        and not NM.pending_connection then
+                    UIManager:broadcastEvent(Event:new("NetworkConnecting"))
+                    NM:restoreWifiAsync()
+                    if NM.pending_connectivity_check then NM:unscheduleConnectivityCheck() end
+                    NM:scheduleConnectivityCheck()
+                    M.noteIfNotJoined()
+                elseif not NM:isWifiOn() then
+                    UIManager:broadcastEvent(Event:new("ToggleWifi"))
+                end
+            else
+                -- (also while it's still coming on: that's stopped)
+                if not (NM:isWifiOn() or NM.pending_connectivity_check or NM.pending_connection) then return end
+                if NM.disableWifi then NM:disableWifi(nil, true)
+                else UIManager:broadcastEvent(Event:new("ToggleWifi")) end
+            end
+        end)
+        if not ok then
+            require("logger").warn("ShelfTechUI: Wi-Fi toggle:", err)
+            _want = nil
+            M.invalidate()
+        end
+    end)
+end
+
+--- Once Wi-Fi was turned on the quick way: if no network was joined after
+--- a while, say how to choose one.
+function M.noteIfNotJoined()
+    local UIManager = require("ui/uimanager")
+    UIManager:scheduleIn(30, function()
+        M.invalidate()
+        local st = M.state()
+        if st.connected or (_want and not _want.on) then return end
+        pcall(function()
+            require("ui/widget/notification"):notify(
+                require("gettext")("Wi-Fi didn't join a network: hold the Wi-Fi control to choose one."))
+        end)
+    end)
 end
 
 --- Call `fn` each time the phase changes, every second while Wi-Fi is in
@@ -149,6 +225,15 @@ function M.watchWifi(fn, alive)
     end
     UIManager:scheduleIn(0.5, tick)
     return function() stopped = true UIManager:unschedule(tick) end
+end
+
+--- Home's toolbar follows Wi-Fi while it's in between (one watcher at a time).
+local _home_stop
+function M.watchHome()
+    if _home_stop then _home_stop() end
+    _home_stop = M.watchWifi(function()
+        pcall(function() require("bos_home").sync() end)
+    end)
 end
 
 --- What the Wi-Fi tile says under its name, as Android does: the network

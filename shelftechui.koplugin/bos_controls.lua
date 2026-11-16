@@ -36,13 +36,7 @@ end
 local function wifiOn()
     -- (while it's turning on or off: where it's going, so the chip or tile
     -- answers the tap at once)
-    local okS, busy, ph = pcall(function()
-        local Status = require("bos_status")
-        if Status.wifiBusy() then return true, Status.wifiPhase() end
-        return false
-    end)
-    if okS and busy then return ph ~= "turning_off" end
-    local ok, on = pcall(function() return require("ui/network/manager"):isWifiOn() end)
+    local ok, on = pcall(function() return require("bos_status").wifiWanted() end)
     return ok and on
 end
 
@@ -90,7 +84,7 @@ local CATALOGUE = {
         available = function() return Device:hasWifiToggle() end,
         active = wifiOn, slow = true,
         home = { menu = "wifi" },
-        qs = { tap = event("ToggleWifi"),
+        qs = { tap = function() require("bos_status").toggleWifi() end,
                sub = function() return require("bos_status").wifiLine() end },
         hold = { home = networks, qs = networks, name_home = _("choose a network"), name_qs = _("choose a network") },
         says = { home = _("On/off, the network you're on, and other networks, in a menu under the chip."),
