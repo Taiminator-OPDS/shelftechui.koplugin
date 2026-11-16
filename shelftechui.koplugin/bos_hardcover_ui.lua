@@ -329,7 +329,17 @@ function App:load(tab, force)
             if self.tab == tab then self:refresh("ui") end
         end, force)
     elseif tab == "popular" then HC.trending(got)
-    elseif tab == "search" then HC.search(self.query or "", got)
+    elseif tab == "search" then
+        if self.search_kind == "people" then
+            HC.searchPeople(self.query or "", function(list, why)
+                self.loading[tab] = nil
+                if self.closed then return end
+                if list then list.people = true self.data[tab] = list else self.err[tab] = why end
+                if self.tab == tab then self:refresh("ui") end
+            end)
+        else
+            HC.search(self.query or "", got)
+        end
     else
         for _i, t in ipairs(TABS) do if t.key == tab then HC.shelf(t.status, got) end end
     end
@@ -356,21 +366,23 @@ end
 function App:search()
     local InputDialog = require("ui/widget/inputdialog")
     local dlg
+    local function go(kind)
+        local q = dlg:getInputText()
+        UIManager:close(dlg)
+        if q and q:match("%S") then
+            self.query, self.search_kind = q, kind
+            self.data.search, self.pg.search = nil, 1
+            self:pick("search")
+        end
+    end
     dlg = InputDialog:new{
         title = _("Search Hardcover"),
         input = self.query or "",
-        input_hint = _("A title or an author"),
+        input_hint = _("A title or an author; or a reader's name"),
         buttons = { {
             { text = _("Cancel"), id = "close", callback = function() UIManager:close(dlg) end },
-            { text = _("Search"), is_enter_default = true, callback = function()
-                local q = dlg:getInputText()
-                UIManager:close(dlg)
-                if q and q:match("%S") then
-                    self.query = q
-                    self.data.search, self.pg.search = nil, 1
-                    self:pick("search")
-                end
-            end },
+            { text = _("People"), callback = function() go("people") end },
+            { text = _("Books"), is_enter_default = true, callback = function() go("books") end },
         } },
     }
     UIManager:show(dlg)
@@ -440,7 +452,8 @@ function App:body(bb, y, w)
             want = _("Nothing on your Want to read shelf. Find a book in Popular or Search and add it."),
             read = _("Nothing on your Read shelf yet."),
             popular = _("Nothing to show just now."),
-            search = T(_("Nothing found for “%1”."), self.query or ""),
+            search = self.search_kind == "people" and T(_("No reader found for “%1”. Try their username."), self.query or "")
+                or T(_("Nothing found for “%1”."), self.query or ""),
         }
         Page.wrap(bb, empty[self.tab] or "", Look.serif(17, false, true), x, y + S(10), w, 5, S(26), Look.GRAY)
         self.pages = 1
@@ -448,7 +461,28 @@ function App:body(bb, y, w)
     end
 
     local pages
-    if self.tab == "friends" then
+    if self.tab == "search" and list.people then
+        -- readers found: a row each; a tap opens their page (to follow them)
+        local rh = S(64)
+        local per = math.max(1, math.floor((bottom - y) / rh))
+        pages = math.max(1, math.ceil(#list / per))
+        local cur = math.max(1, math.min(pages, self.pg[self.tab] or 1))
+        self.pg[self.tab] = cur
+        for k = 1, per do
+            local who = list[(cur - 1) * per + k]
+            if not who then break end
+            local ry = y + (k - 1) * rh
+            Page.wrap(bb, who.name or who.username or "?", tface(16, true), x, ry, w - S(150), 1, S(24))
+            local facts = { "@" .. tostring(who.username or "") }
+            if who.books then facts[#facts + 1] = T(_("%1 books"), count(who.books)) end
+            if who.followers then facts[#facts + 1] = T(_("%1 followers"), count(who.followers)) end
+            Look.label(bb, table.concat(facts, "  ·  "), x, ry + S(26), w - S(150), S(18), 9, { color = Look.GRAY, keep_case = true })
+            if HC.isFollowing(who.id) then Look.label(bb, _("Following"), x + w - S(140), ry + S(8), S(116), S(24), 9, { align = "right" }) end
+            Look.label(bb, "\u{203A}", x + w - S(20), ry + S(4), S(20), S(30), 16, { align = "right" })
+            if k < per and list[(cur - 1) * per + k + 1] then bb:paintRect(x, ry + rh - S(8), w, 1, Look.LIGHT) end
+            self:hit(Geom:new{ x = x, y = ry - S(4), w = w, h = rh - S(6) }, function() M.openProfile(who) end)
+        end
+    elseif self.tab == "friends" then
         -- one row a reader, those reading now first: the cover of what
         -- they're on, their name, the book and how far along they are
         local rh = S(100)
@@ -586,12 +620,39 @@ function M.openProfile(who)
             -- [FIGURES ›]: their reading in numbers
             local rs = Look.button(bb, x + w - S(140) - Look.SHADOW_SMALL, y - S(52), S(140), S(40), _("Insights") .. "  \u{203A}", { size = 12 })
             self:hit(rs, function() require("bos_insights_app").open({ id = u.id, name = u.name or u.username }) end)
+            -- [FOLLOW] / [✓ FOLLOWING] (a tap on Following stops)
+            local following = HC.isFollowing(u.id)
+            local fl = o.following_busy and _("…") or (following and ("\u{2713} " .. _("Following")) or _("Follow"))
+            local rf = Look.button(bb, x + w - S(140) - Look.SHADOW_SMALL, y - S(52) + S(40) + Look.SHADOW_SMALL + S(8), S(140), S(36), fl,
+                { size = 11, on = not following and not o.following_busy })
+            self:hit(rf, function()
+                if o.following_busy then return end
+                local function send(on)
+                    o.following_busy = true
+                    self:refresh("ui")
+                    HC.follow(u.id, on, function(ok, why)
+                        o.following_busy = nil
+                        if ok then notify(on and T(_("Following %1"), u.name or u.username) or T(_("No longer following %1"), u.name or u.username))
+                        else notify(why or _("Hardcover didn't take that.")) end
+                        if M.app and not M.app.closed then M.app.data.friends = nil M.app:load(M.app.tab) M.app:refresh("ui") end
+                        if not self.closed then self:refresh("ui") end
+                    end)
+                end
+                if not following then return send(true) end
+                local ButtonDialog = require("ui/widget/buttondialog")
+                local dlg
+                dlg = ButtonDialog:new{ title = T(_("Stop following %1?"), u.name or u.username), title_align = "center",
+                    buttons = { { { text = _("Cancel"), callback = function() UIManager:close(dlg) end },
+                        { text = _("Stop following"), callback = function() UIManager:close(dlg) send(false) end } } } }
+                UIManager:show(dlg)
+            end)
             local facts = {}
             if u.books then facts[#facts + 1] = T(_("%1 books"), count(u.books)) end
             if u.want then facts[#facts + 1] = T(_("%1 to read"), count(u.want)) end
             if u.followers then facts[#facts + 1] = T(_("%1 followers"), count(u.followers)) end
-            if #facts > 0 then Look.label(bb, table.concat(facts, "  ·  "), x, y, w, S(20), 10) y = y + S(26) end
-            if u.bio then y = y + Page.wrap(bb, u.bio, Look.serif(13, false, true), x, y, w, 2, S(20), Look.GRAY) + S(6) end
+            if #facts > 0 then Look.label(bb, table.concat(facts, "  ·  "), x, y, w - S(160), S(20), 10) y = y + S(26) end
+            if u.bio then y = y + Page.wrap(bb, u.bio, Look.serif(13, false, true), x, y, w - S(160), 2, S(20), Look.GRAY) + S(6) end
+            y = math.max(y, self.pad + S(118))
             y = y + S(8)
             if o.err and not o.full then
                 Page.wrap(bb, o.err, Look.serif(15, false, true), x, y, w, 3, S(23), Look.GRAY)
@@ -815,6 +876,36 @@ local function drawBook(host, bb, x, y, w, bottom, o)
         if mine.rating then
             Look.label(bb, (string.format("%.1f", mine.rating):gsub("%.0$", "")), x + S(120) + 5 * S(28) + S(8), y, S(60), S(30), 11)
         end
+        -- [REMOVE]: off your shelves altogether (added by mistake)
+        local rw = S(96)
+        local rr = Look.button(bb, x + w - rw - Look.SHADOW_SMALL, y - S(1), rw, S(30), o.removing and _("…") or _("Remove"), { size = 10 })
+        hit(rr, function()
+            if o.removing then return end
+            local ButtonDialog = require("ui/widget/buttondialog")
+            local dlg
+            dlg = ButtonDialog:new{
+                title = T(_("Take “%1” off your Hardcover shelves?\nYour rating, dates and progress for it there go too. The book on this device isn't touched."), b.title or ""),
+                title_align = "center",
+                buttons = { { { text = _("Cancel"), callback = function() UIManager:close(dlg) end },
+                    { text = _("Remove"), callback = function()
+                        UIManager:close(dlg)
+                        o.removing = true
+                        host:redraw()
+                        HC.removeBook(mine.id, b.id, function(ok, why)
+                            o.removing = nil
+                            if ok then
+                                b.mine = nil
+                                if o.book ~= b then o.book.mine = nil end
+                                notify(_("Hardcover: removed from your shelves"))
+                                if o.on_change then o.on_change(b) end
+                            else
+                                notify(why or _("Hardcover didn't take that."))
+                            end
+                            host:redraw()
+                        end)
+                    end } } } }
+            UIManager:show(dlg)
+        end)
         y = y + S(40)
     end
     -- the readers you follow who have it: "Ana 42%  ·  Tomás ★ 5" (a tap on

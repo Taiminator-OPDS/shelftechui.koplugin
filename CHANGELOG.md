@@ -2,6 +2,12 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.12.1
+
+- **Find people.** Hardcover's search now has two keys, Books and People: type a name or a username, and the readers found are listed (the ones you follow already say so). A tap opens a reader's page.
+- **Follow and unfollow.** A reader's page has a Follow key; on someone you follow it reads "✓ Following", and a tap (asked first) stops. The friends list, home's badges and the start-menu card follow suit. A key made before this version can read who you follow but not change it: sign out and in again with a new key (the link now asks for that permission).
+- **Remove a book from your shelves.** A book's Hardcover page has a Remove key beside your rating, for one that got there by mistake: it's taken off your Hardcover shelves altogether, with your rating, dates and progress for it (asked first; the book on the device isn't touched). Reading it afterwards doesn't put it back: only choosing a shelf for it again does.
+
 ## 1.12.0
 
 Hardcover becomes a social hub, and the book window loses most of its tabs.

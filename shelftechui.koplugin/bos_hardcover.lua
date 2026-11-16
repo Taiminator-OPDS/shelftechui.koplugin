@@ -54,7 +54,7 @@ local _ = require("gettext")
 local M = { link = {} }
 
 local API = "https://api.hardcover.app"
-local SCOPES = "read:me:content read:catalog read:library read:journal read:social read:users read:goals write:library"
+local SCOPES = "read:me:content read:catalog read:library read:journal read:social read:users read:goals write:library write:social"
 M.KEY_URL = "https://hardcover.app/account/api/keys/new?scope=" .. SCOPES:gsub(" ", "+")
 
 -- ---------------------------------------------------------------- what's kept
@@ -857,6 +857,90 @@ function M.recommendNow(have, norm_title)
     return out
 end
 
+--- Readers by name: { { id, username, name, books, followers } }.
+function M.searchPeople(q, cb)
+    q = tostring(q or ""):gsub("^%s+", ""):gsub("%s+$", ""):gsub("^@", "")
+    if q == "" then return cb({}) end
+    local key = "people:" .. q:lower()
+    local hit = cached(key, 600)
+    if hit then return cb(hit) end
+    call([[query ($q: String!) { search(query: $q, query_type: "User", per_page: 20, page: 1) { ids } }]], { q = q }, function(data, why)
+        if not data then return cb(nil, why) end
+        cb(remember(key, data))
+    end, function(data, token)
+        local ids = idList(data.search and data.search.ids, 20)
+        if #ids == 0 then return {} end
+        local res, why = graphql(token, "query ($ids: [Int!]) { users(where: {id: {_in: $ids}}) { id username name books_count followers_count } }", { ids = ids })
+        if not res then return nil, why end
+        local by = {}
+        for _i, u in ipairs(res.users or {}) do
+            local who = userOf(u)
+            if who then who.books, who.followers = u.books_count, u.followers_count by[u.id] = who end
+        end
+        local out, me = {}, uid()
+        for _i, id in ipairs(ids) do if by[id] and id ~= me then out[#out + 1] = by[id] end end
+        return out
+    end)
+end
+
+--- Do you follow this reader (from what's kept)?
+function M.isFollowing(user_id)
+    for _i, p in ipairs(M.socialCached().people or {}) do if p.id == user_id then return true end end
+    return false
+end
+
+--- Follow a reader, or stop. cb(true) once Hardcover has it (the friends
+--- list is asked for again).
+function M.follow(user_id, on, cb)
+    cb = cb or function() end
+    local q = on and "mutation ($id: Int!) { insert_followed_user(user_id: $id) { error id } }"
+        or "mutation ($id: Int!) { delete_followed_user(user_id: $id) { error id } }"
+    call(q, { id = user_id }, function(ok, why)
+        if not ok then
+            -- (a key made before 1.12.1 can read who you follow, not change it)
+            if why == WHY.scope then why = _("This key can't follow or unfollow. Make a new one (Hardcover → ⋯ → Sign out, then sign in): the link now asks for that permission.") end
+            return cb(nil, why)
+        end
+        if not on then
+            -- gone from what's kept at once (the list is asked for again below)
+            local soc = M.socialCached()
+            for i = #(soc.people or {}), 1, -1 do if soc.people[i].id == user_id then table.remove(soc.people, i) end end
+            M.social_gen = (M.social_gen or 0) + 1
+        end
+        M.social(function() cb(true) end, true)
+    end, function(data)
+        local r = data.insert_followed_user or data.delete_followed_user
+        if not r or r.error then return nil, "refused" end
+        return true
+    end)
+end
+
+--- Take a book off your Hardcover shelves altogether (your rating, dates
+--- and progress for it go too). cb(true).
+function M.removeBook(user_book_id, book_id, cb)
+    cb = cb or function() end
+    call("mutation ($id: Int!) { delete_user_book(id: $id) { id } }", { id = user_book_id }, function(ok, why)
+        if not ok then return cb(nil, why) end
+        M.forget("shelf") M.forget("stats")
+        if book_id then M.forget("book" .. book_id) end
+        -- a file linked to it stays linked (it's still that book), without
+        -- its place on a shelf; reading it won't put it back by itself
+        local links, changed = get("links", {}), false
+        for _file, link in pairs(links) do
+            if link.entry == user_book_id or (book_id and link.id == book_id) then
+                link.entry, link.read_id, link.sent = nil, nil, nil
+                link.status, link.removed = 0, true
+                changed = true
+            end
+        end
+        if changed then set("links", links) M.links_gen = (M.links_gen or 0) + 1 end
+        cb(true)
+    end, function(data)
+        if not data.delete_user_book then return nil, "refused" end
+        return true
+    end)
+end
+
 -- ---------------------------------------------------------------- writing
 
 --- Put a book on a shelf (or move it). cb(entry).
@@ -866,6 +950,15 @@ function M.setStatus(book_id, status, cb)
     }]], { o = { book_id = book_id, status_id = status } }, function(data, why)
         if not data then return (cb or function() end)(nil, why) end
         M.forget("shelf") M.forget("book" .. book_id)
+        -- (chosen on purpose: a file of it follows your reading again)
+        local links, changed = get("links", {}), false
+        for _file, link in pairs(links) do
+            if link.id == book_id and link.removed then
+                link.removed, link.entry, link.status = nil, data.id, data.status
+                changed = true
+            end
+        end
+        if changed then set("links", links) M.links_gen = (M.links_gen or 0) + 1 end
         if cb then cb(data) end
     end, function(data)
         local r = data.insert_user_book
@@ -994,7 +1087,9 @@ end
 --- The status of a linked book, now or when next connected.
 function M.status(file, status)
     local link = M.linkFor(file)
-    if not link or link.status == status then return end
+    -- (a book you took off your shelves isn't put back by reading it: only
+    -- by choosing a shelf for it again)
+    if not link or link.status == status or link.removed then return end
     queue("status", file, status)
     M.flush()
 end
@@ -1002,7 +1097,7 @@ end
 --- Where you are in a linked book (0..1), now or when next connected.
 function M.progress(file, percent)
     local link = M.linkFor(file)
-    if not link or not percent then return end
+    if not link or not percent or link.removed then return end
     if link.sent and math.abs(link.sent - percent) < 0.01 then return end
     queue("progress", file, percent)
     M.flush()
