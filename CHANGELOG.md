@@ -2,6 +2,14 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.13.0
+
+- Hardcover in your library: books on your Hardcover Reading and Want to read shelves that aren't on this device stand at the end of Home, faded, with a small GET. Tap one to open it in the store, where the libraries are searched for it. Hold it to see its Hardcover page.
+- Once the book is on the device (from the store, Transfer, anywhere), the faded one goes. It also goes when you take the book off your Hardcover shelves.
+- Settings → Hardcover → "On Home, your books not on this device": Reading and Want to read (default), Reading only, or None.
+- A shelf of them alone can be made from the shelf editor ("Hardcover: not on this device").
+- Nothing waits on the network: your shelves are kept on the device and fetched again in the background over Wi-Fi.
+
 ## 1.12.2
 
 - Wi-Fi control (home toolbar and Quick Settings): turning Wi-Fi on no longer freezes the screen on a Kindle or Kobo. It comes back the way it does after sleep: the device joins the network it knows by itself. If it can't join one, a note says to hold the control to choose a network.

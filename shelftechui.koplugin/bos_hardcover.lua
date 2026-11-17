@@ -369,6 +369,7 @@ function M.signOut()
     end
     for _i, k in ipairs({ "token", "refresh", "expires", "user", "client_used", "queue" }) do set(k, nil) end
     M.cache = {}
+    M.mineClear()
 end
 
 -- ---------------------------------------------------------------- reading
@@ -517,6 +518,86 @@ function M.socialTouch(done)
     if not M.signedIn() or not connected() then return end
     if os.time() - (M.socialCached().at or 0) < 900 or social_waiting then return end
     M.social(function() if done then pcall(done) end end)
+end
+
+-- Your own Reading and Want to read shelves, kept on the device the same way
+-- (home's library shows the ones that aren't on this device: never waits on
+-- the network for them).
+local mine_mem
+--- { at, books = { { book fields…, status = 1|2 } } } as last fetched.
+function M.mineCached()
+    if not mine_mem then
+        local v = socialStore():readSetting("mine")
+        mine_mem = type(v) == "table" and v or { at = 0, books = {} }
+    end
+    return mine_mem
+end
+
+--- (signed out: another account's shelves aren't kept)
+function M.mineClear()
+    mine_mem = { at = 0, books = {} }
+    socialStore():saveSetting("mine", mine_mem)
+    socialStore():flush()
+    M.mine_gen = (M.mine_gen or 0) + 1
+end
+
+local mine_waiting
+--- Fetch your Reading and Want to read shelves again; cb(mine) when done.
+function M.mine(cb, force)
+    cb = cb or function() end
+    local kept = M.mineCached()
+    if not M.signedIn() then return cb({ at = 0, books = {} }) end
+    if not force and os.time() - (kept.at or 0) < 900 then return cb(kept) end
+    if not connected() then return cb(kept, say("offline")) end
+    if mine_waiting then mine_waiting[#mine_waiting + 1] = cb return end
+    mine_waiting = { cb }
+    call([[query ($u: Int!) {
+      user_books(where: {user_id: {_eq: $u}, status_id: {_in: [1, 2]}}, order_by: {updated_at: desc_nulls_last}, limit: 120) {
+        id status_id updated_at
+        book { ]] .. BOOK .. [[ }
+      }
+    }]], { u = uid() }, function(data, why)
+        local list = mine_waiting or {}
+        mine_waiting = nil
+        if data then
+            mine_mem = data
+            socialStore():saveSetting("mine", data)
+            socialStore():flush()
+            M.mine_gen = (M.mine_gen or 0) + 1
+        end
+        for _i, f in ipairs(list) do pcall(f, data or kept, why) end
+    end, function(data)
+        local out = { at = os.time(), books = {} }
+        for _i, ub in ipairs(data.user_books or {}) do
+            local b = bookOf(ub.book)
+            if b then
+                b.description = nil -- (not needed here: keeps the file small)
+                b.status, b.entry = ub.status_id, ub.id
+                out.books[#out.books + 1] = b
+            end
+        end
+        return out
+    end)
+end
+
+--- Fetch it again in the background when it's old and Wi-Fi is on.
+function M.mineTouch(done)
+    if not M.signedIn() or not connected() or mine_waiting then return end
+    if os.time() - (M.mineCached().at or 0) < 900 then return end
+    M.mine(function() if done then pcall(done) end end)
+end
+
+--- A book left your shelves (or moved): forget it at once, fetch again soon.
+local function mineChanged(book_id, status)
+    local m = M.mineCached()
+    for i = #m.books, 1, -1 do
+        local b = m.books[i]
+        if b.id == book_id then
+            if status == 1 or status == 2 then b.status = status else table.remove(m.books, i) end
+        end
+    end
+    m.at = 0
+    M.mine_gen = (M.mine_gen or 0) + 1
 end
 
 -- A title, as it's compared (the same book in two catalogues).
@@ -934,6 +1015,7 @@ function M.removeBook(user_book_id, book_id, cb)
             end
         end
         if changed then set("links", links) M.links_gen = (M.links_gen or 0) + 1 end
+        if book_id then mineChanged(book_id) end
         cb(true)
     end, function(data)
         if not data.delete_user_book then return nil, "refused" end
@@ -959,6 +1041,7 @@ function M.setStatus(book_id, status, cb)
             end
         end
         if changed then set("links", links) M.links_gen = (M.links_gen or 0) + 1 end
+        mineChanged(book_id, status)
         if cb then cb(data) end
     end, function(data)
         local r = data.insert_user_book

@@ -1288,6 +1288,13 @@ function M.settings()
                 HC.links_gen = (HC.links_gen or 0) + 1
                 pcall(function() require("bos_home").refresh() end)
                 M.settings() end },
+            { text = T(_("On Home, your books not on this device: %1"),
+                ({ reading_want = _("Reading and Want to read"), reading = _("Reading"), off = _("None") })[HC.get("library_ghosts", "reading_want")] or _("None")),
+                callback = function()
+                    local nxt = { reading_want = "reading", reading = "off", off = "reading_want" }
+                    HC.set("library_ghosts", nxt[HC.get("library_ghosts", "reading_want")] or "reading_want")
+                    pcall(function() require("bos_home").refresh() end)
+                    M.settings() end },
             { text = T(_("Hardcover in a book's window: %1"), HC.get("tab_hidden") and _("No") or _("Yes")), callback = function()
                 HC.set("tab_hidden", not HC.get("tab_hidden") and true or nil) M.settings() end },
             { text = _("Send this device's reading history…"), callback = function() M.sendHistory() end },
