@@ -22,8 +22,14 @@ say "start: ${KO_DIR} ${FLAGS}"
 # 1. KOReader closes, and its launcher finishes (which lets USB drive mode run)
 i=0
 while pidof reader.lua >/dev/null 2>&1 && [ "${i}" -lt 60 ]; do sleep 1; i=$((i + 1)); done
+# (not the whole of its launcher's tidying up, which can restart the Kindle's
+# interface and take half a minute: only until volumd runs again)
+volumd_held() {
+    p="$(pidof volumd 2>/dev/null | cut -d' ' -f1)"
+    [ -n "${p}" ] && grep -q "^State:.*T" "/proc/${p}/status" 2>/dev/null
+}
 i=0
-while ps w 2>/dev/null | grep -v grep | grep -q "/var/tmp/koreader.sh" && [ "${i}" -lt 60 ]; do sleep 1; i=$((i + 1)); done
+while volumd_held && [ "${i}" -lt 60 ]; do sleep 1; i=$((i + 1)); done
 say "KOReader closed"
 
 # 2. The computer takes the drive: KOReader's folder goes away.
@@ -42,22 +48,24 @@ gone_within() {
     while [ -e "${KO_DIR}/reader.lua" ] && [ "${n}" -lt "${1}" ]; do sleep 1; n=$((n + 1)); done
     [ ! -e "${KO_DIR}/reader.lua" ]
 }
-if ! gone_within 4 && plugged_ok; then
+if ! gone_within 1 && plugged_ok; then
     say "volumd: $(lipc-probe -v com.lab126.volumd 2>&1 | tr '\n' ' ' | cut -c1-600)"
     say "try 1: plug-in event"
     lipc-send-event com.lab126.hal usbPlugOut >>"${LOG}" 2>&1
     sleep 1
     lipc-send-event com.lab126.hal usbPlugIn >>"${LOG}" 2>&1
-    if ! gone_within 8; then
+    if gone_within 3; then
+        say "  that did it"
+    else
         say "try 2: USB link off and on"
         for sc in /sys/class/udc/*/soft_connect; do
             [ -w "${sc}" ] || continue
             echo disconnect >"${sc}" 2>>"${LOG}"
-            sleep 2
+            sleep 1
             echo connect >"${sc}" 2>>"${LOG}"
             say "  ${sc}"
         done
-        gone_within 8 || say "not yet: a replug will do it"
+        if gone_within 4; then say "  that did it"; else say "not yet: a replug will do it"; fi
     fi
 fi
 i=0
