@@ -2,6 +2,14 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.17.1
+
+- Opening and closing a book no longer waits for KOReader's progress sync (KOSync). It asked its server for your place as a book opened and sent it as the book closed, and the screen (the reading toolbar included) waited for the answer: about 2 s each time on a Paperwhite, sometimes 7 s. Now that's done in the background and the answer used when it comes. Settings → Reading → Progress sync in the background.
+- Home tidies up after a book a few seconds later, not just as the book comes up (it held the first moments of reading up by about half a second).
+- USB drive: the question comes as soon as the computer is seen (from 0.4 s; it was 1.5 s), and a wall charger still doesn't ask.
+- Hardcover: no separate Search tab. Search results, a genre's or a mood's books and Popular open under Explore, with a key back to it.
+- Hardcover: stars no longer overlap. Your rating is drawn at the right size for the screen, halves shown; the rating dialog's stars are spaced.
+
 ## 1.17.0
 
 - Hardcover opens on a dashboard: your reading goal with how you're doing, what you're reading, what your friends are reading, this month's popular books (when there's room) and a line each of genres and moods. Each heading opens its full list.

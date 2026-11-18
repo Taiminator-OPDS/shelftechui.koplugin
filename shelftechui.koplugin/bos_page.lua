@@ -174,20 +174,46 @@ function Page.wrap(bb, text, face, x, y, w, max_lines, line_h, color)
     return h
 end
 
---- Five stars (filled to `rating`); returns their rects (1..5).
+--- Five stars (filled to `rating`, halves too), each in a cell `s` px wide
+--- with a gap between; returns their rects (1..5).
 function Page.stars(bb, x, y, s, rating)
     local TextWidget = require("ui/widget/textwidget")
     local rects = {}
-    local face = Font:getFace("cfont", math.max(8, math.floor(s * 0.9)))
-    for i = 1, 5 do
-        local sx = x + (i - 1) * (s + S(6))
-        local tw = TextWidget:new{ text = (rating and i <= rating) and "\u{2605}" or "\u{2606}", face = face, fgcolor = BLACK }
-        local sz = tw:getSize()
-        tw:paintTo(bb, sx + math.floor((s - sz.w) / 2), y + math.floor((s - sz.h) / 2))
-        tw:free()
-        rects[i] = Geom:new{ x = sx - S(3), y = y - S(6), w = s + S(6), h = s + S(12) }
+    -- (a font's size is in points, scaled for the screen again by getFace:
+    -- `s` is already pixels, so it's turned back into points first, or the
+    -- stars come out bigger than their cells on a sharp screen and overlap)
+    local k = Screen:scaleBySize(100) / 100
+    local face = Font:getFace("cfont", math.max(6, math.floor(s * 0.82 / k)))
+    local gap = math.max(S(4), math.floor(s * 0.25))
+    local function glyph(ch)
+        local tw = TextWidget:new{ text = ch, face = face, fgcolor = BLACK }
+        return tw, tw:getSize()
     end
-    return rects
+    for i = 1, 5 do
+        local sx = x + (i - 1) * (s + gap)
+        local fill = 0
+        if rating then
+            if i <= rating then fill = 1 elseif i - 0.5 <= rating then fill = 0.5 end
+        end
+        if bb then
+            local tw, sz = glyph(fill == 1 and "\u{2605}" or "\u{2606}")
+            local gx, gy = sx + math.floor((s - sz.w) / 2), y + math.floor((s - sz.h) / 2)
+            tw:paintTo(bb, gx, gy)
+            tw:free()
+            if fill == 0.5 then
+                -- the left half filled: a filled star drawn aside, half of it copied
+                local full, fsz = glyph("\u{2605}")
+                local tmp = Blitbuffer.new(fsz.w, fsz.h, bb:getType())
+                tmp:fill(WHITE)
+                full:paintTo(tmp, 0, 0)
+                full:free()
+                bb:blitFrom(tmp, gx, gy, 0, 0, math.floor(fsz.w / 2), fsz.h)
+                tmp:free()
+            end
+        end
+        rects[i] = Geom:new{ x = sx - math.floor(gap / 2), y = y - S(6), w = s + gap, h = s + S(12) }
+    end
+    return rects, 5 * s + 4 * gap
 end
 
 --- Chips, wrapped onto lines; `on` marks selected keys. Returns the rects by

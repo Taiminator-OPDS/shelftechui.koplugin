@@ -47,8 +47,8 @@ local TABS = {
     { key = "read", text = _("Read"), status = 3 },
     { key = "explore", text = _("Explore") },
 }
--- lists reached from a page rather than a tab: shown as one more tab while
--- they're open (the last one looked at)
+-- lists reached from Explore (a genre, a mood, Popular) or the search key:
+-- shown under Explore, with a way back to it
 local VIEWS = { search = true, popular = true, tag = true }
 
 local STATUS_NAME = { [1] = _("Want to read"), [2] = _("Reading"), [3] = _("Read"), [4] = _("Paused"), [5] = _("Did not finish") }
@@ -229,11 +229,14 @@ function App:init()
     self.data, self.err, self.loading, self.pg = {}, {}, {}, {}
     -- (opens on the dashboard; a tab asked for, from elsewhere, opens that)
     self.tab = self.tab or "home"
-    if VIEWS[self.tab] then self.view = self.tab end
     self.signin = { mode = HC.clientId() and "link" or "key" }
     self.draw = function(page, bb, y, w) page:body(bb, y, w) end
     self.on_swipe = function(page, dir)
-        if dir == "west" then page:turn(1) elseif dir == "east" then page:turn(-1) end
+        if dir == "west" then page:turn(1)
+        elseif dir == "east" then
+            -- (on a list of Explore's first page: back to Explore)
+            if VIEWS[page.tab] and (page.pg[page.tab] or 1) <= 1 then page:pick("explore") else page:turn(-1) end
+        end
     end
     self.on_more = function(page, rect) page:more(rect) end
     self.on_close = function(page)
@@ -404,7 +407,6 @@ end
 
 function App:pick(tab)
     self.tab = tab
-    if VIEWS[tab] then self.view = tab end
     self:load(tab)
     self:refresh("ui")
 end
@@ -489,15 +491,10 @@ function App:body(bb, y, w)
     -- tabs (Search joins them once there's been one)
     local cells = {}
     for _i, t in ipairs(TABS) do cells[#cells + 1] = { key = t.key, text = t.text } end
-    -- (a list reached from a page: the last one, as one more tab)
-    if self.view == "search" and self.query then cells[#cells + 1] = { key = "search", text = _("Search") }
-    elseif self.view == "popular" then cells[#cells + 1] = { key = "popular", text = _("Popular") }
-    elseif self.view == "tag" and self.tag_name then
-        local name = self.tag_name
-        if #name > 12 then name = name:sub(1, 11):gsub("[\128-\191]+$", ""):gsub("[\192-\255]$", "") .. "…" end
-        cells[#cells + 1] = { key = "tag", text = name }
-    end
-    local by_key = Look.segments(bb, x, y, w - Look.SHADOW_SMALL, S(38), cells, self.tab, { size = 11, shadow = Look.SHADOW_SMALL })
+    -- (a search's results, a genre's or a mood's books and Popular are
+    -- Explore's: it stays marked)
+    local by_key = Look.segments(bb, x, y, w - Look.SHADOW_SMALL, S(38), cells, VIEWS[self.tab] and "explore" or self.tab,
+        { size = 11, shadow = Look.SHADOW_SMALL })
     for key, r in pairs(by_key) do self:hit(r, function() if self.tab ~= key then self:pick(key) end end) end
     y = y + S(38) + Look.SHADOW_SMALL + S(16)
 
@@ -505,11 +502,21 @@ function App:body(bb, y, w)
     local bottom = H - foot - S(8)
     if self.tab == "home" then self.pages = 1 return self:drawHome(bb, x, y, w, H - S(16)) end
     if self.tab == "explore" then self.pages = 1 return self:drawExplore(bb, x, y, w, H - S(16)) end
-    if self.tab == "tag" then
-        -- what this list is: "Fantasy · genre"
-        Look.label(bb, T(self.tag_key == "mood" and _("%1 · mood · the most read first") or _("%1 · genre · the most read first"), self.tag_name or ""),
-            x, y - S(4), w, S(22), 10, { color = Look.GRAY, keep_case = true })
-        y = y + S(26)
+    if VIEWS[self.tab] then
+        -- ‹ EXPLORE   what this list is ("Fantasy · genre", "“salt” · books")
+        local what
+        if self.tab == "tag" then
+            what = T(self.tag_key == "mood" and _("%1 · mood · the most read first") or _("%1 · genre · the most read first"), self.tag_name or "")
+        elseif self.tab == "search" then
+            what = T(self.search_kind == "people" and _("“%1” · readers") or _("“%1” · books"), self.query or "")
+        else
+            what = _("Popular this month")
+        end
+        local bw = S(120)
+        local rb = Look.button(bb, x, y - S(6), bw, S(34), "\u{2039} " .. _("Explore"), { size = 10 })
+        self:hit(rb, function() self:pick("explore") end)
+        Look.label(bb, what, x + bw + S(16), y - S(6), w - bw - S(16), S(34), 11, { keep_case = true })
+        y = y + S(40)
     end
     local list = self.data[self.tab]
     if not list then
@@ -1020,7 +1027,16 @@ function M.rateDialog(title, current, done)
     local dlg
     local function show()
         if dlg then UIManager:close(dlg) end
-        local stars = value > 0 and (string.rep("\u{2605}", math.floor(value)) .. (value % 1 ~= 0 and "\u{00BD}" or "")) or _("No rating")
+        -- (five places, spaced: in the theme's fonts the stars come from a
+        -- fallback font, wider than a letter, and touching ones overlapped)
+        local stars = _("No rating")
+        if value > 0 then
+            local cells = {}
+            for i = 1, 5 do
+                cells[i] = value >= i and "\u{2605}" or (value >= i - 0.5 and "\u{00BD}" or "\u{2606}")
+            end
+            stars = table.concat(cells, "  ") .. "   " .. (string.format("%.1f", value):gsub("%.0$", ""))
+        end
         dlg = ButtonDialog:new{
             title = title,
             title_align = "center",
@@ -1105,8 +1121,8 @@ local function drawBook(host, bb, x, y, w, bottom, o)
     -- your stars (once it's on a shelf)
     if mine and mine.id then
         Look.label(bb, _("Your rating"), x, y, S(120), S(30), 10, { color = Look.GRAY })
-        Page.stars(bb, x + S(120), y + S(4), S(22), mine.rating and math.floor(mine.rating) or 0)
-        local all = Geom:new{ x = x, y = y - S(4), w = S(120) + 5 * S(28) + S(10), h = S(38) }
+        local _r, sw = Page.stars(bb, x + S(120), y + S(4), S(22), mine.rating or 0)
+        local all = Geom:new{ x = x, y = y - S(4), w = S(120) + sw + S(10), h = S(38) }
         hit(all, function()
             M.rateDialog(b.title or "", mine.rating, function(v)
                 HC.rate(mine.id, v, b.id, function(entry, why)
@@ -1116,7 +1132,7 @@ local function drawBook(host, bb, x, y, w, bottom, o)
             end)
         end)
         if mine.rating then
-            Look.label(bb, (string.format("%.1f", mine.rating):gsub("%.0$", "")), x + S(120) + 5 * S(28) + S(8), y, S(60), S(30), 11)
+            Look.label(bb, (string.format("%.1f", mine.rating):gsub("%.0$", "")), x + S(120) + sw + S(12), y, S(60), S(30), 11)
         end
         -- [REMOVE]: off your shelves altogether (added by mistake)
         local rw = S(96)

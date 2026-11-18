@@ -794,9 +794,13 @@ local function tagsOf(cached, kind)
         cached = ok and t or nil
     end
     local list = type(cached) == "table" and cached[kind]
+    local seen = {}
     for _i, t in ipairs(type(list) == "table" and list or {}) do
         local name = type(t) == "table" and t.tag or (type(t) == "string" and t)
-        if type(name) == "string" and name ~= "" then out[#out + 1] = name end
+        if type(name) == "string" and name ~= "" and not seen[name:lower()] then
+            seen[name:lower()] = true
+            out[#out + 1] = name
+        end
     end
     return out
 end

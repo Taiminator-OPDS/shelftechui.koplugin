@@ -29,6 +29,7 @@ local Device = require("device")
 local UIManager = require("ui/uimanager")
 local logger = require("logger")
 local _ = require("gettext")
+local T = require("ffi/util").template
 
 local Store = require("bos_settings_store")
 
@@ -182,26 +183,33 @@ function M.onPlugged()
     -- (the event can come twice: asked once)
     if M._asking then return end
     M._asking = true
-    -- (a computer takes a moment to talk to the port: looked at twice)
-    UIManager:scheduleIn(1.5, function()
+    -- (a computer takes a moment to talk to the port: looked at soon, and
+    -- again a few times; a computer is asked about as soon as it shows, a
+    -- charger is only taken as one once it says so or 4 s have passed)
+    local looks = { 0.4, 0.8, 1.3, 1.5 }   -- the waits between looks (4 s in all)
+    local n, last_text, last_kind = 0, "", nil
+    local function look()
+        n = n + 1
         if not plugged() then M._asking = false return end
         local text = M.probe()
         local kind = M.classify(text)
+        last_text, last_kind = text, kind or last_kind
+        local t = 0
+        for i = 1, n do t = t + looks[i] end
         if kind == "computer" then
-            note("computer (1.5 s)", text)
             M._asking = false
+            note(T("computer (%1 s)", t), text)
             return M.ask()
         end
-        UIManager:scheduleIn(2.5, function()
-            M._asking = false
-            if not plugged() then return end
-            local text2 = M.probe()
-            local kind2 = M.classify(text2) or kind
-            note((kind2 or "can't tell") .. " (4 s)", text2)
-            if kind2 == "charger" then return end
-            M.ask()
-        end)
-    end)
+        if n < #looks and (kind ~= "charger" or n < 3) then
+            return UIManager:scheduleIn(looks[n + 1], look)
+        end
+        M._asking = false
+        note((last_kind or "can't tell") .. T(" (%1 s)", t), last_text)
+        if last_kind == "charger" then return end
+        M.ask()
+    end
+    UIManager:scheduleIn(looks[1], look)
 end
 
 --- The question: USB drive, or just charge.

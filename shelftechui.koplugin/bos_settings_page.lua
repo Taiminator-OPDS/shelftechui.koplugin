@@ -30,7 +30,7 @@ local S = UI.S
 
 local Page = {}
 
-Page.VERSION = "1.17.0"
+Page.VERSION = "1.17.1"
 
 -- Dispatcher's sub-menus edit tables in place and flag `caller.updated`.
 local saver = setmetatable({}, { __newindex = function() Store.save() end })
@@ -916,7 +916,7 @@ function Page.sections(plugin)
     fold(home, "filemanager")
 
     local reading = { id = "stui_reading", name = _("Reading"), icon = "book.opened", items = { { heading = _("In a book") } } }
-    pick(reading.items, { _("Reading toolbar"), _("Quick Settings"), _("Swipe down in a book"), _("Handles on a selection"),
+    pick(reading.items, { _("Reading toolbar"), _("Quick Settings"), _("Swipe down in a book"), _("Handles on a selection"), _("Progress sync in the background"),
         _("ShelfTechUI text sheet"), _("Glimpse") })
     fold(reading, "navi", _("Navigation"))
     fold(reading, "typeset", _("Typesetting"))
@@ -1246,6 +1246,8 @@ function Page.items()
         },
         toggle("highlight_handles", _("Handles on a selection"),
             _("When you've selected text, a handle at each end: drag one to take in more words, or fewer, before you highlight.")),
+        toggle("kosync_background", _("Progress sync in the background"),
+            _("KOReader's progress sync (KOSync) asks its server for your place when a book opens and sends it when the book closes, and the screen used to wait for the answer (2 s or more each time). With this on, it doesn't wait: the answer is used when it comes.")),
         {
             text = _("Glimpse"),
             description = _("Maps, family trees and other pictures in the book, from anywhere in it, without losing your place: GLIMPSE on the reading toolbar. Its settings: where it opens, the gallery, which images count."),

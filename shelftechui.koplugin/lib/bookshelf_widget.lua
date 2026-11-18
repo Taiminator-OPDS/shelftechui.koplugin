@@ -1221,6 +1221,13 @@ function BookshelfWidget:_rebuild()
     if self[1] and self[1].free then
         local old_tree = self[1]
         local after = UIManager.tickAfterNext and UIManager.tickAfterNext or UIManager.nextTick
+        -- (ShelfTechUI: with a book opening or open, a few seconds later: the
+        -- free and the collection took ~0.6 s on a PW5, just as the book
+        -- came up and its toolbar was wanted)
+        local RUI = package.loaded["apps/reader/readerui"]
+        if RUI and RUI.instance then
+            after = function(um, fn) um:scheduleIn(4, fn) end
+        end
         after(UIManager, function()
             local ok, err = pcall(function() old_tree:free() end)
             if not ok then

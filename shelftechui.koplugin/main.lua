@@ -575,6 +575,8 @@ end
 
 function BookshelfOS:onReaderReady()
     if not self.ui.document then return end
+    -- KOSync's pull (on opening) and push (on closing) without the wait
+    pcall(function() require("bos_kosync_bg").install(self.ui) end)
     pcall(function() require("bos_pins").attach(self.ui) end)
     pcall(function() require("bos_pins").installHighlightButton(self.ui) end)
     pcall(function() require("bos_hardcover_sync").opened(self.ui) end)
