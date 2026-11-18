@@ -30,7 +30,7 @@ local S = UI.S
 
 local Page = {}
 
-Page.VERSION = "1.14.2"
+Page.VERSION = "1.15.0"
 
 -- Dispatcher's sub-menus edit tables in place and flag `caller.updated`.
 local saver = setmetatable({}, { __newindex = function() Store.save() end })
@@ -923,6 +923,20 @@ function Page.sections(plugin)
 
     local device = { id = "stui_device", name = _("Device"), icon = "appbar.settings", items = {} }
     fold(device, "setting", _("This device"))
+    if require("bos_usbdrive").available() then
+        table.insert(device.items, { heading = _("USB drive") })
+        table.insert(device.items, {
+            text = _("Use as a USB drive"),
+            description = _("For a computer: KOReader closes while the computer has the Kindle (it can't stay open: it lives on the drive), and opens again by itself when you eject it, where you were. Plug in first."),
+            callback = function() require("bos_usbdrive").start(true) end,
+        })
+        table.insert(device.items, {
+            text = _("Ask when plugged in"),
+            description = _("Plugging in asks: USB drive, or just charge. A Kindle can't tell a computer from a charger."),
+            checked_func = function() return Store.get("usb_ask") ~= false end,
+            callback = function() Store.set("usb_ask", Store.get("usb_ask") == false) end,
+        })
+    end
 
     local tools = { id = "stui_tools", name = _("Tools"), icon = "appbar.tools", items = {} }
     fold(tools, "tools", _("Tools"))

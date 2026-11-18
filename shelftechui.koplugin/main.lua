@@ -382,6 +382,11 @@ function BookshelfOS:onDispatcherRegisterActions()
     Dispatcher:registerAction("stui_transfer_toggle", {
         category = "none", event = "StuiTransferToggle", title = _("ShelfTechUI: Transfer on / off"), general = true,
     })
+    if require("bos_usbdrive").available() then
+        Dispatcher:registerAction("stui_usbdrive", {
+            category = "none", event = "StuiUsbDrive", title = _("ShelfTechUI: USB drive"), general = true,
+        })
+    end
     Dispatcher:registerAction("stui_home_layout", {
         category = "none", event = "StuiHomeLayout", title = _("ShelfTechUI: next home layout"), general = true,
     })
@@ -473,8 +478,19 @@ end
 function BookshelfOS:onNetworkDisconnected() pokeHome() end
 function BookshelfOS:onNetworkConnecting() pokeHome() end
 function BookshelfOS:onNetworkDisconnecting() pokeHome() end
-function BookshelfOS:onCharging() pokeHome() end
-function BookshelfOS:onNotCharging() pokeHome() end
+function BookshelfOS:onCharging()
+    pokeHome()
+    -- (a Kindle: USB drive, or just charging?)
+    pcall(function() require("bos_usbdrive").onPlugged() end)
+end
+function BookshelfOS:onNotCharging()
+    pokeHome()
+    pcall(function() require("bos_usbdrive").onUnplugged() end)
+end
+function BookshelfOS:onStuiUsbDrive()
+    require("bos_usbdrive").start(true)
+    return true
+end
 function BookshelfOS:onUsbPlugIn() pokeHome() end
 function BookshelfOS:onUsbPlugOut() pokeHome() end
 function BookshelfOS:onFrontlightStateChanged() pokeHome() end

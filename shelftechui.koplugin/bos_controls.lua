@@ -256,6 +256,16 @@ local CATALOGUE = {
                  qs = _("Send books to this device from a browser on the same Wi-Fi: opens Transfer and turns it on.") },
     },
     {
+        -- USB drive on a Kindle (bos_usbdrive): KOReader closes while the
+        -- computer has the Kindle, and opens again when it's ejected
+        id = "usbdrive", name = _("USB drive"), glyph = UI.GLYPH.plug,
+        available = function() return require("bos_usbdrive").available() end,
+        home = { tap = function() require("bos_usbdrive").start(true) end },
+        qs = { tap = function() require("bos_usbdrive").start(true) end, closes = true },
+        says = { home = _("Use the Kindle as a USB drive: KOReader closes, and opens again when you eject it."),
+                 qs = _("Use the Kindle as a USB drive: KOReader closes, and opens again when you eject it.") },
+    },
+    {
         -- the home layout (bos_layouts): Shelf or Dash
         id = "layout", name = _("Layout"), glyph = UI.GLYPH.grid_large,
         available = function() return true end,

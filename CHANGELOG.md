@@ -2,6 +2,10 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.15.0
+
+- USB drive on a Kindle without leaving KOReader by hand. Plugging in asks "USB drive" or "Just charge". Choose USB drive and KOReader saves what's open and closes, the Kindle's own USB drive mode takes over, and when you eject it on the computer KOReader opens again by itself. It can't stay open meanwhile, because it lives on the drive the computer takes. Also a Quick Settings tile and home chip (USB drive), Settings → Device → USB drive, and a gesture action. "Don't ask when plugged in" turns the question off, since a Kindle can't tell a computer from a charger.
+
 ## 1.14.2
 
 - KOReader's Wi-Fi progress messages ("Scanning for networks…", "Turning on Wi-Fi…", "Connecting to network…", "Wi-Fi off.") aren't shown. The Wi-Fi chip and status line already say what Wi-Fi is doing. Questions such as "Do you want to turn on Wi-Fi?", the list of networks, and other messages that mention Wi-Fi still show. Turn it off in Settings → Connect → Wi-Fi.
