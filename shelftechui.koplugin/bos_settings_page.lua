@@ -930,6 +930,12 @@ function Page.sections(plugin)
         checked_func = function() return Store.get("quick_keyboard") ~= false end,
         callback = function() Store.set("quick_keyboard", Store.get("quick_keyboard") == false) end,
     })
+    table.insert(device.items, {
+        text = _("Kindle-style keyboard"),
+        description = _("White rounded keys for letters and numbers, grey ones for shift, backspace and return, on a light grey panel, as a Kindle's own keyboard. Off: KOReader's keyboard as it comes. (Seen the next time the keyboard opens.)"),
+        checked_func = function() return Store.get("keyboard_look") ~= "koreader" end,
+        callback = function() Store.set("keyboard_look", Store.get("keyboard_look") ~= "koreader" and "koreader" or nil) end,
+    })
     if require("bos_usbdrive").available() then
         table.insert(device.items, { heading = _("USB drive") })
         table.insert(device.items, {

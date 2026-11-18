@@ -8,12 +8,18 @@ is shown pressed for a moment without waiting on the screen, and the text
 being typed is drawn with the screen's fast mode (cleaned up with one normal
 redraw when you pause).
 
-On unless turned off: Settings → Device → Keyboard. KOReader's own "Flash
-keyboard" setting still decides whether keys show being pressed at all.
+And it looks like a Kindle's: white rounded keys for letters, numbers and the
+space bar, darker grey ones for shift, backspace, return and the like, on a
+light grey panel; a key pressed turns darker for a moment. Done to KOReader's
+keyboard as it's built (KOReader's own files aren't changed).
+
+Both on unless turned off: Settings → Device → Keyboard. KOReader's own
+"Flash keyboard" setting still decides whether keys show being pressed.
 
   M.install()   once, at start
 --]]
 
+local Blitbuffer = require("ffi/blitbuffer")
 local Device = require("device")
 local UIManager = require("ui/uimanager")
 local logger = require("logger")
@@ -21,6 +27,52 @@ local logger = require("logger")
 local M = {}
 
 function M.enabled() return require("bos_settings_store").get("quick_keyboard") ~= false end
+function M.kindleLook() return require("bos_settings_store").get("keyboard_look") ~= "koreader" end
+
+-- the Kindle keyboard's greys
+local PANEL = Blitbuffer.Color8(0xD8)     -- behind the keys
+local KEY = Blitbuffer.COLOR_WHITE        -- a letter, a number, the space bar
+local FUNC = Blitbuffer.Color8(0xB0)      -- shift, backspace, return, SYM…
+local ACTIVE = Blitbuffer.Color8(0x80)    -- shift or caps on
+local PRESSED = Blitbuffer.Color8(0x70)   -- held down
+
+-- keys that do something rather than type (by their label)
+local FUNC_LABELS = { ["\u{2190}"] = true, ["\u{2192}"] = true, ["\u{2191}"] = true, ["\u{2193}"] = true,
+    ["\u{2BA0}"] = true, ["\u{1F310}"] = true, ["\u{2325}"] = true, ["\u{21E7}"] = true, ["\u{232B}"] = true }
+
+local function firstCodepoint(s)
+    local b = s:byte(1)
+    if not b then return nil end
+    if b < 0x80 then return b end
+    if b >= 0xF0 then return ((b % 8) * 262144) + ((s:byte(2) % 64) * 4096) + ((s:byte(3) % 64) * 64) + (s:byte(4) % 64) end
+    if b >= 0xE0 then return ((b % 16) * 4096) + ((s:byte(2) % 64) * 64) + (s:byte(3) % 64) end
+    return ((b % 32) * 64) + (s:byte(2) % 64)
+end
+
+local function isFunctionKey(k)
+    if k.icon then return true end
+    local label = k.label
+    if type(label) ~= "string" or label == "" then return true end
+    if FUNC_LABELS[label] then return true end
+    if k.alt_label == "SYM" then return true end
+    local cp = firstCodepoint(label)
+    -- the icon glyphs (shift, backspace…) are in the private-use area
+    if cp and ((cp >= 0xE000 and cp <= 0xF8FF) or cp >= 0xF0000) then return true end
+    -- a word on a key ("ABC", "123") rather than a character
+    local n = select(2, label:gsub("[^\128-\191]", ""))
+    return n > 1
+end
+
+--- One key in the Kindle's look (after KOReader has built it).
+local function dressKey(k)
+    local frame = k[1]
+    if type(frame) ~= "table" then return end
+    local active = frame.background == Blitbuffer.COLOR_LIGHT_GRAY -- (KOReader's mark for shift/caps on)
+    frame.radius = Device.screen:scaleBySize(10)
+    frame.bordersize = 0
+    frame.background = active and ACTIVE or (isFunctionKey(k) and FUNC or KEY)
+    k._stui_bg = frame.background
+end
 
 local function onScreen(w)
     for _i, e in ipairs(UIManager._window_stack or {}) do
@@ -34,6 +86,14 @@ end
 local function patchKey(VirtualKey)
     if VirtualKey._stui_quick then return end
     VirtualKey._stui_quick = true
+    -- pressed, in the Kindle's look: the key turns darker (KOReader draws a
+    -- black outline inside it)
+    local orig_invert = VirtualKey.invert
+    VirtualKey.invert = function(self, invert, hold)
+        if not (self._stui_bg and self[1]) then return orig_invert(self, invert, hold) end
+        self[1].background = invert and PRESSED or self._stui_bg
+        self:update_keyboard(hold, true)
+    end
     local orig_tap = VirtualKey.onTapSelect
     VirtualKey.onTapSelect = function(self, skip_flash)
         if not M.enabled() then return orig_tap(self, skip_flash) end
@@ -62,13 +122,43 @@ function M.install()
     if okK and type(VirtualKeyboard) == "table" and not VirtualKeyboard._stui_quick then
         VirtualKeyboard._stui_quick = true
         local orig_add = VirtualKeyboard.addKeys
+        local Size = require("ui/size")
         VirtualKeyboard.addKeys = function(self, ...)
-            local r = orig_add(self, ...)
+            local kindle = M.kindleLook()
+            -- (a little more room between keys, so each stands on its own)
+            if kindle then self.key_padding = math.max(Size.padding.default, self.key_padding or 0)
+            else self.key_padding = Size.padding.small end
+            -- (the Kindle's keys are in a plain sans-serif: KOReader's UI
+            -- font, not its fixed-width keyboard font)
+            local Font = require("ui/font")
+            local orig_face = Font.getFace
+            if kindle then
+                Font.getFace = function(f, font, size, ...)
+                    if font == "infont" then font = "cfont" end
+                    return orig_face(f, font, size, ...)
+                end
+            end
+            local okA, r = pcall(orig_add, self, ...)
+            Font.getFace = orig_face
+            if not okA then error(r, 0) end
             pcall(function()
                 local key = self.layout and self.layout[1] and self.layout[1][1]
                 local cls = key and getmetatable(key)
                 if cls and cls.onTapSelect then patchKey(cls) end
             end)
+            if kindle then
+                local ok, err = pcall(function()
+                    for _r, row in ipairs(self.layout or {}) do
+                        for _c, k in ipairs(row) do dressKey(k) end
+                    end
+                    local frame = self[1] and self[1][1]
+                    if frame then
+                        frame.background = PANEL
+                        frame.bordersize = 0
+                    end
+                end)
+                if not ok then logger.warn("ShelfTechUI: keyboard look:", err) end
+            end
             return r
         end
     end
