@@ -956,35 +956,47 @@ function Store:lookFor(v)
         if self:view() == v then self:redraw("ui") end
     end
     v.matches = {}
-    v.session = Search.start(pick.title or "", 1, self:filters{ sort = "" }, function(session)
-        if self.closed or v.session ~= session then return end
-        -- (the books that match, kept as they come: the title, and whether
-        -- the author is the same too)
-        local seen, list = {}, {}
-        for _i, b in ipairs(session.books) do
-            local same = sameBook(b, pick.title, pick.author)
-            if same or sameBook(b, pick.title, nil) then
-                local key = tostring(b.provider) .. ":" .. tostring(b.provider_id or b.id or b.title)
-                if not seen[key] then
-                    seen[key] = true
-                    b._stui_same = same or nil
-                    list[#list + 1] = b
+    -- asked by the title and the author together ("Dracula Stoker": a
+    -- common title doesn't bury the book); if that finds nothing, by the
+    -- title alone (a library that only searches titles)
+    local surname = tostring(pick.author or ""):gsub("%s*[,;&].*$", ""):match("(%S+)%s*$")
+    local queries = { pick.title or "" }
+    if surname and #surname > 1 and not norm(pick.title):find(norm(surname), 1, true) then
+        table.insert(queries, 1, (pick.title or "") .. " " .. surname)
+    end
+    local all = {}   -- every match from every query so far, by key
+    local function run(qi)
+        v.session = Search.start(queries[qi], 1, self:filters{ sort = "" }, function(session)
+            if self.closed or v.session ~= session then return end
+            -- (the books that match, kept as they come: the title, and
+            -- whether the author is the same too)
+            for _i, b in ipairs(session.books) do
+                local same = sameBook(b, pick.title, pick.author)
+                if same or sameBook(b, pick.title, nil) then
+                    local key = tostring(b.provider) .. ":" .. tostring(b.provider_id or b.id or b.title)
+                    if not all[key] then
+                        all[key] = b
+                        b._stui_same = same or nil
+                        table.insert(v.matches, b)
+                    end
                 end
             end
-        end
-        v.matches = list
-        if v.state == "looking" then
-            local any = false
-            for _i, b in ipairs(list) do if b._stui_same then any = true break end end
-            if session.finished then
-                if any then choose() else v.state = "missing" end
-            elseif any and not v.choose_timer then
-                v.choose_timer = function() v.choose_timer = nil choose() end
-                UIManager:scheduleIn(6, v.choose_timer)
+            if v.state == "looking" then
+                local any = false
+                for _i, b in ipairs(v.matches) do if b._stui_same then any = true break end end
+                if session.finished then
+                    if any then choose()
+                    elseif qi < #queries then return run(qi + 1)
+                    else v.state = "missing" end
+                elseif any and not v.choose_timer then
+                    v.choose_timer = function() v.choose_timer = nil choose() end
+                    UIManager:scheduleIn(6, v.choose_timer)
+                end
             end
-        end
-        if self:view() == v then self:redraw("ui") end
-    end)
+            if self:view() == v then self:redraw("ui") end
+        end)
+    end
+    run(1)
 end
 
 --- The other books that match the one from Hardcover (or a pick): every

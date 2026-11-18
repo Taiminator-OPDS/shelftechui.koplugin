@@ -133,7 +133,23 @@ local function searchExpression(query, filters)
     }
     if query and query:match("%S") then
         local term = quoted(query)
-        clauses[#clauses + 1] = "(title:" .. term .. " OR creator:" .. term .. " OR subject:" .. term .. ")"
+        local phrase = "(title:" .. term .. " OR creator:" .. term .. " OR subject:" .. term .. ")"
+        -- (ShelfTechUI: a title and an author together, "dracula stoker", is
+        -- no field's phrase: each word in the title, the author or the
+        -- subjects, as well as the whole as a phrase)
+        local words = {}
+        for w in tostring(query):gmatch("[^%s\"()]+") do
+            if #w > 1 and #words < 6 then words[#words + 1] = quoted(w) end
+        end
+        if #words > 1 then
+            local each = {}
+            for _, w in ipairs(words) do
+                each[#each + 1] = "(title:" .. w .. " OR creator:" .. w .. " OR subject:" .. w .. ")"
+            end
+            clauses[#clauses + 1] = "(" .. phrase .. " OR (" .. table.concat(each, " AND ") .. "))"
+        else
+            clauses[#clauses + 1] = phrase
+        end
     end
     filters = filters or {}
     if SUBJECTS[filters.content] then
@@ -392,5 +408,7 @@ function Provider:hydrate(book)
     end
     return book
 end
+
+Provider._searchExpression = searchExpression
 
 return Provider

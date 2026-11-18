@@ -573,7 +573,11 @@ local function searchGallica(source, query, page, filters)
         return { books = {}, total = 0, page = page, has_previous = page > 1, has_next = false }
     end
     local merged, seen, totals, has_next, errors = {}, {}, {}, false, {}
-    for _, field in ipairs({ "dc.title", "dc.creator" }) do
+    -- (ShelfTechUI: and every field at once, for a title and an author
+    -- together: "dracula stoker" is neither a title nor an author)
+    local fields = { "dc.title", "dc.creator" }
+    if tostring(query):match("%S+%s+%S+") then fields[#fields + 1] = "gallica" end
+    for _, field in ipairs(fields) do
         local request_url = gallicaSearchUrl(source, field, query)
         local books, total, next_url = pagedFeed(request_url, page, "gallica", source, filters)
         if books then
