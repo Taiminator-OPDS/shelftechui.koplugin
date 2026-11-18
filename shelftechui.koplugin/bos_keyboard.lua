@@ -128,7 +128,18 @@ local function patchKey(VirtualKey)
     VirtualKey.invert = function(self, invert, hold)
         if not (self._stui_bg and self[1]) then return orig_invert(self, invert, hold) end
         self[1].background = invert and (self._stui_pressed or PRESSED) or self._stui_bg
-        self:update_keyboard(hold, true)
+        local f = self[1]
+        if not (f.dimen and f.dimen.x) then return end
+        UIManager:widgetRepaint(f, f.dimen.x, f.dimen.y)
+        if invert then
+            -- pressed: on screen now, in the screen's quickest mode (it shows
+            -- the grey as dark), not queued behind the letter's typing
+            UIManager:setDirty(nil, "a2", f.dimen)
+            if M.enabled() then UIManager:forceRePaint() end
+        else
+            -- released: drawn properly (the quick mode can't show a grey key)
+            UIManager:setDirty(nil, "ui", f.dimen)
+        end
     end
     local orig_tap = VirtualKey.onTapSelect
     VirtualKey.onTapSelect = function(self, skip_flash)

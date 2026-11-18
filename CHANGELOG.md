@@ -2,6 +2,11 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.15.2
+
+- A key you tap changes colour at once. Its pressed colour used to wait behind the typing of the letter and reach the screen with it. It's now sent to the screen first, in the screen's quickest mode, and the key is drawn back properly when you let go (the quick mode can't show the grey keys).
+- Typing in the store's search field is quicker. Your own matching books are looked up, and the list redrawn, once you pause for a moment, not on every key.
+
 ## 1.15.1
 
 - A borderless Kindle-style keyboard: with KOReader's "Key border" unchecked (Keyboard → Keyboard appearance), the keys sit on one white board, touching, with the keys that don't type (shift, backspace, return…) in a light grey and a line along its top. With it checked, the keys stand apart on the grey panel as before.

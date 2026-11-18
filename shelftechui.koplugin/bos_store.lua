@@ -649,21 +649,28 @@ function Store:onTyped()
     v.query = text
     if self.typing_timer then UIManager:unschedule(self.typing_timer) end
     local q = text:gsub("^%s+", ""):gsub("%s+$", "")
-    -- your own books first: at once, from the second letter, no Wi-Fi needed
-    v.mine = M.mine(q)
     if #q < 3 then
         Search.cancel(v.session)
         v.session, v.books, v.waiting, v.note = nil, {}, false, nil
+    else
+        v.waiting = true
+        self.typing_timer = function()
+            self.typing_timer = nil
+            self:runSearch(v, q)
+        end
+        UIManager:scheduleIn(0.7, self.typing_timer)
+    end
+    -- your own books first, from the second letter, no Wi-Fi needed: looked
+    -- up (and the list drawn) once the typing pauses for a moment, not on
+    -- every key (each look and drawing of the covers holds the keyboard up)
+    if self.mine_timer then UIManager:unschedule(self.mine_timer) end
+    self.mine_timer = function()
+        self.mine_timer = nil
+        if self.closed or self:view() ~= v then return end
+        v.mine = M.mine(q)
         self:refreshCovers()
-        return
     end
-    v.waiting = true
-    self.typing_timer = function()
-        self.typing_timer = nil
-        self:runSearch(v, q)
-    end
-    UIManager:scheduleIn(0.7, self.typing_timer)
-    self:refreshCovers()
+    UIManager:scheduleIn(0.25, self.mine_timer)
 end
 
 function Store:runSearch(v, q, page)
