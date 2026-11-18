@@ -207,7 +207,7 @@ local function merge(session)
         for _i, b in ipairs(books) do if P.matchesQuery(b, q) then keep[#keep + 1] = b end end
         books = keep
     end
-    local ok, sorted = pcall(P.sortBooks, P, books, q, session.filters.sort, session.filters)
+    local ok, sorted = pcall(M.sortBooks, books, q, session.filters.sort, session.filters)
     session.books = ok and sorted or books
 end
 
@@ -330,6 +330,76 @@ end
 
 local function inside(p, r) return p and r and p.x >= r.x and p.x < r.x + r.w and p.y >= r.y and p.y < r.y + r.h end
 
+--- A book's file size in bytes, as its library gives it: the file a
+--- download would take (its first format), else the smallest offered, else
+--- the size written on the book ("1.2 MB"); nil if no library said.
+local function sizeBytes(b)
+    if type(b) ~= "table" then return nil end
+    local acqs = b.acquisitions or {}
+    local first = acqs[1] and tonumber(acqs[1].size)
+    if first and first > 0 then return first end
+    local best
+    for _i, a in ipairs(acqs) do
+        local n = tonumber(a.size)
+        if n and n > 0 and (not best or n < best) then best = n end
+    end
+    if best then return best end
+    local n = tonumber(b.filesize)
+    if n and n > 0 then return n end
+    local text = type(b.size) == "string" and b.size or nil
+    if text then
+        local num, unit = text:gsub(",", "."):match("([%d%.]+)%s*([KkMmGg]?)[Bb]?")
+        num = tonumber(num)
+        if num then
+            local mult = ({ k = 1024, m = 1048576, g = 1073741824 })[(unit or ""):lower()] or 1
+            return num * mult
+        end
+    end
+    return nil
+end
+M.sizeBytes = sizeBytes
+
+local function sizeText(n)
+    if not n then return nil end
+    if n < 1048576 then return T(_("%1 KB"), math.max(1, math.floor(n / 1024 + 0.5))) end
+    return T(_("%1 MB"), (string.format("%.1f", n / 1048576):gsub("%.0$", "")))
+end
+M.sizeText = sizeText
+
+--- The store's sorts: how a list of results is ordered (Settings: store_sort).
+M.SORTS = {
+    { key = "", text = _("Best match") },
+    { key = "small", text = _("Smallest file first") },
+    { key = "large", text = _("Largest file first") },
+    { key = "title", text = _("Title") },
+    { key = "newest", text = _("Newest") },
+    { key = "oldest", text = _("Oldest") },
+}
+
+--- Order books by `sort` (the libraries' own sorts, and by file size).
+function M.sortBooks(books, query, sort, filters)
+    local P = Provider()
+    local by_size = sort == "small" or sort == "large"
+    local ok, sorted = pcall(P.sortBooks, P, books, query, by_size and "" or sort, filters)
+    books = ok and sorted or books
+    if by_size then
+        -- (by size, the best match first among equals; a book whose size no
+        -- library gave goes last)
+        local pos = {}
+        for i, b in ipairs(books) do pos[b] = i end
+        table.sort(books, function(a, b)
+            local sa, sb = sizeBytes(a), sizeBytes(b)
+            if sa and sb and sa ~= sb then
+                if sort == "small" then return sa < sb end
+                return sa > sb
+            end
+            if (sa ~= nil) ~= (sb ~= nil) then return sa ~= nil end
+            return pos[a] < pos[b]
+        end)
+    end
+    return books
+end
+
 local function sourceLine(b)
     local parts = {}
     if b.source and b.source ~= "" then parts[#parts + 1] = b.source end
@@ -337,6 +407,8 @@ local function sourceLine(b)
     if fmt and fmt ~= "" and fmt ~= "EBOOK" then parts[#parts + 1] = fmt end
     local year = tostring(b.published_date or b.year or ""):match("%d%d%d%d")
     if year then parts[#parts + 1] = year end
+    local size = sizeText(sizeBytes(b))
+    if size then parts[#parts + 1] = size end
     return table.concat(parts, " · ")
 end
 
@@ -481,6 +553,9 @@ function Store:filters(overrides)
         Libs.register()
         f.libraries = Libs.withLibraries(f.libraries)
     end
+    -- the sort chosen in the store (results: Sort)
+    local sort = require("bos_settings_store").get("store_sort")
+    if sort ~= nil then f.sort = sort end
     for k, v in pairs(overrides or {}) do f[k] = v end
     return f
 end
@@ -575,6 +650,7 @@ function Store:pop(quiet)
     if v then
         Search.cancel(v.session)
         if v.jobs then for _i, j in ipairs(v.jobs) do j.cancelled = true end end
+        if v.choose_timer then UIManager:unschedule(v.choose_timer) v.choose_timer = nil end
     end
     if #self.stack == 0 then
         self:close()
@@ -849,26 +925,90 @@ function Store:lookFor(v)
         if cover and not v.book.cover_path then v.book.cover_path = cover end
         if self:view() == v then self:redraw("ui") end
     end, 25))
-    v.session = Search.start(pick.title or "", 1, self:filters{ sort = "" }, function(session)
-        if self.closed or v.session ~= session or v.state ~= "looking" then return end
-        for _i, b in ipairs(session.books) do
-            if sameBook(b, pick.title, pick.author) then
-                Search.cancel(session)
-                v.found = b
-                local keep_desc, keep_cover = v.book.description, v.book.cover_path
-                b.cover_path = b.cover_path or CoverCache():get(b) or keep_cover
-                v.book = b
-                v.book.description = b.description or keep_desc
-                self:hydrate(v, b)
-                if self:view() == v then self:redraw("ui") end
-                return
+    -- every library is asked; of the copies that are the same book (title
+    -- and author), the one that takes the least room is opened. Once one is
+    -- found the others get a few seconds more (a slow library's copy may be
+    -- the small one), then the smallest so far. All of them, and the books
+    -- with the same title by someone else, are Other matches.
+    local function choose()
+        if v.state ~= "looking" or self.closed then return end
+        if v.choose_timer then UIManager:unschedule(v.choose_timer) v.choose_timer = nil end
+        -- (the very title first: "Dracula" before "Dracula's Guest", which
+        -- the looser match lets in for subtitles)
+        local same, exact = {}, {}
+        local want = norm(pick.title)
+        for _i, b in ipairs(v.matches or {}) do
+            if b._stui_same then
+                same[#same + 1] = b
+                if norm(b.title) == want then exact[#exact + 1] = b end
             end
         end
-        if session.finished then
-            v.state = "missing"
-            if self:view() == v then self:redraw("ui") end
+        if #same == 0 then return end
+        if #exact > 0 then same = exact end
+        same = M.sortBooks(same, pick.title or "", "small", self:filters())
+        local b = same[1]
+        v.found = b
+        local keep_desc, keep_cover = v.book.description, v.book.cover_path
+        b.cover_path = b.cover_path or CoverCache():get(b) or keep_cover
+        v.book = b
+        v.book.description = b.description or keep_desc
+        self:hydrate(v, b)
+        if self:view() == v then self:redraw("ui") end
+    end
+    v.matches = {}
+    v.session = Search.start(pick.title or "", 1, self:filters{ sort = "" }, function(session)
+        if self.closed or v.session ~= session then return end
+        -- (the books that match, kept as they come: the title, and whether
+        -- the author is the same too)
+        local seen, list = {}, {}
+        for _i, b in ipairs(session.books) do
+            local same = sameBook(b, pick.title, pick.author)
+            if same or sameBook(b, pick.title, nil) then
+                local key = tostring(b.provider) .. ":" .. tostring(b.provider_id or b.id or b.title)
+                if not seen[key] then
+                    seen[key] = true
+                    b._stui_same = same or nil
+                    list[#list + 1] = b
+                end
+            end
         end
+        v.matches = list
+        if v.state == "looking" then
+            local any = false
+            for _i, b in ipairs(list) do if b._stui_same then any = true break end end
+            if session.finished then
+                if any then choose() else v.state = "missing" end
+            elseif any and not v.choose_timer then
+                v.choose_timer = function() v.choose_timer = nil choose() end
+                UIManager:scheduleIn(6, v.choose_timer)
+            end
+        end
+        if self:view() == v then self:redraw("ui") end
     end)
+end
+
+--- The other books that match the one from Hardcover (or a pick): every
+--- copy the libraries have (same title and author, the smallest file first),
+--- then the same title by someone else.
+function Store:otherMatches(v)
+    local title = (v.pick and v.pick.title) or v.book.title or ""
+    local want = norm(title)
+    -- the same book (its very title, then with more to it), then the same
+    -- title by someone else; each the smallest file first
+    local groups = { {}, {}, {} }
+    for _i, b in ipairs(v.matches or {}) do
+        if b ~= v.found then
+            local g = (b._stui_same and norm(b.title) == want and 1) or (b._stui_same and 2) or 3
+            table.insert(groups[g], b)
+        end
+    end
+    local same = {}
+    for _i, g in ipairs(groups) do
+        for _j, b in ipairs(M.sortBooks(g, title, "small", self:filters())) do same[#same + 1] = b end
+    end
+    self:push{ kind = "results", title = _("Other matches"), query = title, books = same, page = 1, sort = "small",
+        empty = _("No other copies in your libraries.") }
+    self:redraw("ui")
 end
 
 local function destination(book, acq)
@@ -982,7 +1122,7 @@ end
 function Store:otherFormats(v, anchor)
     local items = {}
     for i, acq in ipairs(v.book.acquisitions or {}) do
-        local size = tonumber(acq.size) and string.format(" · %.1f MB", acq.size / 1024 / 1024) or ""
+        local size = tonumber(acq.size) and (" · " .. sizeText(tonumber(acq.size))) or ""
         table.insert(items, { text = (acq.format or (acq.extension or "?"):upper()) .. size, callback = function()
             local path = destination(v.book, acq)
             if exists(path) then self:read(path) else self:download(v, acq) end
@@ -1305,6 +1445,18 @@ function Store:paintResults(bb, v, bottom)
     Look.heading(bb, title, x, y, w, S(26), status)
     y = y + S(36)
     local typing = self:keyboardUp()
+    -- the order: Best match, by file size, title, year (kept for next time)
+    if #v.books > 1 and not typing then
+        local cur = v.sort
+        if cur == nil then cur = require("bos_settings_store").get("store_sort") or "" end
+        local name = M.SORTS[1].text
+        for _i, s2 in ipairs(M.SORTS) do if s2.key == cur then name = s2.text end end
+        local label = T(_("Sort: %1"), name) .. " \u{25BE}"
+        local sw = Look.textWidth(Look.case(label), 10) + S(28)
+        local r = Look.button(bb, x + w - sw - Look.SHADOW_SMALL, y - S(4), sw, S(32), label, { size = 10 })
+        self:hit(r, function() self:chooseSort(v, r) end)
+        y = y + S(40)
+    end
     local rh = S(108)
     local foot = typing and 0 or S(60)
     -- on this device: your own books that match, above the store's (the
@@ -1431,6 +1583,25 @@ function Store:paintResults(bb, v, bottom)
     end
 end
 
+--- The order of a list of results: chosen, kept for the next searches, and
+--- the list ordered again here and now (no asking the libraries again).
+function Store:chooseSort(v, anchor)
+    local items = {}
+    local cur = v.sort
+    if cur == nil then cur = require("bos_settings_store").get("store_sort") or "" end
+    for _i, s2 in ipairs(M.SORTS) do
+        items[#items + 1] = { text = (s2.key == cur and "\u{2713} " or "    ") .. s2.text, callback = function()
+            require("bos_settings_store").set("store_sort", s2.key ~= "" and s2.key or nil)
+            v.sort = s2.key
+            local q = (v.query or ""):gsub("^%s+", ""):gsub("%s+$", "")
+            v.books = M.sortBooks(v.books, q, s2.key, v.filters or self:filters())
+            v.page = 1
+            self:redraw("ui")
+        end }
+    end
+    UI.openList(items, anchor, function() end)
+end
+
 -- a book's page ----------------------------------------------------------
 
 function Store:paintBook(bb, v, bottom)
@@ -1521,6 +1692,13 @@ function Store:paintBook(bb, v, bottom)
     end
     -- the key
     local ky = y + ch - S(52) - S(56)
+    -- (a book from Hardcover or a pick: the other copies and books like it,
+    -- a row of their own under the keys)
+    local others = 0
+    if v.pick then
+        for _i, m in ipairs(v.matches or {}) do if m ~= v.found then others = others + 1 end end
+    end
+    if others > 0 then ky = ky - S(52) end
     -- Hardcover's readers: ★ 4.3 · 1.3k ratings · 2 reviews ›
     if hc and hc.rating and hc.rating > 0 and ty + S(22) <= ky - S(4) then
         local n = hc.ratings >= 1000 and (string.format("%.1fk", hc.ratings / 1000):gsub("%.0k", "k")) or tostring(hc.ratings)
@@ -1542,7 +1720,7 @@ function Store:paintBook(bb, v, bottom)
             local r = Look.button(bb, tx, ky, bw2, kh, _("Read now"), { size = 14, on = true })
             self:hit(r, function() self:read(path) end)
         else
-            local size = tonumber(acq.size) and string.format(" · %.1f MB", acq.size / 1024 / 1024) or ""
+            local size = tonumber(acq.size) and (" · " .. sizeText(tonumber(acq.size))) or ""
             local r = Look.button(bb, tx, ky, bw2, kh, _("Download") .. " · " .. (acq.format or (acq.extension or ""):upper()) .. size,
                 { size = 13, on = true })
             self:hit(r, function() self:download(v, acq) end)
@@ -1582,6 +1760,10 @@ function Store:paintBook(bb, v, bottom)
                 self:openSearch(b.title or "")
             end
         end)
+    end
+    if others > 0 then
+        local r = Look.button(bb, tx, sy + sh + S(12), bw2, sh, T(_("Other matches · %1"), others), { size = 11 })
+        self:hit(r, function() self:otherMatches(v) end)
     end
     -- about
     local ay = y + ch + Look.SHADOW_SMALL + S(22)

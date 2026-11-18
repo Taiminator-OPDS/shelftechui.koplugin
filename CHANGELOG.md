@@ -2,6 +2,13 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.18.0
+
+- The store can sort its results: Best match, Smallest file first, Largest file first, Title, Newest, Oldest (the Sort key above a list). It's kept for the next searches, and changing it reorders the list there and then.
+- Each result shows its file size (when the library gives it), beside its library, format and year.
+- A book from Hardcover (Find in the store), or a pick, opens the copy that takes the least room. Every library is asked; once a copy turns up the others get a few seconds more, then the smallest copy of the very same book (same title and author) is opened.
+- Other matches: on such a book's page, every other copy the libraries have (smallest first), then books with the title and more to it, then the same title by someone else.
+
 ## 1.17.2
 
 - "Connecting to Wi-Fi…" and "Waiting for network connectivity…" are hidden too, with KOReader's other Wi-Fi progress messages (they show while something waits for the network: the store, Hardcover, a sync). Settings → Connect → Wi-Fi → Hide Wi-Fi progress messages.
