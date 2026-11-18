@@ -29,7 +29,8 @@ local function buildBar(self)
     local StatusBar = require("bos_statusbar")
     local HorizontalGroup = require("ui/widget/horizontalgroup")
     local HorizontalSpan = require("ui/widget/horizontalspan")
-    local bar = StatusBar:new{ width = self.width - 2 * pad, chips = chips }
+    local bar = StatusBar:new{ width = self.width - 2 * pad, chips = chips, keep_bg = true }
+    if Home.bar and Home.bar ~= bar then Home.bar:dropBg() end
     Home.bar = bar
     return VerticalGroup:new{
         align = "left",
@@ -195,8 +196,10 @@ function Home.sync()
         UIManager:setDirty(shelf, "ui", Geom:new{ x = 0, y = 0, w = shelf.width, h = bar.dimen.y + bar.dimen.h })
         return
     end
-    -- the whole shelf is painted (the chips may have moved: what's behind
-    -- them is drawn again), only the bar's strip of the screen is refreshed
+    -- what's behind the bar was kept when the shelf last painted: put back
+    -- and the bar drawn on it, without painting the shelf (~100 ms on a PW5)
+    if bar:quickRepaint() then return end
+    -- else the shelf is painted (clipped to the bar's strip)
     UIManager:setDirty(shelf, "ui", bar.dimen)
 end
 
@@ -219,6 +222,9 @@ end
 --- Start the minute's tick (once; it stops by itself when home is closed).
 function Home.watch()
     if not Home.bar then return end
+    -- (a full-screen window closing puts the shelf's pixels back rather than
+    -- painting it again: the bar's time may be a minute behind, so a look)
+    pcall(function() require("lib/bookshelf_underlay").after_restore = function() Home.poke() end end)
     UIManager:unschedule(minute)
     Home.ticking = true
     UIManager:scheduleIn(61 - os.time() % 60, minute)

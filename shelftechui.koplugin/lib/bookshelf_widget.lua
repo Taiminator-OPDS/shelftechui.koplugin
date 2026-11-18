@@ -11700,11 +11700,14 @@ end
 --
 -- Only ticks: a dialog over the shelf that previews into it (the line
 -- editor, the size dialogs) is not one, and keeps its live repaint.
-function BookshelfWidget:_holdTickRefresh(target)
+function BookshelfWidget:_holdTickRefresh(target, rect)
     if not self._in_status_tick then return false end
     if UIManager:getTopmostVisibleWidget() == (target or self) then return false end
     local ok, Underlay = pcall(require, "lib/bookshelf_underlay")
-    if ok and Underlay and Underlay.invalidate then Underlay.invalidate() end
+    -- (ShelfTechUI: with the region known, only it is painted again when the
+    -- window over the shelf closes; the rest of what was kept stands)
+    if ok and Underlay and Underlay.stale then Underlay.stale(rect)
+    elseif ok and Underlay and Underlay.invalidate then Underlay.invalidate() end
     return true
 end
 
@@ -11736,7 +11739,7 @@ function BookshelfWidget:_swapHeroRightColumnInPlace(regions, region_hint)
     -- update to the area that actually changed — for a clock tick that's
     -- ~30dp tall instead of the whole right column, so any overlay
     -- happens to be unaffected by the refresh entirely.
-    if ok and not self:_holdTickRefresh() then UIManager:setDirty(self, "ui", rect) end
+    if ok and not self:_holdTickRefresh(nil, rect) then UIManager:setDirty(self, "ui", rect) end
     return ok
 end
 

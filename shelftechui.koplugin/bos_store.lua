@@ -1337,7 +1337,7 @@ function Store:paintResults(bb, v, bottom)
             local who = b.authors and b.authors[1] or ""
             if who ~= "" then Page.wrap(bb, who, Look.serif(12, false, true), tx, ry + S(26), tw, 1, S(18)) end
             local state = (b.status == "complete" and _("Finished")) or (b.pct and b.pct > 0 and T(_("%1% read"), math.floor(b.pct * 100 + 0.5))) or _("Not started")
-            Look.button(bb, x + w - S(96) - Look.SHADOW_SMALL, ry + S(8), S(96), S(38), _("Read") .. " \u{203A}", { size = 11 })
+            Look.button(bb, x + w - S(96) - Look.SHADOW_SMALL, ry + S(8), S(96), S(38), _("Read"), { size = 11 })
             Look.label(bb, state, tx, ry + mch - S(10), tw, S(16), 9, { color = Look.GRAY })
             self:hit(Geom:new{ x = 0, y = ry - S(4), w = W, h = mh }, function() self:read(b.filepath) end)
         end
@@ -1492,7 +1492,7 @@ function Store:paintBook(bb, v, bottom)
         self:paintFooter(bb, v, #plist, bottom)
         -- your shelf and rating for it, and all of it: Hardcover's own page
         local ow = S(210)
-        local ro = Look.button(bb, x + w - ow - Look.SHADOW_SMALL, bottom - S(106), ow, S(40), _("Open in Hardcover") .. "  ›", { size = 11 })
+        local ro = Look.button(bb, x + w - ow - Look.SHADOW_SMALL, bottom - S(106), ow, S(40), _("Open in Hardcover"), { size = 11 })
         self:hit(ro, function() require("bos_hardcover_ui").openBook(hc) end)
         return
     end
@@ -1602,10 +1602,10 @@ function Store:paintBook(bb, v, bottom)
             UIManager:nextTick(function() if not self.closed and self:view() == v then self:redraw("ui") end end)
         end
         if long then
-            local r = Look.button(bb, x, bottom - S(56), S(170), S(40), _("Read more") .. "  ›", { size = 11 })
+            local r = Look.button(bb, x, bottom - S(56), S(170), S(40), _("Read more"), { size = 11 })
             self:hit(r, function() v.long = true v.page = 2 self:redraw("ui") end)
         elseif hc_says then
-            local r = Look.button(bb, x, bottom - S(56), S(170), S(40), _("Reviews") .. "  ›", { size = 11 })
+            local r = Look.button(bb, x, bottom - S(56), S(170), S(40), _("Reviews"), { size = 11 })
             self:hit(r, function() v.page = pageOf("hc") or 1 self:redraw("ui") end)
         end
     else
@@ -1614,7 +1614,7 @@ function Store:paintBook(bb, v, bottom)
         Page.wrap(bb, note, Look.serif(14, false, true), x, ay, w, 4, S(23), Look.GRAY)
     end
     if b.author and b.author ~= "" then
-        local label = T(_("More by %1"), (b.author:gsub("%s*[,;&].*$", ""))) .. "  ›"
+        local label = T(_("More by %1"), (b.author:gsub("%s*[,;&].*$", "")))
         local mw = math.min(w - S(190), Look.textWidth(Look.case(label), 11) + S(28))
         local r = Look.button(bb, x + w - mw - Look.SHADOW_SMALL, bottom - S(56), mw, S(40), label, { size = 11 })
         local author = b.author

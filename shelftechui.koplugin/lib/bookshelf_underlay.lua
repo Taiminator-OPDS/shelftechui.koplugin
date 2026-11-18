@@ -50,7 +50,18 @@ end
 
 local function dropPieces()
     for _i, p in ipairs(_pieces) do pcall(function() p.bb:free() end) end
-    _pieces, _tiles, _tile_area = {}, {}, 0
+    _pieces, _tiles, _tile_area, _stale = {}, {}, 0, {}
+end
+
+--- stale(rect): this part of the shelf changed while a window is over it.
+--- With the shelf kept whole, it's painted again after the put-back;
+--- otherwise (or with no rect) nothing kept stands.
+function M.stale(rect)
+    if _tiles.all and rect and rect.w and #_stale < 8 then
+        _stale[#_stale + 1] = { x = rect.x, y = rect.y, w = rect.w, h = rect.h }
+        return
+    end
+    M.invalidate()
 end
 
 --- invalidate(): the shelf painted under a window; nothing copied stands.
@@ -72,6 +83,9 @@ end
 -- shelf's (a later window's draw over a tile an earlier one drew on finds
 -- it already kept).
 local function ensure(bb, x, y, w, h)
+    -- (the whole shelf is kept already: nothing more to copy, and a tile
+    -- copied now would be the window's, not the shelf's)
+    if _tiles.all then return end
     if not _valid or not (x and y and w and h) or w <= 0 or h <= 0 then return end
     local Screen = screen()
     local sw, sh = Screen:getWidth(), Screen:getHeight()
@@ -179,6 +193,20 @@ local function sleepScreen(window)
     return window.name == "ScreenSaver" or window.name == "ScreenSaverLock"
 end
 
+-- ShelfTechUI: a full-screen window over the shelf other than the reader and
+-- the file browser (Settings, the store, Hardcover, Wrapped…). Its close
+-- used to repaint the whole shelf (~500 ms on a PW5); the shelf as it stood
+-- is copied whole when it opens (a few ms) and put back when it closes.
+local function wholeScreen(window)
+    if sleepScreen(window) then return true end
+    if not window.covers_fullscreen then return false end
+    if window.name == "ReaderUI" or window.name == "filemanager" or window.document then return false end
+    return true
+end
+-- rects of the shelf that changed while it was kept whole (a minute tick's
+-- status line): painted again after it's put back
+local _stale = {}
+
 -- keepWhole(): the sleep screen covers it all, so the whole screen is copied
 -- once, as it is when the sleep screen is shown. Not at its first paint: its
 -- anti-ghosting redraws fill the screen black from a timer, and on a PW5 the
@@ -205,8 +233,8 @@ end
 local function paintOver(window, paint, bb, x, y)
     local Screen = screen()
     if not _valid or bb ~= Screen.bb then return paint(window, bb, x, y) end
-    if sleepScreen(window) then
-        keepWhole()
+    if rawget(window, "_underlay_whole") then
+        if sleepScreen(window) then keepWhole() end
         return paint(window, bb, x, y)
     end
     local ok, err = pcall(paint, window, M.cow(bb), x, y)
@@ -229,9 +257,21 @@ function M.shown(window)
     -- full read off the framebuffer, and the reader's page is drawn by
     -- crengine straight into the buffer it is handed. Not tracked at all.
     -- The sleep screen is the exception (see paintOver).
-    if window.covers_fullscreen and not sleepScreen(window) then
+    local whole = wholeScreen(window)
+    if window.covers_fullscreen and not whole then
         M.invalidate()
         return
+    end
+    if whole and not sleepScreen(window) then
+        -- only straight over the shelf (nothing else of ours over it, and it
+        -- the window just under this one): what's on screen is the shelf
+        local UIManager = require("ui/uimanager")
+        local stack = UIManager._window_stack or {}
+        local below = stack[#stack - 1] and stack[#stack - 1].widget
+        if next(_over) ~= nil or below ~= _bw or stack[#stack].widget ~= window then
+            M.invalidate()
+            return
+        end
     end
     -- Only over the shelf as it stands on screen: when the shelf is not the
     -- window under everything shown since it, this has nothing to keep.
@@ -240,13 +280,14 @@ function M.shown(window)
         dropPieces()
     end
     _over[window] = true
+    rawset(window, "_underlay_whole", whole or nil)
     local paint = window.paintTo
     -- Its own paintTo, if it had one, to put back (false: none).
     rawset(window, "_underlay_own", rawget(window, "paintTo") or false)
     rawset(window, "paintTo", function(self, bb, x, y)
         return paintOver(self, paint, bb, x, y)
     end)
-    if sleepScreen(window) then keepWhole() end
+    if whole then keepWhole() end
 end
 
 --- closing(window) -> true when the shelf's pixels went back under it (and
@@ -257,6 +298,11 @@ function M.closing(window)
     local own = rawget(window, "_underlay_own")
     rawset(window, "paintTo", own or nil)
     rawset(window, "_underlay_own", nil)
+    local was_whole = rawget(window, "_underlay_whole")
+    rawset(window, "_underlay_whole", nil)
+    -- (a window over a full-screen one closing: the full-screen one is still
+    -- up, so the shelf isn't put back yet)
+    if _tiles.all and not was_whole and next(_over) ~= nil then return false end
     local restored = false
     if _valid and #_pieces > 0 then
         local Screen = screen()
@@ -266,7 +312,15 @@ function M.closing(window)
             end
         end)
         restored = ok
-        if ok then M._last_restore = os.time() end
+        if ok then
+            M._last_restore = os.time()
+            -- what changed meanwhile, painted again (clipped to it)
+            local UIManager = require("ui/uimanager")
+            for _i, r in ipairs(_stale) do
+                pcall(function() UIManager:setDirty(_bw, "ui", require("ui/geometry"):new(r)) end)
+            end
+            if M.after_restore then pcall(M.after_restore) end
+        end
     end
     if next(_over) == nil then dropPieces(); _valid = true end
     return restored

@@ -2,6 +2,17 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.17.0
+
+- Hardcover opens on a dashboard: your reading goal with how you're doing, what you're reading, what your friends are reading, this month's popular books (when there's room) and a line each of genres and moods. Each heading opens its full list.
+- Browse Hardcover by genre or mood, as on hardcover.app: Explore shows every genre and mood (the ones your books and popular books carry first, by Hardcover's own names), and a tap lists their books, the most read first. A book's page shows its genres and moods too; a tap on one lists more like it.
+- Popular moved into Explore (and opens as a list from there or the dashboard).
+- Buttons with words on them lose their arrows (Reviews, Read more, More by…, Open in Hardcover, Insights): they pointed the same way wherever they sat.
+- USB drive: the question only comes up for a computer. The Kindle's USB port and charger say what's at the other end (a computer talks to it; a wall charger only gives power); when they don't say, it asks as before. What was seen is kept in koreader/stui_usbprobe.log.
+- Smoother home: closing Settings, the store, Hardcover or Wrapped puts home's screen back as it was instead of drawing it all again (that took about half a second on a Paperwhite). Only what changed meanwhile, like the clock, is drawn again.
+- The home bar's clock and battery redraw just the bar each minute, not the whole home screen.
+- Hardcover covers are kept small (at most 360 × 540), so its pages show quicker; covers fetched before are made small in the background.
+
 ## 1.16.0
 
 - Bookshelf is now simply Home. Its settings are part of Settings → Home, under plain headings beside the rest: Shelves (edit shelves, shelf and top panel size), Top panel (status line, content, modules), Covers and text, Library and More (behaviour, advanced). There's no separate "Bookshelf" heading or "Bookshelf settings" page any more, and "Start menu position" sits with the start menu's entries.

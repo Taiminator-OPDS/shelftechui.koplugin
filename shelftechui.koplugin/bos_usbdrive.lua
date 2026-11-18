@@ -8,9 +8,13 @@ Kindle's own USB drive mode takes over, and when the computer lets go
 (ejected, or unplugged) KOReader starts again by itself (usbdrive.sh, from a
 copy in /var/tmp), back where you were.
 
-  * Plugged in: asked once each time ("USB drive" / "Just charge"); a Kindle
-    can't tell a computer from a charger. Settings → Device → USB drive turns
-    the question off.
+  * Plugged in: asked once each time ("USB drive" / "Just charge"), only
+    when it's a computer. What it's plugged into is told by the USB port
+    (a computer talks to it: the port is "configured", at a speed; a charger
+    only gives power) and by the charger's own report (SDP/CDP: a computer,
+    DCP: a wall charger); when neither says, it asks as before. What was
+    seen is written to koreader/stui_usbprobe.log. Settings → Device → USB
+    drive turns the question off.
   * Any time: the USB drive control (Quick Settings tile, home chip), its
     row in Settings, and a gesture action.
 
@@ -106,14 +110,103 @@ function M.start(ask)
     })
 end
 
---- Plugged in: the question (unless turned off), once per plugging in.
+-- ---------------------------------------------------------------- computer or charger?
+
+-- What the kernel says about the USB port and the charger, as "path=value"
+-- lines (one shell, a few small files).
+local PROBE = [[
+for f in /sys/class/udc/*/state /sys/class/udc/*/current_speed \
+         /sys/class/power_supply/*/type /sys/class/power_supply/*/usb_type /sys/class/power_supply/*/real_type \
+         /sys/class/power_supply/*/online /sys/class/power_supply/*/charge_type /sys/class/power_supply/*/charger_type \
+         /sys/class/power_supply/*/chg_type /sys/devices/platform/charger/charger_type /sys/devices/platform/charger/type; do
+  [ -r "$f" ] && echo "$f=$(head -c 120 "$f" 2>/dev/null | tr '\n' ' ')"
+done 2>/dev/null
+]]
+
+function M.probe()
+    if os.getenv("STUI_USB_PROBE") then return os.getenv("STUI_USB_PROBE") end
+    local okP, out = pcall(function()
+        local f = io.popen(PROBE)
+        if not f then return "" end
+        local s2 = f:read("*a") or ""
+        f:close()
+        return s2
+    end)
+    return okP and out or ""
+end
+
+--- "computer" | "charger" | nil (can't tell), from the probe's lines.
+function M.classify(text)
+    local computer, charger = false, false
+    for line in tostring(text or ""):gmatch("[^\n]+") do
+        local path, value = line:match("^(.-)=(.*)$")
+        if path then
+            value = value:gsub("%s+$", "")
+            local low = value:lower()
+            -- the selected one of a list ("Unknown [SDP] DCP CDP") or the value
+            local sel = (value:match("%[([^%]]+)%]") or value):upper()
+            if path:match("/udc/.*/state$") then
+                if low == "configured" or low == "addressed" then computer = true end
+            elseif path:match("/udc/.*/current_speed$") then
+                if low ~= "" and low ~= "unknown" then computer = true end
+            elseif path:match("usb_type$") or path:match("/type$") or path:match("real_type$")
+                    or path:match("charger_type$") or path:match("chg_type$") then
+                if sel:match("SDP") or sel:match("CDP") or sel == "USB" and path:match("usb_type$") then computer = true
+                elseif sel:match("DCP") or sel:match("MAINS") or sel:match("^AC") or sel:match("WALL") or sel:match("ADAPTER") then charger = true end
+            end
+        end
+    end
+    if computer then return "computer" end
+    if charger then return "charger" end
+    return nil
+end
+
+--- What was seen, kept beside KOReader (to be read over USB), the latest last.
+local function note(what, text)
+    pcall(function()
+        local path = require("datastorage"):getDataDir() .. "/stui_usbprobe.log"
+        local lfs = require("libs/libkoreader-lfs")
+        local size = lfs.attributes(path, "size") or 0
+        local f = io.open(path, size > 30000 and "w" or "a")
+        if not f then return end
+        f:write(os.date("%Y-%m-%d %H:%M:%S"), "  ", what, "\n", text, "\n")
+        f:close()
+    end)
+    logger.info("ShelfTechUI: USB plugged in:", what)
+end
+
+--- Plugged in: the question (unless turned off), once per plugging in, if
+--- it's (or may be) a computer.
 function M.onPlugged()
     if not M.available() or Store.get("usb_ask") == false then return end
     -- (the event can come twice: asked once)
     if M._asking then return end
     M._asking = true
+    -- (a computer takes a moment to talk to the port: looked at twice)
     UIManager:scheduleIn(1.5, function()
-        M._asking = false
+        if not plugged() then M._asking = false return end
+        local text = M.probe()
+        local kind = M.classify(text)
+        if kind == "computer" then
+            note("computer (1.5 s)", text)
+            M._asking = false
+            return M.ask()
+        end
+        UIManager:scheduleIn(2.5, function()
+            M._asking = false
+            if not plugged() then return end
+            local text2 = M.probe()
+            local kind2 = M.classify(text2) or kind
+            note((kind2 or "can't tell") .. " (4 s)", text2)
+            if kind2 == "charger" then return end
+            M.ask()
+        end)
+    end)
+end
+
+--- The question: USB drive, or just charge.
+function M.ask()
+    do
         if not plugged() then return end
         local ButtonDialog = require("ui/widget/buttondialog")
         local dlg
@@ -131,7 +224,7 @@ function M.onPlugged()
         }
         M._dialog = dlg
         UIManager:show(dlg)
-    end)
+    end
 end
 
 --- Unplugged: the question goes.

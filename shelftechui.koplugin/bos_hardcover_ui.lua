@@ -1,8 +1,11 @@
 --[[
 Hardcover's screens (the talking to Hardcover is bos_hardcover).
 
-  M.open(tab)            the app: FRIENDS · READING · WANT · READ · POPULAR,
-                         a search, your goal; or the sign-in screen
+  M.open(tab)            the app: HOME (a dashboard: your goal, what you're
+                         reading, friends, popular, genres and moods) ·
+                         FRIENDS · READING · WANT · READ · EXPLORE (browse by
+                         genre or mood), a search; or the sign-in screen
+  M.browseTag(key, name) the app on the books with a genre or a mood
   M.openBook(book)       a book: your shelf and rating for it, the quotes
                          readers liked most, reviews, and the way to the store
   M.tab(bw, book, modal) the "Hardcover" tab of Bookshelf's book window
@@ -37,12 +40,16 @@ local function tface(size, bold, italic)
 end
 
 local TABS = {
+    { key = "home", text = _("Home") },
     { key = "friends", text = _("Friends") },
     { key = "reading", text = _("Reading"), status = 2 },
     { key = "want", text = _("Want") , status = 1 },
     { key = "read", text = _("Read"), status = 3 },
-    { key = "popular", text = _("Popular") },
+    { key = "explore", text = _("Explore") },
 }
+-- lists reached from a page rather than a tab: shown as one more tab while
+-- they're open (the last one looked at)
+local VIEWS = { search = true, popular = true, tag = true }
 
 local STATUS_NAME = { [1] = _("Want to read"), [2] = _("Reading"), [3] = _("Read"), [4] = _("Paused"), [5] = _("Did not finish") }
 
@@ -220,7 +227,9 @@ local App = Page:extend{ name = "stui_hardcover", caption = _("Hardcover") }
 function App:init()
     Page.init(self)
     self.data, self.err, self.loading, self.pg = {}, {}, {}, {}
-    self.tab = self.tab or HC.get("tab", "reading")
+    -- (opens on the dashboard; a tab asked for, from elsewhere, opens that)
+    self.tab = self.tab or "home"
+    if VIEWS[self.tab] then self.view = self.tab end
     self.signin = { mode = HC.clientId() and "link" or "key" }
     self.draw = function(page, bb, y, w) page:body(bb, y, w) end
     self.on_swipe = function(page, dir)
@@ -300,19 +309,42 @@ function App:load(tab, force)
     if self.data[tab] and not force then return end
     self.loading[tab] = true
     self.err[tab] = nil
+    local asked_tag = self.tag_name
     local function got(list, why)
         self.loading[tab] = nil
         if self.closed then return end
+        -- (a genre's books that come after another genre was picked: not these)
+        if tab == "tag" and self.tag_name ~= asked_tag then return end
         if list then self.data[tab] = list else self.err[tab] = why end
         if list then
             local books = {}
             for _i, it in ipairs(list) do books[#books + 1] = it.book or it end
-            HC.fetchCovers(books, function() if not self.closed and self.tab == tab then self:refresh("ui") end end, 16)
+            HC.fetchCovers(books, function() if not self.closed and self:shows(tab) then self:refresh("ui") end end, 16)
         end
-        if self.tab == tab then self:refresh("ui") end
+        if self:shows(tab) then self:refresh("ui") end
     end
-    if force then HC.forget(tab == "friends" and "friends" or tab == "popular" and "trending" or "shelf") end
-    if tab == "friends" then
+    if force then
+        HC.forget(tab == "friends" and "friends" or tab == "popular" and "trending" or tab == "tag" and "tag:"
+            or tab == "explore" and "tags" or tab == "home" and "" or "shelf")
+    end
+    if tab == "home" then
+        -- the dashboard: a bit of everything, each drawn when it comes
+        self.loading[tab] = nil
+        self.data.home = true
+        for _i, t in ipairs({ "reading", "friends", "popular" }) do
+            if force then self.data[t] = nil end
+            self:load(t)
+        end
+        self:loadTags(force)
+    elseif tab == "explore" then
+        self.loading[tab] = nil
+        self.data.explore = true
+        if force then self.data.popular = nil end
+        self:load("popular")
+        self:loadTags(force)
+    elseif tab == "tag" then
+        HC.byTag(self.tag_key, self.tag_name, got)
+    elseif tab == "friends" then
         -- the readers you follow, each with what they're on (bos_hardcover
         -- keeps it; `force` asks Hardcover again)
         HC.social(function(soc, why)
@@ -325,8 +357,8 @@ function App:load(tab, force)
             self.loading[tab] = nil
             if self.closed then return end
             self.data[tab] = soc.people
-            HC.fetchCovers(books, function() if not self.closed and self.tab == tab then self:refresh("ui") end end, 16)
-            if self.tab == tab then self:refresh("ui") end
+            HC.fetchCovers(books, function() if not self.closed and self:shows(tab) then self:refresh("ui") end end, 16)
+            if self:shows(tab) then self:refresh("ui") end
         end, force)
     elseif tab == "popular" then HC.trending(got)
     elseif tab == "search" then
@@ -349,11 +381,41 @@ function App:load(tab, force)
     end
 end
 
+--- Is what `tab` holds on screen now (as the tab, or part of the dashboard
+--- or Explore)?
+function App:shows(tab)
+    if self.tab == tab then return true end
+    if self.tab == "home" then return tab == "reading" or tab == "friends" or tab == "popular" or tab == "tags" end
+    if self.tab == "explore" then return tab == "popular" or tab == "tags" end
+    return false
+end
+
+function App:loadTags(force)
+    if (self.tags and not force) or self.tags_asked then return end
+    self.tags_asked = true
+    if force then HC.forget("tags") end
+    HC.tags(function(t)
+        self.tags_asked = nil
+        if self.closed then return end
+        self.tags = t
+        if self:shows("tags") then self:refresh("ui") end
+    end)
+end
+
 function App:pick(tab)
     self.tab = tab
-    if tab ~= "search" then HC.set("tab", tab) end
+    if VIEWS[tab] then self.view = tab end
     self:load(tab)
     self:refresh("ui")
+end
+
+--- The books with a genre or a mood (`key`: "genre" | "mood").
+function App:showTag(key, name)
+    if self.tag_key ~= key or self.tag_name ~= name then
+        self.tag_key, self.tag_name = key, name
+        self.data.tag, self.err.tag, self.loading.tag, self.pg.tag = nil, nil, nil, 1
+    end
+    self:pick("tag")
 end
 
 function App:turn(d)
@@ -371,7 +433,7 @@ function App:search()
         UIManager:close(dlg)
         if q and q:match("%S") then
             self.query, self.search_kind = q, kind
-            self.data.search, self.pg.search = nil, 1
+            self.data.search, self.err.search, self.pg.search = nil, nil, 1
             self:pick("search")
         end
     end
@@ -427,13 +489,28 @@ function App:body(bb, y, w)
     -- tabs (Search joins them once there's been one)
     local cells = {}
     for _i, t in ipairs(TABS) do cells[#cells + 1] = { key = t.key, text = t.text } end
-    if self.query then cells[#cells + 1] = { key = "search", text = _("Search") } end
+    -- (a list reached from a page: the last one, as one more tab)
+    if self.view == "search" and self.query then cells[#cells + 1] = { key = "search", text = _("Search") }
+    elseif self.view == "popular" then cells[#cells + 1] = { key = "popular", text = _("Popular") }
+    elseif self.view == "tag" and self.tag_name then
+        local name = self.tag_name
+        if #name > 12 then name = name:sub(1, 11):gsub("[\128-\191]+$", ""):gsub("[\192-\255]$", "") .. "…" end
+        cells[#cells + 1] = { key = "tag", text = name }
+    end
     local by_key = Look.segments(bb, x, y, w - Look.SHADOW_SMALL, S(38), cells, self.tab, { size = 11, shadow = Look.SHADOW_SMALL })
     for key, r in pairs(by_key) do self:hit(r, function() if self.tab ~= key then self:pick(key) end end) end
     y = y + S(38) + Look.SHADOW_SMALL + S(16)
 
     local foot = S(52)
     local bottom = H - foot - S(8)
+    if self.tab == "home" then self.pages = 1 return self:drawHome(bb, x, y, w, H - S(16)) end
+    if self.tab == "explore" then self.pages = 1 return self:drawExplore(bb, x, y, w, H - S(16)) end
+    if self.tab == "tag" then
+        -- what this list is: "Fantasy · genre"
+        Look.label(bb, T(self.tag_key == "mood" and _("%1 · mood · the most read first") or _("%1 · genre · the most read first"), self.tag_name or ""),
+            x, y - S(4), w, S(22), 10, { color = Look.GRAY, keep_case = true })
+        y = y + S(26)
+    end
     local list = self.data[self.tab]
     if not list then
         local msg = self.err[self.tab] or _("Loading…")
@@ -452,6 +529,7 @@ function App:body(bb, y, w)
             want = _("Nothing on your Want to read shelf. Find a book in Popular or Search and add it."),
             read = _("Nothing on your Read shelf yet."),
             popular = _("Nothing to show just now."),
+            tag = T(_("Hardcover has no books tagged “%1” yet."), self.tag_name or ""),
             search = self.search_kind == "people" and T(_("No reader found for “%1”. Try their username."), self.query or "")
                 or T(_("Nothing found for “%1”."), self.query or ""),
         }
@@ -543,6 +621,166 @@ function App:body(bb, y, w)
     end
 end
 
+-- ---------------------------------------------------------------- home and explore
+
+--- What goes under a cover: how far along (Reading), your stars (Read),
+--- readers' stars (the rest).
+local function underCover(b)
+    if b.mine and b.mine.status == 2 and b.mine.pages and (b.mine.edition_pages or b.pages) then
+        local total = b.mine.edition_pages or b.pages
+        return T(_("%1%"), math.floor(100 * b.mine.pages / math.max(1, total)))
+    elseif b.mine and b.mine.rating then
+        return "\u{2605} " .. string.format("%.1f", b.mine.rating):gsub("%.0$", "")
+    end
+    return ratingText(b)
+end
+
+--- A row of `cols` covers with their titles; returns the height used.
+function App:coverRow(bb, books, x, y, w, cols, max)
+    local gap = S(14)
+    local cw = math.floor((w - (cols - 1) * gap - Look.SHADOW_SMALL) / cols)
+    local ch = math.floor(cw * 1.5)
+    for k = 1, math.min(cols, max or cols, #books) do
+        local b = books[k]
+        local cx = x + (k - 1) * (cw + gap)
+        drawCover(bb, b, cx, y, cw, ch)
+        local th = Page.wrap(bb, b.title, tface(11, true), cx, y + ch + S(6), cw, 1, S(16))
+        local under = underCover(b)
+        if under then Look.label(bb, under, cx, y + ch + S(7) + th, cw, S(15), 8, { color = Look.GRAY }) end
+        self:hit(Geom:new{ x = cx - S(4), y = y - S(4), w = cw + S(8), h = ch + S(44) }, function() M.openBook(b) end)
+    end
+    return ch + S(44)
+end
+
+--- A section's heading; a tap on it (with "All" on the right) goes to `to`.
+function App:section(bb, text, x, y, w, to)
+    Page.heading(bb, text, x, y, w, to and _("All") or nil)
+    if to then
+        self:hit(Geom:new{ x = x, y = y - S(8), w = w, h = S(38) }, function()
+            if type(to) == "function" then to() else self:pick(to) end
+        end)
+    end
+    return S(32)
+end
+
+--- Genres or moods as keys, wrapped onto lines (at most `max_lines`);
+--- a tap opens their books. Returns the height used.
+function App:tagKeys(bb, key, names, x, y, w, max_lines, size)
+    local kh, gap = S(34), S(9)
+    local cx, cy, line = x, y, 1
+    size = size or 11
+    for _i, name in ipairs(names or {}) do
+        local label = key == "mood" and (name:sub(1, 1):upper() .. name:sub(2)) or name
+        local cw = Look.textWidth(Look.case(label), size) + S(26)
+        if cx > x and cx + cw > x + w - Look.SHADOW_SMALL then
+            if line >= max_lines then break end
+            cx, cy, line = x, cy + kh + gap, line + 1
+        end
+        local r = Look.button(bb, cx, cy, cw, kh, label, { size = size })
+        self:hit(r, function() self:showTag(key, name) end)
+        cx = cx + cw + gap
+    end
+    return (cy - y) + kh + Look.SHADOW_SMALL
+end
+
+--- The dashboard: your goal, what you're reading, what your friends are
+--- reading, this month's popular books and genres and moods to browse,
+--- as many of them as the page has room for.
+function App:drawHome(bb, x, y, w, bottom)
+    -- your goal: "12 of 30 books in 2026", a bar, and how you're doing
+    if self.goal and self.goal.goal > 0 then
+        local g = self.goal
+        local gh = S(58)
+        Look.box(bb, x, y, w - Look.SHADOW_SMALL, gh, { shadow = Look.SHADOW_SMALL })
+        local metric = g.metric == "pages" and _("pages") or _("books")
+        local frac = math.min(1, g.progress / math.max(1, g.goal))
+        local t = os.date("*t")
+        local due = math.floor(g.goal * (t.yday / 365) + 0.5)
+        local note = g.progress >= g.goal and _("Done!") or (g.progress >= due and _("On track") or T(_("%1 behind"), due - g.progress))
+        Look.label(bb, T(_("%1 of %2 %3 in %4"), g.progress, g.goal, metric, os.date("%Y")), x + S(14), y + S(6), w - S(150), S(22), 12, { keep_case = true })
+        Look.label(bb, T(_("%1%"), math.floor(frac * 100)) .. "  ·  " .. note, x + w - S(200), y + S(6), S(176), S(22), 10, { align = "right" })
+        Look.slimTrack(bb, x + S(14), y + S(36), w - S(30) - Look.SHADOW_SMALL, S(10), frac)
+        y = y + gh + Look.SHADOW_SMALL + S(16)
+    end
+    local function room(h) return y + h <= bottom end
+    local cols = 6
+    local cw = math.floor((w - (cols - 1) * S(14) - Look.SHADOW_SMALL) / cols)
+    local row_h = math.floor(cw * 1.5) + S(44) + S(32) + S(14)
+    -- (genres and moods always get their two lines, at the end)
+    local tags = self.tags
+    local tags_h = tags and (S(32) + 2 * S(43) + S(10)) or 0
+    -- what you're reading
+    local reading = self.data.reading
+    if room(row_h + tags_h) then
+        y = y + self:section(bb, _("Continue reading"), x, y, w, "reading")
+        if reading and #reading > 0 then
+            y = y + self:coverRow(bb, reading, x, y, w, cols) + S(14)
+        else
+            local msg = reading and _("Nothing on your Reading shelf. Books you open here go there by themselves.")
+                or self.err.reading or _("Loading…")
+            y = y + Page.wrap(bb, msg, Look.serif(14, false, true), x, y, w, 2, S(22), Look.GRAY) + S(18)
+        end
+    end
+    -- friends reading now (those who are, first)
+    local friends = self.data.friends
+    local fr_h = S(86)
+    if friends and #friends > 0 and room(S(32) + fr_h + tags_h) then
+        y = y + self:section(bb, _("Friends reading"), x, y, w, "friends")
+        local shown = 0
+        for _i, who in ipairs(friends) do
+            if shown >= 2 or not room(fr_h + tags_h) then break end
+            if who.reading[1] or shown == 0 then
+                M.friendRow(self, bb, who, x, y, w, fr_h)
+                y = y + fr_h
+                shown = shown + 1
+            end
+        end
+        y = y + S(6)
+    end
+    -- this month's popular books, when there's room for them too
+    local popular = self.data.popular
+    if popular and #popular > 0 and room(row_h + tags_h) then
+        y = y + self:section(bb, _("Popular this month"), x, y, w, function() self:pick("popular") end)
+        y = y + self:coverRow(bb, popular, x, y, w, cols) + S(14)
+    end
+    -- genres and moods: a line of each, all of them on Explore
+    if tags and room(tags_h) then
+        y = y + self:section(bb, _("Browse by genre and mood"), x, y, w, "explore")
+        y = y + self:tagKeys(bb, "genre", tags.genre, x, y, w, 1) + S(10)
+        self:tagKeys(bb, "mood", tags.mood, x, y, w, 1)
+    end
+end
+
+--- Explore: every genre and mood to browse by, and this month's popular books.
+function App:drawExplore(bb, x, y, w, bottom)
+    local tags = self.tags
+    if not tags then
+        Page.wrap(bb, _("Loading…"), Look.serif(17, false, true), x, y + S(10), w, 2, S(26), Look.GRAY)
+        return
+    end
+    Page.wrap(bb, _("Books by what readers on Hardcover tag them with, the most read first."),
+        Look.serif(14, false, true), x, y, w, 2, S(22), Look.GRAY)
+    y = y + S(30)
+    y = y + self:section(bb, _("Genres"), x, y, w)
+    y = y + self:tagKeys(bb, "genre", tags.genre, x, y, w, 5) + S(18)
+    y = y + self:section(bb, _("Moods"), x, y, w)
+    y = y + self:tagKeys(bb, "mood", tags.mood, x, y, w, 3) + S(18)
+    local popular = self.data.popular
+    local cols = 6
+    local cw = math.floor((w - (cols - 1) * S(14) - Look.SHADOW_SMALL) / cols)
+    if popular and #popular > 0 and y + S(32) + math.floor(cw * 1.5) + S(44) <= bottom then
+        y = y + self:section(bb, _("Popular this month"), x, y, w, function() self:pick("popular") end)
+        self:coverRow(bb, popular, x, y, w, cols)
+    end
+end
+
+--- The app, on the books with a genre or a mood.
+function M.browseTag(key, name)
+    local app = M.open()
+    if app and HC.signedIn() then app:showTag(key, name) end
+    return app
+end
+
 function M.open(tab)
     if M.app and not M.app.closed then
         if tab and HC.signedIn() then M.app:pick(tab) end
@@ -550,7 +788,11 @@ function M.open(tab)
     end
     M.app = App:new{ tab = tab }
     M.app:show()
-    if not M.pruned then M.pruned = true UIManager:scheduleIn(20, HC.prune) end
+    if not M.pruned then
+        M.pruned = true
+        UIManager:scheduleIn(20, HC.prune)
+        UIManager:scheduleIn(8, function() pcall(HC.shrinkOld) end)
+    end
     return M.app
 end
 
@@ -618,7 +860,7 @@ function M.openProfile(who)
             y = y + Page.wrap(bb, u.name or u.username or "?", Look.serif(22, true), x, y, w - S(150), 1, S(32))
             if u.username then Look.label(bb, "@" .. u.username, x, y, w - S(150), S(18), 10, { color = Look.GRAY, keep_case = true }) y = y + S(22) end
             -- [FIGURES ›]: their reading in numbers
-            local rs = Look.button(bb, x + w - S(140) - Look.SHADOW_SMALL, y - S(52), S(140), S(40), _("Insights") .. "  \u{203A}", { size = 12 })
+            local rs = Look.button(bb, x + w - S(140) - Look.SHADOW_SMALL, y - S(52), S(140), S(40), _("Insights"), { size = 12 })
             self:hit(rs, function() require("bos_insights_app").open({ id = u.id, name = u.name or u.username }) end)
             -- [FOLLOW] / [✓ FOLLOWING] (a tap on Following stops)
             local following = HC.isFollowing(u.id)
@@ -954,6 +1196,28 @@ local function drawBook(host, bb, x, y, w, bottom, o)
     o.pg = o.pg or 1
     local pages = 1
     if o.section == "about" then
+        -- its genres and moods (as readers tagged it): a tap shows more books
+        -- with it, in the app
+        local tags = {}
+        for k, g in ipairs(full.genres or {}) do if k <= 4 then tags[#tags + 1] = { text = g, key = "genre", name = g } end end
+        for k, m in ipairs(full.moods or {}) do if k <= 3 then tags[#tags + 1] = { text = m, key = "mood", name = m } end end
+        if #tags > 0 then
+            -- (one line: as many as fit)
+            local rects = Page.chips(nil, tags, x, y, w, 9)
+            local keep = {}
+            for i, r in ipairs(rects) do if r.y == y then keep[#keep + 1] = tags[i] end end
+            rects = Page.chips(bb, keep, x, y, w, 9)
+            for i, r in ipairs(rects) do
+                local t = keep[i]
+                hit(Geom:new{ x = r.x - S(3), y = r.y - S(6), w = r.w + S(6), h = r.h + S(12) }, function()
+                    -- (the book's own page closes: the app is under it)
+                    if host.draw and host.onClose then pcall(function() host:onClose() end) end
+                    M.browseTag(t.key, t.name)
+                end)
+            end
+            y = y + S(26) + S(12)
+            room = bottom - y - foot
+        end
         local text = (full.description and full.description ~= "") and full.description or _("Hardcover has no description for this book.")
         text = text:gsub("<[^>]+>", ""):gsub("\r", "")
         -- by the page: as many lines as fit, then the next page

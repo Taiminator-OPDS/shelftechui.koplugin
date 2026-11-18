@@ -194,6 +194,49 @@ function StatusBar:signature()
     return table.concat(t, "\n")
 end
 
+--- What's behind the bar (keep_bg): copied off the screen as the shelf
+--- paints, before the chips are drawn, so a change of the time or the
+--- battery repaints the bar alone (quickRepaint).
+function StatusBar:keepBg(bb, x, y)
+    if self._quick or not self.keep_bg then return end
+    local Screen = require("device").screen
+    if bb ~= Screen.bb then
+        -- a clipped paint of the shelf: what's behind may have changed here
+        self:dropBg()
+        return
+    end
+    local w, h = self.width, self.height
+    if not (w and h and w > 0 and h > 0) then return end
+    local Blitbuffer = require("ffi/blitbuffer")
+    if not (self._bg and self._bg:getWidth() == w and self._bg:getHeight() == h and self._bg:getType() == bb:getType()) then
+        self:dropBg()
+        self._bg = Blitbuffer.new(w, h, bb:getType())
+    end
+    self._bg:blitFrom(bb, 0, 0, x, y, w, h)
+    self._bg_at = { x = x, y = y }
+end
+
+function StatusBar:dropBg()
+    if self._bg then pcall(function() self._bg:free() end) end
+    self._bg, self._bg_at = nil, nil
+end
+
+--- The bar alone, drawn again where it is, on what was behind it; true if done.
+function StatusBar:quickRepaint()
+    local d, at = self.dimen, self._bg_at
+    if not (self._bg and d and at and d.x == at.x and d.y == at.y) then return false end
+    local Screen = require("device").screen
+    local ok = pcall(function()
+        Screen.bb:blitFrom(self._bg, d.x, d.y, 0, 0, self._bg:getWidth(), self._bg:getHeight())
+        self._quick = true
+        self:paintTo(Screen.bb, d.x, d.y)
+    end)
+    self._quick = nil
+    if not ok then self:dropBg() return false end
+    UIManager:setDirty(nil, "ui", Geom:new{ x = d.x, y = d.y, w = self._bg:getWidth(), h = self._bg:getHeight() })
+    return true
+end
+
 function StatusBar:paintTo(bb, x, y)
     -- a chip's text changed width (9:59 → 10:00, 100% → 99%): lay out again
     local sig = self:signature()
@@ -206,6 +249,7 @@ function StatusBar:paintTo(bb, x, y)
         self._sig = sig
     end
     self.dimen = Geom:new{ x = x, y = y, w = self.width, h = self.height }
+    if self.keep_bg and not self._quick then self:keepBg(bb, x, y) end
     for r, row in ipairs(self.rows) do
         -- spacers share the free room; without one the row sits on the right
         -- and a field takes the free room first: all of it (shared between

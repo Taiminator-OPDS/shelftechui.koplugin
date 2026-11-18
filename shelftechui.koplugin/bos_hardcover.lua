@@ -770,6 +770,112 @@ function M.trending(cb)
     end)
 end
 
+-- ---------------------------------------------------------------- genres and moods
+
+-- What Hardcover's readers tag books with, by kind (a book's cached_tags:
+-- { Genre = { { tag = "Fantasy", count = … }, … }, Mood = { … }, … }).
+-- The names have to be Hardcover's own, letter for letter, to find books
+-- by them: these are a start, and the tags of your own books and this
+-- month's popular ones are added (and put first) when they come.
+M.KINDS = { genre = "Genre", mood = "Mood" }
+local STARTER = {
+    genre = { "Fiction", "Fantasy", "Science fiction", "Romance", "Mystery", "Thriller", "Horror", "Historical fiction",
+        "Classics", "Literary fiction", "Young Adult", "Nonfiction", "History", "Biography", "Memoir", "Philosophy",
+        "Poetry", "Humor", "Adventure", "Dystopian" },
+    mood = { "adventurous", "challenging", "dark", "emotional", "funny", "hopeful", "informative", "inspiring",
+        "lighthearted", "mysterious", "reflective", "relaxing", "sad", "tense" },
+}
+
+--- The tags of a book's cached_tags, of a kind ("Genre", "Mood"), in order.
+local function tagsOf(cached, kind)
+    local out = {}
+    if type(cached) == "string" then
+        local ok, t = pcall(require("rapidjson").decode, cached)
+        cached = ok and t or nil
+    end
+    local list = type(cached) == "table" and cached[kind]
+    for _i, t in ipairs(type(list) == "table" and list or {}) do
+        local name = type(t) == "table" and t.tag or (type(t) == "string" and t)
+        if type(name) == "string" and name ~= "" then out[#out + 1] = name end
+    end
+    return out
+end
+M.tagsOf = tagsOf
+
+--- Genres and moods to browse by: { genre = { names… }, mood = { names… } },
+--- the most used among your books and this month's popular ones first.
+function M.tags(cb)
+    local hit = cached("tags", 86400)
+    if hit then return cb(hit) end
+    local function starter()
+        local out = {}
+        for k, list in pairs(STARTER) do out[k] = { unpack(list) } end
+        return out
+    end
+    call([[query ($u: Int!) {
+      user_books(where: {user_id: {_eq: $u}}, order_by: {updated_at: desc_nulls_last}, limit: 120) { book { cached_tags } }
+    }]], { u = uid() }, function(data)
+        -- (no answer: the starter lists, not kept, so asked again next time)
+        if not data then return cb(starter()) end
+        cb(remember("tags", data))
+    end, function(data, token)
+        local seen = { genre = {}, mood = {} }
+        local function add(cached_tags, w)
+            for key, kind in pairs(M.KINDS) do
+                for i, name in ipairs(tagsOf(cached_tags, kind)) do
+                    -- (a book's first tags are the ones most readers gave it)
+                    if i <= 5 then seen[key][name] = (seen[key][name] or 0) + w * (6 - i) end
+                end
+            end
+        end
+        for _i, ub in ipairs(data.user_books or {}) do add(ub.book and ub.book.cached_tags, 2) end
+        -- (asked separately: a request with several questions in it can be refused)
+        local tr = graphql(token, "{ books_trending(duration: month, limit: 60) { ids } }")
+        local ids = idList(tr and tr.books_trending and tr.books_trending.ids, 60)
+        if #ids > 0 then
+            local more = graphql(token, "query ($ids: [Int!]) { books(where: {id: {_in: $ids}}) { cached_tags } }", { ids = ids })
+            for _i, b in ipairs(more and more.books or {}) do add(b.cached_tags, 1) end
+        end
+        local out = {}
+        for key, counts in pairs(seen) do
+            local list = {}
+            for name, n in pairs(counts) do list[#list + 1] = { name, n } end
+            table.sort(list, function(a, b) return a[2] > b[2] or (a[2] == b[2] and a[1] < b[1]) end)
+            local names, have = {}, {}
+            for _i, e in ipairs(list) do
+                if #names >= 24 then break end
+                names[#names + 1] = e[1] have[e[1]:lower()] = true
+            end
+            -- (then the starter's, so there's always something to pick)
+            for _i, name in ipairs(STARTER[key]) do
+                if #names >= 24 then break end
+                if not have[name:lower()] then names[#names + 1] = name have[name:lower()] = true end
+            end
+            out[key] = names
+        end
+        return out
+    end)
+end
+
+--- Books with a genre or a mood (`key`: "genre" | "mood"), the most read first.
+function M.byTag(key, name, cb)
+    local kind = M.KINDS[key]
+    if not (kind and name and name ~= "") then return cb({}) end
+    local ck = "tag:" .. key .. ":" .. name:lower()
+    local hit = cached(ck, 3600)
+    if hit then return cb(hit) end
+    call([[query ($t: jsonb!) {
+      books(where: {cached_tags: {_contains: $t}}, order_by: {users_read_count: desc_nulls_last}, limit: 48) { ]] .. BOOK .. [[ }
+    }]], { t = { [kind] = { { tag = name } } } }, function(data, why)
+        if not data then return cb(nil, why) end
+        cb(remember(ck, data))
+    end, function(data)
+        local out = {}
+        for _i, b in ipairs(data.books or {}) do out[#out + 1] = bookOf(b) end
+        return out
+    end)
+end
+
 function M.search(q, cb)
     q = tostring(q or ""):gsub("^%s+", ""):gsub("%s+$", "")
     if q == "" then return cb({}) end
@@ -791,7 +897,7 @@ function M.book(id, cb)
     local hit = cached(key, 300)
     if hit then return cb(hit) end
     call([[query ($id: Int!, $u: Int!) {
-      books_by_pk(id: $id) { ]] .. BOOK .. [[ description
+      books_by_pk(id: $id) { ]] .. BOOK .. [[ description cached_tags
         user_books(where: {user_id: {_eq: $u}}, limit: 1) {
           id status_id rating updated_at
           user_book_reads(where: {finished_at: {_is_null: true}}, order_by: {id: desc}, limit: 1) { id progress_pages edition { pages } }
@@ -804,6 +910,8 @@ function M.book(id, cb)
         local b = bookOf(data.books_by_pk)
         if not b then return nil, "server" end
         b.mine = entryOf(first(data.books_by_pk.user_books))
+        b.genres = tagsOf(data.books_by_pk.cached_tags, "Genre")
+        b.moods = tagsOf(data.books_by_pk.cached_tags, "Mood")
         b.quotes, b.reviews = {}, {}
         -- (asked for one at a time: a request with several questions in it
         -- can be refused; and the book still shows if these two aren't answered)
@@ -1336,6 +1444,59 @@ function M.coverPath(book)
     if require("libs/libkoreader-lfs").attributes(path, "mode") == "file" then return path end
 end
 
+-- Covers are kept at most this size (Hardcover's are often 1000 px or more:
+-- each took ~100 ms to read on a Paperwhite, every time a page showed it).
+local COVER_W, COVER_H = 360, 540
+
+--- Make a fetched cover small (in a background process): written over itself
+--- as a smaller JPEG. True if it was (or was already small).
+local function shrink(path)
+    local lfs = require("libs/libkoreader-lfs")
+    local size = lfs.attributes(path, "size") or 0
+    if size < 60000 then return true end
+    local ok = pcall(function()
+        local RenderImage = require("ui/renderimage")
+        local bb = RenderImage:renderImageFile(path, false)
+        if not bb then error("unreadable") end
+        local w, h = bb:getWidth(), bb:getHeight()
+        if w <= COVER_W and h <= COVER_H then
+            -- (small already, just heavy: kept as it is)
+            bb:free()
+            return
+        end
+        local scale = math.min(COVER_W / w, COVER_H / h)
+        local small = RenderImage:scaleBlitBuffer(bb, math.floor(w * scale + 0.5), math.floor(h * scale + 0.5), true)
+        local tmp = path .. ".small"
+        small:writeToFile(tmp, "jpg", 85)
+        small:free()
+        if (lfs.attributes(tmp, "size") or 0) > 0 then os.rename(tmp, path) else os.remove(tmp) end
+    end)
+    return ok
+end
+M._shrink = shrink
+
+--- Covers fetched before they were made small: made small, a few at a
+--- time in the background (once a session).
+function M.shrinkOld()
+    if M._shrunk then return end
+    M._shrunk = true
+    local lfs = require("libs/libkoreader-lfs")
+    local dir = coverDir()
+    local big = {}
+    for f in lfs.dir(dir) do
+        if f:match("^%d+%.jpg$") and (lfs.attributes(dir .. "/" .. f, "size") or 0) >= 60000 then
+            big[#big + 1] = dir .. "/" .. f
+            if #big >= 60 then break end
+        end
+    end
+    if #big == 0 then return end
+    Async().run(function()
+        local n = 0
+        for _i, p in ipairs(big) do if shrink(p) then n = n + 1 end end
+        return n
+    end, function() end, 120)
+end
+
 --- Fetch the covers of these books that aren't here yet (a few at a time,
 --- in the background); done() when something new arrived.
 local asked = {}
@@ -1358,7 +1519,10 @@ function M.fetchCovers(books, done, max)
                 local ok, res = pcall(function()
                     return require("lib/bookshelf_cover_fetch").download(w.url, w.path, nil, nil, { block_timeout = 8, total_timeout = 15 })
                 end)
-                if ok and res then got = got + 1 end
+                if ok and res then
+                    got = got + 1
+                    shrink(w.path)
+                end
             end
             return got
         end, function(ok, got) if ok and (got or 0) > 0 and done then done() end end, 70)
