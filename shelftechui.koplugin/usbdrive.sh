@@ -26,7 +26,40 @@ i=0
 while ps w 2>/dev/null | grep -v grep | grep -q "/var/tmp/koreader.sh" && [ "${i}" -lt 60 ]; do sleep 1; i=$((i + 1)); done
 say "KOReader closed"
 
-# 2. The computer takes the drive: KOReader's folder goes away
+# 2. The computer takes the drive: KOReader's folder goes away.
+# While KOReader ran, volumd (the Kindle's USB drive service) was held, so a
+# cable plugged in meanwhile went unnoticed. It's told again (as a replug
+# would): the plug-in event, then the USB link off and on. Each try's answer
+# goes in the log.
+plugged_ok() {
+    for f in /sys/devices/platform/charger/charging /sys/devices/platform/fsl-usb2-udc/charging /sys/class/power_supply/*/online; do
+        [ -r "${f}" ] && [ "$(cat "${f}" 2>/dev/null)" = "1" ] && return 0
+    done
+    return 1
+}
+gone_within() {
+    n=0
+    while [ -e "${KO_DIR}/reader.lua" ] && [ "${n}" -lt "${1}" ]; do sleep 1; n=$((n + 1)); done
+    [ ! -e "${KO_DIR}/reader.lua" ]
+}
+if ! gone_within 4 && plugged_ok; then
+    say "volumd: $(lipc-probe -v com.lab126.volumd 2>&1 | tr '\n' ' ' | cut -c1-600)"
+    say "try 1: plug-in event"
+    lipc-send-event com.lab126.hal usbPlugOut >>"${LOG}" 2>&1
+    sleep 1
+    lipc-send-event com.lab126.hal usbPlugIn >>"${LOG}" 2>&1
+    if ! gone_within 8; then
+        say "try 2: USB link off and on"
+        for sc in /sys/class/udc/*/soft_connect; do
+            [ -w "${sc}" ] || continue
+            echo disconnect >"${sc}" 2>>"${LOG}"
+            sleep 2
+            echo connect >"${sc}" 2>>"${LOG}"
+            say "  ${sc}"
+        done
+        gone_within 8 || say "not yet: a replug will do it"
+    fi
+fi
 i=0
 while [ -e "${KO_DIR}/reader.lua" ] && [ "${i}" -lt 90 ]; do sleep 1; i=$((i + 1)); done
 if [ -e "${KO_DIR}/reader.lua" ]; then
@@ -42,7 +75,12 @@ fi
 # 4. KOReader again, as KUAL starts it (this log kept beside it, to be read
 # over USB)
 say "starting KOReader"
-cp -f "${LOG}" "${KO_DIR}/stui_usbdrive.log" 2>/dev/null
 cd / || exit 1
 /bin/sh "${KO_DIR}/koreader.sh" --kual ${FLAGS} </dev/null >/dev/null 2>&1 &
+# (this log, kept beside KOReader to be read over USB: once the drive is
+# writable again)
+for n in 1 2 3 4 5 6; do
+    sleep 5
+    cp -f "${LOG}" "${KO_DIR}/stui_usbdrive.log" 2>/dev/null && break
+done
 exit 0
