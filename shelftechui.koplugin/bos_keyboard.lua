@@ -12,7 +12,9 @@ And it looks like a Kindle's: white rounded keys for letters, numbers and the
 space bar, darker grey ones for shift, backspace, return and the like, on a
 light grey panel; a key pressed turns darker for a moment. With KOReader's
 "Key border" off (Keyboard → Keyboard appearance), borderless: one white
-board, the keys touching, the ones that don't type in a light grey. Done to KOReader's
+board, the keys touching, the ones that don't type in a light grey. With its
+"Compact" on: lower rows than KOReader's compact, labels in proportion and
+no long-press hints in the keys' corners, so it's smaller without crowding. Done to KOReader's
 keyboard as it's built (KOReader's own files aren't changed).
 
 Both on unless turned off: Settings → Device → Keyboard. KOReader's own
@@ -37,6 +39,11 @@ local KEY = Blitbuffer.COLOR_WHITE        -- a letter, a number, the space bar
 local FUNC = Blitbuffer.Color8(0xB0)      -- shift, backspace, return, SYM…
 local ACTIVE = Blitbuffer.Color8(0x80)    -- shift or caps on
 local PRESSED = Blitbuffer.Color8(0x70)   -- held down
+-- compact (KOReader's "Compact" on): rows this high (KOReader's compact is
+-- 48, its regular 64), labels at most this size (KOReader's default 22)
+local COMPACT_ROW = 42
+local COMPACT_LABEL = 18
+
 -- borderless (KOReader's "Key border" off): one white board, the keys
 -- touching; the ones that do something rather than type a light grey
 local FLAT_FUNC = Blitbuffer.Color8(0xE0)
@@ -71,6 +78,18 @@ local function isFunctionKey(k)
     -- a word on a key ("ABC", "123") rather than a character
     local n = select(2, label:gsub("[^\128-\191]", ""))
     return n > 1
+end
+
+--- Compact: the key's long-press hint (the small character in its corner)
+--- goes, so a low key isn't crowded; holding the key still offers it.
+local function plainLabel(k)
+    local center = k[1] and k[1][1]
+    local og = center and center[1]
+    -- (KOReader puts the hint and the label in an OverlapGroup: the label is
+    -- its first child's content)
+    if k.alt_label and type(og) == "table" and og[1] and og[1][1] then
+        center[1] = og[1][1]
+    end
 end
 
 --- One key in the Kindle's look (after KOReader has built it).
@@ -143,18 +162,32 @@ function M.install()
         VirtualKeyboard.addKeys = function(self, ...)
             local kindle = M.kindleLook()
             local bordered = M.bordered()
+            local compact = kindle and G_reader_settings:isTrue("keyboard_key_compact")
             -- (with borders: a little more room between keys, so each stands
             -- on its own; without: none, one board)
-            if kindle and bordered then self.key_padding = Size.padding.default
+            if kindle and bordered then self.key_padding = compact and Size.padding.small or Size.padding.default
             elseif kindle then self.key_padding = 0
             else self.key_padding = Size.padding.small end
+            -- compact (KOReader's "Compact" on): lower rows, and the room in
+            -- them given to the keys (no margin round the board)
+            if compact then
+                self.height = Device.screen:scaleBySize(COMPACT_ROW * #(self.KEYS or {}))
+                self.padding = 0
+            elseif kindle then
+                self.padding = nil -- (KOReader's own)
+            end
             -- (the Kindle's keys are in a plain sans-serif: KOReader's UI
             -- font, not its fixed-width keyboard font)
             local Font = require("ui/font")
             local orig_face = Font.getFace
             if kindle then
+                local label_size = G_reader_settings:readSetting("keyboard_key_font_size", 22)
                 Font.getFace = function(f, font, size, ...)
-                    if font == "infont" then font = "cfont" end
+                    if font == "infont" then
+                        font = "cfont"
+                        -- (compact: a label in proportion to the lower key)
+                        if compact and size == label_size then size = math.min(size, COMPACT_LABEL) end
+                    end
                     return orig_face(f, font, size, ...)
                 end
             end
@@ -169,7 +202,13 @@ function M.install()
             if kindle then
                 local ok, err = pcall(function()
                     for _r, row in ipairs(self.layout or {}) do
-                        for _c, k in ipairs(row) do dressKey(k, bordered) end
+                        for _c, k in ipairs(row) do
+                            dressKey(k, bordered)
+                            if compact then
+                                plainLabel(k)
+                                if bordered then k[1].radius = Device.screen:scaleBySize(7) end
+                            end
+                        end
                     end
                     local frame = self[1] and self[1][1]
                     if frame then

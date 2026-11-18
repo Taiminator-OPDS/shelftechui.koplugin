@@ -5,6 +5,7 @@ Each version's section is its release notes (GitHub releases and Storefront show
 ## 1.15.1
 
 - A borderless Kindle-style keyboard: with KOReader's "Key border" unchecked (Keyboard → Keyboard appearance), the keys sit on one white board, touching, with the keys that don't type (shift, backspace, return…) in a light grey and a line along its top. With it checked, the keys stand apart on the grey panel as before.
+- A roomier compact keyboard: with KOReader's "Compact" checked (Keyboard → Keyboard appearance), the Kindle-style keyboard is lower still than KOReader's compact one (an eighth less height), and less crowded: labels sized to the keys, no long-press hints in the keys' corners (holding a key still offers them), narrow gaps and no margin round the board.
 
 ## 1.15.0
 
