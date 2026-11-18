@@ -199,6 +199,15 @@ function BookshelfOS:startBookdrop()
 end
 
 function BookshelfOS:init()
+    -- slow steps logged, for finding hiccups (only with settings/stui_perf)
+    pcall(function()
+        local Perf = require("bos_perf")
+        if Perf.on() then
+            Perf.install()
+            local ui = self.ui
+            UIManager:nextTick(function() pcall(Perf.watch, ui) end)
+        end
+    end)
     -- the file browser's list under home is built when it's seen (bos_fmlazy)
     pcall(function() require("bos_fmlazy").install() end)
     -- a book a friend on Hardcover is reading says so on its cover

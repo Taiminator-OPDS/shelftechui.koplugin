@@ -30,6 +30,7 @@ local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
 local TopContainer = require("ui/widget/container/topcontainer")
 local UIManager = require("ui/uimanager")
+local logger = require("logger")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
@@ -284,6 +285,8 @@ function HubScreen:init()
 
     self.sections = self.plugin:getSections()
     self.stack = { self:rootLevel() }
+    -- the search index, built quietly once the app is up
+    self:indexInBackground()
     -- asked to open on a section (the store's "Libraries, formats and
     -- language"): once
     local Store = require("bos_settings_store")
@@ -687,6 +690,11 @@ end
 local Utf8Proc
 local function norm(s)
     s = tostring(s or "")
+    -- plain ASCII (most of it): Lua's own lower case, much quicker
+    if not s:find("[\128-\255]") then
+        s = s:lower():gsub("[%-']", ""):gsub("[%p]", " "):gsub("%s+", " ")
+        return s
+    end
     if Utf8Proc == nil then
         local ok, m = pcall(require, "ffi/utf8proc")
         Utf8Proc = ok and m or false
@@ -704,9 +712,20 @@ end
 
 --- Every setting, once (sub-pages too, as KOReader's own menu search walks
 --- them): { text, desc, trail, sec, chain = { { item, items } }, item }.
-function HubScreen:buildIndex()
-    if self.index then return self.index end
+---
+--- Built a slice at a time in the background once the app is open (some
+--- menus are built as they're walked, which takes a while on a slow device),
+--- so it's usually ready by the first letter typed; asked for before it is,
+--- it's finished at once. Kept for half an hour by the app (the plugin), so
+--- opening Settings again doesn't build it again.
+local INDEX_KEEP = 30 * 60
+
+function HubScreen:indexBuilder()
     local index, seen = {}, {}
+    local budget_end
+    local function maybeYield()
+        if budget_end and require("ui/time").now() > budget_end then coroutine.yield() end
+    end
     local function walk(items, sec_i, chain, trail, depth)
         if type(items) ~= "table" or items.ignored_by_menu_search or depth > 8 then return end
         for _i, item in ipairs(items) do
@@ -724,13 +743,14 @@ function HubScreen:buildIndex()
                     local e = { text = text, desc = type(desc) == "string" and desc or nil, trail = trail,
                         sec = sec_i, chain = chain, item = item, siblings = #items }
                     e.n_text = norm(text)
-                    e.n_all = e.n_text .. " | " .. norm(table.concat(trail, " ")) .. " | " .. norm(e.desc or "")
+                    -- (a long help text: its beginning says what it's about)
+                    e.n_all = e.n_text .. " | " .. norm(table.concat(trail, " ")) .. " | " .. norm((e.desc or ""):sub(1, 240))
                     index[#index + 1] = e
                     local sub = item.sub_item_table
                     if item.stui_search_shallow then sub = nil
                     elseif item.sub_item_table_func then
-                        local okS, s = pcall(item.sub_item_table_func)
-                        sub = okS and s or nil
+                        local okS, s2 = pcall(item.sub_item_table_func)
+                        sub = okS and s2 or nil
                     end
                     if type(sub) == "table" and #sub > 0 then
                         local c2 = { unpack(chain) }
@@ -741,15 +761,62 @@ function HubScreen:buildIndex()
                     end
                 end
             end
+            maybeYield()
         end
     end
-    for i, sec in ipairs(self.sections) do
-        index[#index + 1] = { text = sec.name, desc = summary(sec), trail = {}, sec = i, chain = {}, section = true,
-            n_text = norm(sec.name), n_all = norm(sec.name) }
-        walk(sec.items, i, {}, { sec.name }, 1)
+    local co = coroutine.create(function()
+        for i, sec in ipairs(self.sections) do
+            index[#index + 1] = { text = sec.name, desc = summary(sec), trail = {}, sec = i, chain = {}, section = true,
+                n_text = norm(sec.name), n_all = norm(sec.name) }
+            walk(sec.items, i, {}, { sec.name }, 1)
+        end
+    end)
+    --- Run for at most `ms` (nil: to the end); true when it's done.
+    return function(ms)
+        if coroutine.status(co) == "dead" then return true, index end
+        local TM = require("ui/time")
+        budget_end = ms and (TM.now() + TM.ms(ms)) or nil
+        local ok, err = coroutine.resume(co)
+        if not ok then logger.warn("ShelfTechUI: settings index:", err) return true, index end
+        return coroutine.status(co) == "dead", index
     end
-    self.index = index
+end
+
+--- The index: kept, finished, or built now.
+function HubScreen:buildIndex()
+    if self.index then return self.index end
+    local kept = self.plugin and self.plugin._stui_index
+    if kept and os.time() - kept.at < INDEX_KEEP and kept.n == #self.sections then
+        self.index = kept.index
+        return self.index
+    end
+    self._index_step = self._index_step or self:indexBuilder()
+    local _done, index = self._index_step(nil)
+    self:keepIndex(index)
     return index
+end
+
+function HubScreen:keepIndex(index)
+    self.index = index
+    self._index_step = nil
+    if self.plugin then self.plugin._stui_index = { index = index, at = os.time(), n = #self.sections } end
+end
+
+--- In the background: a slice each moment the screen is idle.
+function HubScreen:indexInBackground()
+    if self.index then return end
+    local kept = self.plugin and self.plugin._stui_index
+    if kept and os.time() - kept.at < INDEX_KEEP and kept.n == #self.sections then
+        self.index = kept.index
+        return
+    end
+    self._index_step = self._index_step or self:indexBuilder()
+    self._index_tick = self._index_tick or function()
+        if self.closed or self.index or not self._index_step then return end
+        local done, index = self._index_step(25)
+        if done then self:keepIndex(index) else UIManager:scheduleIn(0.05, self._index_tick) end
+    end
+    UIManager:scheduleIn(0.6, self._index_tick)
 end
 
 --- The settings matching `q`: every word somewhere (its name, the way to it,
@@ -1248,6 +1315,8 @@ function HubScreen:render()
 end
 
 function HubScreen:onCloseWidget()
+    self.closed = true
+    if self._index_tick then UIManager:unschedule(self._index_tick) end
     if self._typed then UIManager:unschedule(self._typed) end
     pcall(function() self:hideKeyboard(true) end)
     if self.plugin and self.plugin.screen == self then self.plugin.screen = nil end
@@ -1255,6 +1324,7 @@ function HubScreen:onCloseWidget()
 end
 
 function HubScreen:onShow()
+    self.closed = nil
     -- shown again after something closed it for a while (see closeAll): it's
     -- the plugin's screen again, and what it lists may have changed
     if self.plugin and self.plugin.screen ~= self then
