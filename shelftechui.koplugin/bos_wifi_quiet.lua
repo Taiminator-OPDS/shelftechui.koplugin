@@ -1,7 +1,8 @@
 --[[
 Wi-Fi without the running commentary: KOReader's progress messages
-("Scanning for networks…", "Turning on Wi-Fi…", "Connecting to network …",
-"Wi-Fi off." and the like) aren't shown. ShelfTechUI's Wi-Fi chip, tile and
+("Scanning for networks…", "Turning on Wi-Fi…", "Connecting to Wi-Fi…",
+"Connecting to network …", "Waiting for network connectivity…", "Wi-Fi off."
+and the like) aren't shown. ShelfTechUI's Wi-Fi chip, tile and
 status line already say what Wi-Fi is doing.
 
 Only those short-lived messages go, matched on KOReader's own texts.
@@ -31,6 +32,10 @@ local TEXTS = {
     "Wi-Fi off.",
     "Already connected.",
     "Already connected to network %1.",
+    -- (while something waits for the network: a store, Hardcover, an update)
+    "Connecting to Wi-Fi…",
+    "Waiting for network connectivity…",
+    "Disconnecting…",
 }
 
 local prefixes

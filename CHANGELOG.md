@@ -2,6 +2,10 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.17.2
+
+- "Connecting to Wi-Fi…" and "Waiting for network connectivity…" are hidden too, with KOReader's other Wi-Fi progress messages (they show while something waits for the network: the store, Hardcover, a sync). Settings → Connect → Wi-Fi → Hide Wi-Fi progress messages.
+
 ## 1.17.1
 
 - Opening and closing a book no longer waits for KOReader's progress sync (KOSync). It asked its server for your place as a book opened and sent it as the book closed, and the screen (the reading toolbar included) waited for the answer: about 2 s each time on a Paperwhite, sometimes 7 s. Now that's done in the background and the answer used when it comes. Settings → Reading → Progress sync in the background.
