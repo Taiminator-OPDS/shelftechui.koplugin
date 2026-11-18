@@ -12,8 +12,8 @@ msgstr ""
 "Plural-Forms: nplurals=3; plural=(n==1) ? 0 : (n>=2 && n<=4) ? 1 : 2;\n"
 
 #: _meta.lua:19 lib/bookshelf_action_exec.lua:77 main.lua:754
-msgid "Bookshelf"
-msgstr "Bookshelf"
+msgid "Home"
+msgstr ""
 
 #: _meta.lua:20
 msgid "A nice-looking home screen for KOReader: pick a book from your shelf and read it."
@@ -40,20 +40,20 @@ msgid "Menu action…"
 msgstr "Akcia ponuky…"
 
 #: lib/bookshelf_action_chooser.lua:66
-msgid "Bookshelf action…"
-msgstr "Akcia Bookshelf…"
+msgid "Home action…"
+msgstr ""
 
 #: lib/bookshelf_action_chooser.lua:72
-msgid "Bookshelf actions"
-msgstr "Akcie Bookshelf"
+msgid "Home actions"
+msgstr ""
 
 #: lib/bookshelf_action_chooser.lua:75 lib/bookshelf_action_chooser.lua:76
-msgid "Close bookshelf"
-msgstr "Zavrieť Bookshelf"
+msgid "Go to the file browser"
+msgstr ""
 
 #: lib/bookshelf_action_chooser.lua:79 lib/bookshelf_action_chooser.lua:80
-msgid "Bookshelf menu"
-msgstr "Ponuka Bookshelf"
+msgid "Home menu"
+msgstr ""
 
 #: lib/bookshelf_action_picker.lua:53
 msgid "Choose an action"
@@ -1598,8 +1598,8 @@ msgid "Swipe down leaves full screen shelves"
 msgstr "Potiahnutie nadol ukončí police na celú obrazovku"
 
 #: lib/bookshelf_gestures.lua:28
-msgid "When enabled, swiping down in full screen shelves brings the top panel back. Turn off to stay in full screen: the swipe then refreshes the library, as it does with the top panel showing, and the top panel comes back when you tap the book icon at the start of the shelf bar, or with a gesture set to Bookshelf: full screen shelves on or off."
-msgstr "Keď je zapnuté, potiahnutie nadol v policiach na celú obrazovku vráti horný panel. Vypnite, ak chcete zostať na celej obrazovke: potiahnutie potom obnoví knižnicu, ako keď je horný panel zobrazený, a horný panel sa vráti ťuknutím na ikonu knihy na začiatku lišty políc alebo gestom nastaveným na Bookshelf: zapnúť alebo vypnúť police na celú obrazovku."
+msgid "When enabled, swiping down in full screen shelves brings the top panel back. Turn off to stay in full screen: the swipe then refreshes the library, as it does with the top panel showing, and the top panel comes back when you tap the book icon at the start of the shelf bar, or with a gesture set to Home: full screen shelves on or off."
+msgstr ""
 
 #: lib/bookshelf_gestures.lua:34
 msgid "Swipe down on the shelf to refresh the library"
@@ -2425,8 +2425,8 @@ msgstr "Nezobrazuje sa na poličke: tento priečinok je mimo vášho domovského
 
 #: lib/bookshelf_move_flow.lua:171
 #, lua-format
-msgid "Not shown on the shelf: this folder is %d levels below your home folder, and the shelf scans %d. Raise the folder walk depth in Bookshelf settings to include it."
-msgstr "Nezobrazuje sa na poličke: tento priečinok je o %d úrovní nižšie ako váš domovský priečinok, pričom polica prehľadáva %d. Ak ho chcete zahrnúť, zvýšte hĺbku prehľadávania priečinkov v nastaveniach Bookshelf."
+msgid "Not shown on the shelf: this folder is %d levels below your home folder, and the shelf scans %d. Raise the folder walk depth in Settings → Home to include it."
+msgstr ""
 
 #: lib/bookshelf_move_flow.lua:205
 msgid "Moved 1 book."
@@ -3003,8 +3003,8 @@ msgid "Insert token"
 msgstr "Vložiť token"
 
 #: lib/bookshelf_settings.lua:230
-msgid "Bookshelf tokens"
-msgstr "Tokeny Bookshelf"
+msgid "Top panel tokens"
+msgstr ""
 
 #: lib/bookshelf_settings.lua:231
 msgid ""
@@ -3715,12 +3715,12 @@ msgid "Follow KOReader"
 msgstr "Podľa KOReader"
 
 #: lib/bookshelf_settings.lua:3397
-msgid "Bookshelf UI font: %1"
-msgstr "Písmo rozhrania Bookshelf: %1"
+msgid "Home font: %1"
+msgstr ""
 
 #: lib/bookshelf_settings.lua:3399
-msgid "The font Bookshelf uses for its own UI text (shelf names, labels, metadata). Pick any installed font (same picker as the top panel); '(Default)' follows your KOReader UI font. The title and author have their own fonts in the book detail editor."
-msgstr "Písmo, ktoré Bookshelf používa pre vlastný text rozhrania (názvy políc, popisky, metadáta). Vyberte ľubovoľné nainštalované písmo (rovnaký výber ako pri hornom paneli); „(Predvolené)“ sa riadi písmom rozhrania KOReader. Názov a autor majú vlastné písma v editore detailu knihy."
+msgid "The font home uses for its own UI text (shelf names, labels, metadata). Pick any installed font (same picker as the top panel); '(Default)' follows your KOReader UI font. The title and author have their own fonts in the book detail editor."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:3411
 msgid "Image contrast"
@@ -3920,8 +3920,8 @@ msgid "Clear cache (keeps links)"
 msgstr "Vymazať vyrovnávaciu pamäť (zachová prepojenia)"
 
 #: lib/bookshelf_settings.lua:4017
-msgid "Remove Bookshelf's cached Hardcover descriptions, cover images, ratings, review counts and review text. Existing book links are kept, so you can refresh again later."
-msgstr "Odstráni uložené popisy, obrázky obálok, hodnotenia, počty recenzií a text recenzií z Hardcover. Existujúce prepojenia kníh zostanú zachované, takže ich môžete neskôr znova obnoviť."
+msgid "Remove the cached Hardcover descriptions, cover images, ratings, review counts and review text. Existing book links are kept, so you can refresh again later."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4030
 msgid "Hardcover cache cleared"
@@ -4012,8 +4012,8 @@ msgid "Instant book close (beta)"
 msgstr "Okamžité zatvorenie knihy (beta)"
 
 #: lib/bookshelf_settings.lua:4181
-msgid "Show Bookshelf immediately when leaving a book. The book finishes closing at the next quiet moment - opening another book, half a minute of inactivity, or leaving Bookshelf - so browsing never has to wait for it. Until then, going straight back into the same book is instant. Turn this off to close books fully before Bookshelf appears, as before."
-msgstr "Zobrazí Bookshelf ihneď po opustení knihy. Kniha sa dokončí zatvárať pri najbližšej vhodnej chvíli -- otvorení inej knihy, po pol minúte nečinnosti alebo pri opustení Bookshelf -- takže prehliadanie naň nikdy nemusí čakať. Dovtedy je návrat priamo do tej istej knihy okamžitý. Vypnutím tejto voľby sa knihy pred zobrazením Bookshelf zatvoria úplne, ako predtým."
+msgid "Show home immediately when leaving a book. The book finishes closing at the next quiet moment - opening another book, half a minute of inactivity, or leaving home - so browsing never has to wait for it. Until then, going straight back into the same book is instant. Turn this off to close books fully before home appears, as before."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4202
 msgid "Use E-ink refresh rate for shelf pages"
@@ -4108,12 +4108,12 @@ msgid "What tapping a book does in full screen shelves: show that book's detail 
 msgstr "Čo urobí ťuknutie na knihu v policiach na celú obrazovku: zobrazí jej detail v hornom paneli, otvorí ju jedným ťuknutím alebo ju otvorí dvojitým ťuknutím (prvé ťuknutie vyberie). Vlastné otváranie horného panela dvojitým ťuknutím je v nasledujúcom riadku."
 
 #: lib/bookshelf_settings.lua:4482
-msgid "Bookshelf gestures"
-msgstr "Gestá Bookshelf"
+msgid "Home gestures"
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4483
-msgid "Switch off any of Bookshelf's own gestures. A gesture switched off does nothing on the shelf. Tapping a book and swiping between pages always work."
-msgstr "Vypnite ktorékoľvek z vlastných gest Bookshelf. Vypnuté gesto na polici nerobí nič. Ťuknutie na knihu a potiahnutie medzi stranami fungujú vždy."
+msgid "Switch off any of home's own gestures. A gesture switched off does nothing on the shelf. Tapping a book and swiping between pages always work."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4491
 msgid "Double tap to open books"
@@ -4168,8 +4168,8 @@ msgid "Closing book notification"
 msgstr "Upozornenie na zatváranie knihy"
 
 #: lib/bookshelf_settings.lua:4569
-msgid "Show a 'Closing book…' message in the center of the screen while a book is being closed back to Bookshelf. The book-close work takes a moment, so the message confirms your gesture landed during the wait. Some users on color e-ink panels see a brief flash from the message appearing. Turn it off here if you prefer no message and no flash."
-msgstr "Zobrazí v strede obrazovky správu „Zatvára sa kniha…“, kým sa kniha zatvára späť do Bookshelf. Zatváranie knihy chvíľu trvá, takže správa potvrdzuje, že vaše gesto bolo zaznamenané počas čakania. Niektorí používatelia farebných e-ink panelov vidia pri zobrazení správy krátke bliknutie. Ak nechcete žiadnu správu ani bliknutie, tu to vypnite."
+msgid "Show a 'Closing book…' message in the center of the screen while a book is being closed back to home. The book-close work takes a moment, so the message confirms your gesture landed during the wait. Some users on color e-ink panels see a brief flash from the message appearing. Turn it off here if you prefer no message and no flash."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4651
 msgid "Scan all library metadata"
@@ -4240,8 +4240,8 @@ msgid "Image library"
 msgstr "Knižnica obrázkov"
 
 #: lib/bookshelf_settings.lua:4846
-msgid "Where Bookshelf looks for custom cover images. For stacks, place files like authors/author-name.jpg into the matching subfolder (authors, series, genres, collections). For folders, drop a cover.jpg into the folder itself. See the README for more matching options."
-msgstr "Kde Bookshelf hľadá vlastné obrázky obálok. Pre stohy vložte súbory ako authors/meno-autora.jpg do príslušného podpriečinka (authors, series, genres, collections). Pre priečinky vložte cover.jpg priamo do daného priečinka. Ďalšie možnosti zhody nájdete v súbore README."
+msgid "Where home looks for custom cover images. For stacks, place files like authors/author-name.jpg into the matching subfolder (authors, series, genres, collections). For folders, drop a cover.jpg into the folder itself. See the README for more matching options."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4852
 msgid "Find author images online…"
@@ -4296,16 +4296,16 @@ msgid "Show status line"
 msgstr "Zobraziť stavový riadok"
 
 #: lib/bookshelf_settings.lua:5001
-msgid "Puts Bookshelf's status line across the top of the reader, drawn by the same code that draws it on the shelf, so it reads the same in both. Edit the line itself under Settings > Status line. If you also use Bookends, its top row and any top-anchored progress bar move down to make space."
-msgstr "Umiestni stavový riadok Bookshelf naprieč vrchom čítačky, vykreslený tým istým kódom ako na poličke, takže vyzerá rovnako na oboch miestach. Samotný riadok upravíte v Nastavenia > Stavový riadok. Ak používate aj Bookends, jeho horný riadok a prípadný hore ukotvený ukazovateľ priebehu sa posunú nižšie, aby uvoľnili miesto."
+msgid "Puts home's status line across the top of the reader, drawn by the same code that draws it on the shelf, so it reads the same in both. Edit the line itself under Settings > Status line. If you also use Bookends, its top row and any top-anchored progress bar move down to make space."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:5023
 msgid "Show menu button"
 msgstr "Zobraziť tlačidlo ponuky"
 
 #: lib/bookshelf_settings.lua:5024
-msgid "Adds the Bookshelf menu button to the reader. Takes effect the next time you open a book."
-msgstr "Pridá do čítačky tlačidlo ponuky Bookshelf. Prejaví sa pri ďalšom otvorení knihy."
+msgid "Adds the home menu button to the reader. Takes effect the next time you open a book."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:5033
 msgid "Show modules button"
@@ -4340,32 +4340,20 @@ msgid "Clears your custom shelf menu (which shelves are shown, their order, thei
 msgstr "Vymaže vašu vlastnú ponuku políc (ktoré police sa zobrazujú, ich poradie, popisky a ikony, zdroje, filtre a zoradenie) a obnoví pôvodnú sadu ako pri novej inštalácii: zapnuté Domov / Nedávne / Séria / Obľúbené, zvyšok dostupný na zapnutie. Zároveň vráti aktívnu policu na Domov a ukazovateľ strany na 1. Ostatné nastavenia (text horného panela, písma, farby) nie sú ovplyvnené."
 
 #: lib/bookshelf_settings.lua:5089
-msgid ""
-"Reset the shelf menu to default settings?\n"
-"\n"
-"All custom shelves you have created or edited will be lost. Other Bookshelf settings (top panel text, fonts, colors) are unaffected."
+msgid "Reset the shelf menu to default settings?\n\nAll custom shelves you have created or edited will be lost. Other home settings (top panel text, fonts, colors) are unaffected."
 msgstr ""
-"Obnoviť predvolené nastavenia ponuky políc?\n"
-"\n"
-"Všetky vlastné police, ktoré ste vytvorili alebo upravili, sa stratia. Ostatné nastavenia Bookshelf (text horného panela, písma, farby) nie sú ovplyvnené."
 
 #: lib/bookshelf_settings.lua:5125
 msgid "Reset top panel content to defaults"
 msgstr "Obnoviť predvolený obsah horného panela"
 
 #: lib/bookshelf_settings.lua:5126
-msgid "Clears your top-panel customizations and restores the fresh-install detail layout, including the bundled title (Inter ExtraBold) and author (Caveat) fonts. The Bookshelf UI font and shelf menu are unaffected."
-msgstr "Vymaže vaše úpravy horného panela a obnoví pôvodné rozloženie detailu ako pri novej inštalácii, vrátane pribalených písiem pre názov (Inter ExtraBold) a autora (Caveat). Písmo rozhrania Bookshelf a ponuka políc nie sú ovplyvnené."
+msgid "Clears your top-panel customizations and restores the fresh-install detail layout, including the bundled title (Inter ExtraBold) and author (Caveat) fonts. The Home font and shelf menu are unaffected."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:5133
-msgid ""
-"Reset the top panel's content to default settings?\n"
-"\n"
-"All top-panel text and font customizations will be lost. The Bookshelf UI font and shelf menu are unaffected."
+msgid "Reset the top panel's content to default settings?\n\nAll top-panel text and font customizations will be lost. The Home font and shelf menu are unaffected."
 msgstr ""
-"Obnoviť predvolené nastavenia obsahu horného panela?\n"
-"\n"
-"Všetky úpravy textu a písiem horného panela sa stratia. Písmo rozhrania Bookshelf a ponuka políc nie sú ovplyvnené."
 
 #: lib/bookshelf_settings.lua:5153
 msgid "Read calibre metadata.calibre"
@@ -4796,8 +4784,8 @@ msgid "Delete this folder and everything in it?"
 msgstr "Vymazať tento priečinok a všetko v ňom?"
 
 #: lib/bookshelf_start_menu_edit.lua:480
-msgid "Bookshelf module…"
-msgstr "Modul Bookshelf…"
+msgid "Home module…"
+msgstr ""
 
 #: lib/bookshelf_start_menu_edit.lua:519
 msgid "New folder"
@@ -5593,8 +5581,8 @@ msgid "Current home folder:"
 msgstr "Aktuálny domovský priečinok:"
 
 #: lib/bookshelf_widget.lua:4774 lib/bookshelf_widget.lua:22803
-msgid "File no longer exists. The bookshelf entry is stale."
-msgstr "Súbor už neexistuje. Položka na poličke je neaktuálna."
+msgid "File no longer exists. The entry on home is stale."
+msgstr ""
 
 #: lib/bookshelf_widget.lua:4802
 msgid "Couldn't open this Kobo book."
@@ -5811,8 +5799,8 @@ msgid "Authentication failed for %1"
 msgstr "Overenie zlyhalo pre %1"
 
 #: lib/bookshelf_widget.lua:18257 lib/bookshelf_widget.lua:19925
-msgid "%1 refused every format Bookshelf asked for"
-msgstr "%1 odmietol každý formát, o ktorý Bookshelf požiadal"
+msgid "%1 refused every format asked for"
+msgstr ""
 
 #: lib/bookshelf_widget.lua:18259 lib/bookshelf_widget.lua:19927
 msgid "%1 is limiting requests. Wait a minute and try again."
@@ -6464,14 +6452,8 @@ msgid "Importing calibre metadata…"
 msgstr "Importujú sa metadáta z Calibre…"
 
 #: main.lua:407
-msgid ""
-"Bookshelf update: cached Hardcover book details from earlier versions can list audiobook narrators and translators as authors, which shows extra author cards.\n"
-"\n"
-"Refresh the details for your linked books now? (Contacts Hardcover, rate-limited, cancellable. Also available later under Hardcover > Manage Hardcover data.)"
+msgid "Update: cached Hardcover book details from earlier versions can list audiobook narrators and translators as authors, which shows extra author cards.\n\nRefresh the details for your linked books now? (Contacts Hardcover, rate-limited, cancellable. Also available later under Hardcover > Manage Hardcover data.)"
 msgstr ""
-"Aktualizácia Bookshelf: uložené údaje kníh z Hardcover zo starších verzií môžu uvádzať rozprávačov audiokníh a prekladateľov ako autorov, čo pridáva nadbytočné karty autorov.\n"
-"\n"
-"Obnoviť teraz údaje pre vaše prepojené knihy? (Kontaktuje Hardcover, s obmedzením rýchlosti, dá sa zrušiť. Dostupné aj neskôr v Hardcover > Spravovať údaje Hardcover.)"
 
 #: main.lua:408
 msgid "Refresh now"
@@ -6486,24 +6468,24 @@ msgid "Bookshelf requires the CoverBrowser plugin. Enable it under Settings > Mo
 msgstr "Bookshelf vyžaduje doplnok CoverBrowser. Zapnite ho v Nastavenia > Ďalšie doplnky."
 
 #: main.lua:595 main.lua:599 main.lua:630
-msgid "bookshelf"
-msgstr "bookshelf"
+msgid "home"
+msgstr ""
 
 #: main.lua:630
 msgid "Start with: %1"
 msgstr "Spustiť s: %1"
 
 #: main.lua:762
-msgid "Close Bookshelf"
-msgstr "Zavrieť Bookshelf"
+msgid "Go to the file browser"
+msgstr ""
 
 #: main.lua:762
-msgid "Open Bookshelf"
-msgstr "Otvoriť Bookshelf"
+msgid "Go to home"
+msgstr ""
 
 #: main.lua:822
-msgid "Open a small overlay that lets you set the number of columns and rows of books on the shelf, with the bookshelf visible behind it. Cover size follows the column count and the top panel fills the space left over. Changes preview in realtime; Accept keeps them, Cancel reverts."
-msgstr "Otvorí malé prekrytie, v ktorom nastavíte počet stĺpcov a riadkov kníh na poličke, pričom polica je viditeľná v pozadí. Veľkosť obálky sa riadi počtom stĺpcov a horný panel vyplní zvyšný priestor. Zmeny sa zobrazujú v reálnom čase; Prijať ich zachová, Zrušiť ich vráti späť."
+msgid "Open a small overlay that lets you set the number of columns and rows of books on the shelf, with the shelves visible behind it. Cover size follows the column count and the top panel fills the space left over. Changes preview in realtime; Accept keeps them, Cancel reverts."
+msgstr ""
 
 #: main.lua:837
 msgid "Edit shelves…"
@@ -6522,80 +6504,80 @@ msgid "About"
 msgstr "O doplnku"
 
 #: main.lua:1055
-msgid "Bookshelf couldn't open. Some of its files may be missing or corrupted after an update. Try reinstalling the plugin."
-msgstr "Bookshelf sa nepodarilo otvoriť. Niektoré jeho súbory môžu po aktualizácii chýbať alebo byť poškodené. Skúste doplnok preinštalovať."
+msgid "Home couldn't open. Some of its files may be missing or corrupted after an update. Try reinstalling the plugin."
+msgstr ""
 
 #: main.lua:1129
-msgid "Bookshelf: open or close"
-msgstr "Bookshelf: otvoriť alebo zavrieť"
+msgid "Home: open or close"
+msgstr ""
 
 #: main.lua:1135
-msgid "Bookshelf: open"
-msgstr "Bookshelf: otvoriť"
+msgid "Home: open"
+msgstr ""
 
 #: main.lua:1138
 msgid "on"
 msgstr "zapnuté"
 
 #: main.lua:1144
-msgid "Bookshelf: next shelf"
-msgstr "Bookshelf: ďalšia polica"
+msgid "Home: next shelf"
+msgstr ""
 
 #: main.lua:1150
-msgid "Bookshelf: previous shelf"
-msgstr "Bookshelf: predchádzajúca polica"
+msgid "Home: previous shelf"
+msgstr ""
 
 #: main.lua:1156
-msgid "Bookshelf: next page of shelves"
-msgstr "Bookshelf: ďalšia strana políc"
+msgid "Home: next page of shelves"
+msgstr ""
 
 #: main.lua:1162
-msgid "Bookshelf: previous page of shelves"
-msgstr "Bookshelf: predchádzajúca strana políc"
+msgid "Home: previous page of shelves"
+msgstr ""
 
 #: main.lua:1168
-msgid "Bookshelf: full screen shelves on or off"
-msgstr "Bookshelf: zapnúť alebo vypnúť police na celú obrazovku"
+msgid "Home: full screen shelves on or off"
+msgstr ""
 
 #: main.lua:1178
-msgid "Bookshelf: refresh the library"
-msgstr "Bookshelf: obnoviť knižnicu"
+msgid "Home: refresh the library"
+msgstr ""
 
 #: main.lua:1184
-msgid "Bookshelf: toggle bulk selection mode"
-msgstr "Bookshelf: prepnúť režim hromadného výberu"
+msgid "Home: toggle bulk selection mode"
+msgstr ""
 
 #: main.lua:1191
-msgid "Bookshelf: toggle selection on focused book"
-msgstr "Bookshelf: prepnúť výber zameranej knihy"
+msgid "Home: toggle selection on focused book"
+msgstr ""
 
 #: main.lua:1200
-msgid "Bookshelf: select all books in this shelf"
-msgstr "Bookshelf: vybrať všetky knihy na tejto poličke"
+msgid "Home: select all books in this shelf"
+msgstr ""
 
 #: main.lua:1206
-msgid "Bookshelf: add focused stack to selection"
-msgstr "Bookshelf: pridať zameraný stoh do výberu"
+msgid "Home: add focused stack to selection"
+msgstr ""
 
 #: main.lua:1212
-msgid "Bookshelf: open bulk action menu"
-msgstr "Bookshelf: otvoriť ponuku hromadných akcií"
+msgid "Home: open bulk action menu"
+msgstr ""
 
 #: main.lua:1223
-msgid "Bookshelf: open start menu"
-msgstr "Bookshelf: otvoriť úvodnú ponuku"
+msgid "Home: open start menu"
+msgstr ""
 
 #: main.lua:1229
-msgid "Bookshelf: open modules"
-msgstr "Bookshelf: otvoriť moduly"
+msgid "Home: open modules"
+msgstr ""
 
 #: main.lua:1243
-msgid "Bookshelf: shuffle ornaments"
-msgstr "Bookshelf: zamiešať ozdoby"
+msgid "Home: shuffle ornaments"
+msgstr ""
 
 #: main.lua:1249
-msgid "Bookshelf: go to home screen"
-msgstr "Bookshelf: prejsť na domovskú obrazovku"
+msgid "Home: first shelf, first page"
+msgstr ""
 
 #: main.lua:2446
 msgid "Branch name (leave empty for stable)"

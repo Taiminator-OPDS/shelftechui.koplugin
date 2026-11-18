@@ -18,8 +18,8 @@ msgstr ""
 "X-Generator: Poedit 3.9\n"
 
 #: _meta.lua:19 lib/bookshelf_action_exec.lua:77 main.lua:754
-msgid "Bookshelf"
-msgstr "Bookshelf"
+msgid "Home"
+msgstr ""
 
 #: _meta.lua:20
 msgid "A nice-looking home screen for KOReader: pick a book from your shelf and read it."
@@ -46,20 +46,20 @@ msgid "Menu action…"
 msgstr "菜单操作…"
 
 #: lib/bookshelf_action_chooser.lua:66
-msgid "Bookshelf action…"
-msgstr "Bookshelf 操作…"
+msgid "Home action…"
+msgstr ""
 
 #: lib/bookshelf_action_chooser.lua:72
-msgid "Bookshelf actions"
-msgstr "Bookshelf 操作"
+msgid "Home actions"
+msgstr ""
 
 #: lib/bookshelf_action_chooser.lua:75 lib/bookshelf_action_chooser.lua:76
-msgid "Close bookshelf"
-msgstr "关闭书架"
+msgid "Go to the file browser"
+msgstr ""
 
 #: lib/bookshelf_action_chooser.lua:79 lib/bookshelf_action_chooser.lua:80
-msgid "Bookshelf menu"
-msgstr "Bookshelf 菜单"
+msgid "Home menu"
+msgstr ""
 
 #: lib/bookshelf_action_picker.lua:53
 msgid "Choose an action"
@@ -1604,8 +1604,8 @@ msgid "Swipe down leaves full screen shelves"
 msgstr "下滑退出全屏书架"
 
 #: lib/bookshelf_gestures.lua:28
-msgid "When enabled, swiping down in full screen shelves brings the top panel back. Turn off to stay in full screen: the swipe then refreshes the library, as it does with the top panel showing, and the top panel comes back when you tap the book icon at the start of the shelf bar, or with a gesture set to Bookshelf: full screen shelves on or off."
-msgstr "开启后，在全屏书架中下滑会恢复顶部面板。关闭则保持全屏：下滑会像显示顶部面板时一样刷新书库；点击书架栏开头的书本图标，或使用设为「Bookshelf：开关全屏书架」的手势，即可恢复顶部面板。"
+msgid "When enabled, swiping down in full screen shelves brings the top panel back. Turn off to stay in full screen: the swipe then refreshes the library, as it does with the top panel showing, and the top panel comes back when you tap the book icon at the start of the shelf bar, or with a gesture set to Home: full screen shelves on or off."
+msgstr ""
 
 #: lib/bookshelf_gestures.lua:34
 msgid "Swipe down on the shelf to refresh the library"
@@ -2431,8 +2431,8 @@ msgstr "未显示在书架上：此文件夹位于主页文件夹 (%s) 之外。
 
 #: lib/bookshelf_move_flow.lua:171
 #, lua-format
-msgid "Not shown on the shelf: this folder is %d levels below your home folder, and the shelf scans %d. Raise the folder walk depth in Bookshelf settings to include it."
-msgstr "未显示在书架上：此文件夹位于主页文件夹下第 %d 层，而书架仅扫描 %d 层。请在 Bookshelf 设置中调高文件夹遍历深度以包含它。"
+msgid "Not shown on the shelf: this folder is %d levels below your home folder, and the shelf scans %d. Raise the folder walk depth in Settings → Home to include it."
+msgstr ""
 
 #: lib/bookshelf_move_flow.lua:205
 msgid "Moved 1 book."
@@ -3009,8 +3009,8 @@ msgid "Insert token"
 msgstr "插入占位符"
 
 #: lib/bookshelf_settings.lua:230
-msgid "Bookshelf tokens"
-msgstr "Bookshelf 占位符"
+msgid "Top panel tokens"
+msgstr ""
 
 #: lib/bookshelf_settings.lua:231
 msgid ""
@@ -3721,12 +3721,12 @@ msgid "Follow KOReader"
 msgstr "跟随 KOReader 设置"
 
 #: lib/bookshelf_settings.lua:3397
-msgid "Bookshelf UI font: %1"
-msgstr "界面字体：%1"
+msgid "Home font: %1"
+msgstr ""
 
 #: lib/bookshelf_settings.lua:3399
-msgid "The font Bookshelf uses for its own UI text (shelf names, labels, metadata). Pick any installed font (same picker as the top panel); '(Default)' follows your KOReader UI font. The title and author have their own fonts in the book detail editor."
-msgstr "Bookshelf 界面文字 (书架名称、标签、元数据) 所用的字体。可选择任何已安装的字体 (与顶部面板使用同一个选择器)；「(默认)」跟随你的 KOReader 界面字体。标题和作者在书籍详情编辑器中另有各自的字体。"
+msgid "The font home uses for its own UI text (shelf names, labels, metadata). Pick any installed font (same picker as the top panel); '(Default)' follows your KOReader UI font. The title and author have their own fonts in the book detail editor."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:3411
 msgid "Image contrast"
@@ -3929,8 +3929,8 @@ msgid "Clear cache (keeps links)"
 msgstr "清除缓存（保留关联关系）"
 
 #: lib/bookshelf_settings.lua:4017
-msgid "Remove Bookshelf's cached Hardcover descriptions, cover images, ratings, review counts and review text. Existing book links are kept, so you can refresh again later."
-msgstr "清除书架中缓存的 Hardcover 简介、封面图片、评分、评论数量及评论内容。已建立的书籍关联关系会保留，后续可重新刷新数据。"
+msgid "Remove the cached Hardcover descriptions, cover images, ratings, review counts and review text. Existing book links are kept, so you can refresh again later."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4030
 msgid "Hardcover cache cleared"
@@ -4021,8 +4021,8 @@ msgid "Instant book close (beta)"
 msgstr "即时关闭书籍 (测试版)"
 
 #: lib/bookshelf_settings.lua:4181
-msgid "Show Bookshelf immediately when leaving a book. The book finishes closing at the next quiet moment - opening another book, half a minute of inactivity, or leaving Bookshelf - so browsing never has to wait for it. Until then, going straight back into the same book is instant. Turn this off to close books fully before Bookshelf appears, as before."
-msgstr "离开书籍时立即显示书架。书籍会在下一个空闲时刻完成关闭 - 打开另一本书、半分钟无操作，或离开书架 - 因此浏览时无需等待。在那之前，直接返回同一本书是即时的。关闭此项则会像以前一样，在显示书架前先完全关闭书籍。"
+msgid "Show home immediately when leaving a book. The book finishes closing at the next quiet moment - opening another book, half a minute of inactivity, or leaving home - so browsing never has to wait for it. Until then, going straight back into the same book is instant. Turn this off to close books fully before home appears, as before."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4202
 msgid "Use E-ink refresh rate for shelf pages"
@@ -4117,12 +4117,12 @@ msgid "What tapping a book does in full screen shelves: show that book's detail 
 msgstr "在全屏书架中点击书籍的行为：在顶部面板显示该书详情、单击打开，或双击打开 (第一次点击为选中)。顶部面板自身的双击打开在下一行设置。"
 
 #: lib/bookshelf_settings.lua:4482
-msgid "Bookshelf gestures"
-msgstr "Bookshelf 手势"
+msgid "Home gestures"
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4483
-msgid "Switch off any of Bookshelf's own gestures. A gesture switched off does nothing on the shelf. Tapping a book and swiping between pages always work."
-msgstr "关闭任意一个 Bookshelf 自带的手势。关闭后的手势在书架上不会有任何效果。点击书籍与翻页滑动始终有效。"
+msgid "Switch off any of home's own gestures. A gesture switched off does nothing on the shelf. Tapping a book and swiping between pages always work."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4491
 msgid "Double tap to open books"
@@ -4177,8 +4177,8 @@ msgid "Closing book notification"
 msgstr "退出书籍提醒"
 
 #: lib/bookshelf_settings.lua:4569
-msgid "Show a 'Closing book…' message in the center of the screen while a book is being closed back to Bookshelf. The book-close work takes a moment, so the message confirms your gesture landed during the wait. Some users on color e-ink panels see a brief flash from the message appearing. Turn it off here if you prefer no message and no flash."
-msgstr "显示「正在关闭书本…」提示，在关闭书籍并退回 Bookshelf 时，会出现在屏幕中央。关闭进程需要短暂耗时，这个提示用于反馈操作已生效。部分彩色墨水屏设备会因弹窗闪现短暂屏闪，如需消除提示与闪屏可在此关闭。"
+msgid "Show a 'Closing book…' message in the center of the screen while a book is being closed back to home. The book-close work takes a moment, so the message confirms your gesture landed during the wait. Some users on color e-ink panels see a brief flash from the message appearing. Turn it off here if you prefer no message and no flash."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4651
 msgid "Scan all library metadata"
@@ -4249,8 +4249,8 @@ msgid "Image library"
 msgstr "图片库"
 
 #: lib/bookshelf_settings.lua:4846
-msgid "Where Bookshelf looks for custom cover images. For stacks, place files like authors/author-name.jpg into the matching subfolder (authors, series, genres, collections). For folders, drop a cover.jpg into the folder itself. See the README for more matching options."
-msgstr "设置书架自定义封面图片的查找目录。合集封面需将图片 (如 authors / 作者名.jpg)放入对应子目录 (作者、丛书、分类、合集文件夹)；文件夹封面直接在目录内放入 cover.jpg 即可，更多匹配规则参阅说明文档。"
+msgid "Where home looks for custom cover images. For stacks, place files like authors/author-name.jpg into the matching subfolder (authors, series, genres, collections). For folders, drop a cover.jpg into the folder itself. See the README for more matching options."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4852
 msgid "Find author images online…"
@@ -4305,16 +4305,16 @@ msgid "Show status line"
 msgstr "显示状态条"
 
 #: lib/bookshelf_settings.lua:5001
-msgid "Puts Bookshelf's status line across the top of the reader, drawn by the same code that draws it on the shelf, so it reads the same in both. Edit the line itself under Settings > Status line. If you also use Bookends, its top row and any top-anchored progress bar move down to make space."
-msgstr "在阅读界面顶部显示 Bookshelf 的状态条，与书架上使用同一段代码绘制，因此两处显示完全一致。状态条本身在 设置 > 状态条 中编辑。如果你同时使用 Bookends，它的顶行以及任何固定在顶部的进度条会下移以留出空间。"
+msgid "Puts home's status line across the top of the reader, drawn by the same code that draws it on the shelf, so it reads the same in both. Edit the line itself under Settings > Status line. If you also use Bookends, its top row and any top-anchored progress bar move down to make space."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:5023
 msgid "Show menu button"
 msgstr "显示菜单按钮"
 
 #: lib/bookshelf_settings.lua:5024
-msgid "Adds the Bookshelf menu button to the reader. Takes effect the next time you open a book."
-msgstr "在阅读器中添加 Bookshelf 菜单按钮。该设置将在你下次打开书籍时生效。"
+msgid "Adds the home menu button to the reader. Takes effect the next time you open a book."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:5033
 msgid "Show modules button"
@@ -4349,32 +4349,20 @@ msgid "Clears your custom shelf menu (which shelves are shown, their order, thei
 msgstr "清除你自定义的书架菜单 (显示哪些书架、它们的顺序、标签与图标、来源、筛选和排序)，恢复为全新安装时的组合：启用「首页 / 在读 / 系列 / 收藏夹」，其余可自行开启。同时把当前书架切回首页，页码指示重置为 1。其他设置 (顶部面板文字、字体、颜色) 不受影响。"
 
 #: lib/bookshelf_settings.lua:5089
-msgid ""
-"Reset the shelf menu to default settings?\n"
-"\n"
-"All custom shelves you have created or edited will be lost. Other Bookshelf settings (top panel text, fonts, colors) are unaffected."
+msgid "Reset the shelf menu to default settings?\n\nAll custom shelves you have created or edited will be lost. Other home settings (top panel text, fonts, colors) are unaffected."
 msgstr ""
-"是否将书架菜单恢复默认设置？\n"
-"\n"
-"所有自行新增、修改的自定义书架将会被清除；Bookshelf 其余配置 (顶部面板文本、字体、配色)保持不变。"
 
 #: lib/bookshelf_settings.lua:5125
 msgid "Reset top panel content to defaults"
 msgstr "将顶部面板内容重置为默认值"
 
 #: lib/bookshelf_settings.lua:5126
-msgid "Clears your top-panel customizations and restores the fresh-install detail layout, including the bundled title (Inter ExtraBold) and author (Caveat) fonts. The Bookshelf UI font and shelf menu are unaffected."
-msgstr "清除你对顶部面板的自定义，恢复为全新安装时的详情布局，包括内置的标题字体 (Inter ExtraBold) 和作者字体 (Caveat)。Bookshelf 界面字体和书架菜单不受影响。"
+msgid "Clears your top-panel customizations and restores the fresh-install detail layout, including the bundled title (Inter ExtraBold) and author (Caveat) fonts. The Home font and shelf menu are unaffected."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:5133
-msgid ""
-"Reset the top panel's content to default settings?\n"
-"\n"
-"All top-panel text and font customizations will be lost. The Bookshelf UI font and shelf menu are unaffected."
+msgid "Reset the top panel's content to default settings?\n\nAll top-panel text and font customizations will be lost. The Home font and shelf menu are unaffected."
 msgstr ""
-"是否将顶部面板内容恢复为默认设置？\n"
-"\n"
-"顶部面板的所有文字与字体自定义都将丢失。Bookshelf 界面字体和书架菜单不受影响。"
 
 #: lib/bookshelf_settings.lua:5153
 msgid "Read calibre metadata.calibre"
@@ -4805,8 +4793,8 @@ msgid "Delete this folder and everything in it?"
 msgstr "删除此文件夹及其中所有内容？"
 
 #: lib/bookshelf_start_menu_edit.lua:480
-msgid "Bookshelf module…"
-msgstr "Bookshelf 模块…"
+msgid "Home module…"
+msgstr ""
 
 #: lib/bookshelf_start_menu_edit.lua:519
 msgid "New folder"
@@ -5602,8 +5590,8 @@ msgid "Current home folder:"
 msgstr "当前主页文件夹："
 
 #: lib/bookshelf_widget.lua:4774 lib/bookshelf_widget.lua:22803
-msgid "File no longer exists. The bookshelf entry is stale."
-msgstr "文件已不存在，书架条目失效。"
+msgid "File no longer exists. The entry on home is stale."
+msgstr ""
 
 #: lib/bookshelf_widget.lua:4802
 msgid "Couldn't open this Kobo book."
@@ -5820,8 +5808,8 @@ msgid "Authentication failed for %1"
 msgstr "%1 身份验证失败"
 
 #: lib/bookshelf_widget.lua:18257 lib/bookshelf_widget.lua:19925
-msgid "%1 refused every format Bookshelf asked for"
-msgstr "%1 拒绝了 Bookshelf 请求的所有格式"
+msgid "%1 refused every format asked for"
+msgstr ""
 
 #: lib/bookshelf_widget.lua:18259 lib/bookshelf_widget.lua:19927
 msgid "%1 is limiting requests. Wait a minute and try again."
@@ -6473,14 +6461,8 @@ msgid "Importing calibre metadata…"
 msgstr "正在导入 calibre 元数据…"
 
 #: main.lua:407
-msgid ""
-"Bookshelf update: cached Hardcover book details from earlier versions can list audiobook narrators and translators as authors, which shows extra author cards.\n"
-"\n"
-"Refresh the details for your linked books now? (Contacts Hardcover, rate-limited, cancellable. Also available later under Hardcover > Manage Hardcover data.)"
+msgid "Update: cached Hardcover book details from earlier versions can list audiobook narrators and translators as authors, which shows extra author cards.\n\nRefresh the details for your linked books now? (Contacts Hardcover, rate-limited, cancellable. Also available later under Hardcover > Manage Hardcover data.)"
 msgstr ""
-"Bookshelf 更新：早期版本缓存的 Hardcover 书籍详情可能把有声书朗读者和译者列为作者，从而多出作者卡片。\n"
-"\n"
-"现在就刷新已关联书籍的详情吗？（将访问 Hardcover，存在访问频次限制，可随时取消。之后也可在「Hardcover > 管理 Hardcover 数据」中进行。）"
 
 #: main.lua:408
 msgid "Refresh now"
@@ -6495,24 +6477,24 @@ msgid "Bookshelf requires the CoverBrowser plugin. Enable it under Settings > Mo
 msgstr "Bookshelf 需要 CoverBrowser 插件支持。请在 「设置 > 更多工具> 插件管理」 中启用它。"
 
 #: main.lua:595 main.lua:599 main.lua:630
-msgid "bookshelf"
-msgstr "bookshelf"
+msgid "home"
+msgstr ""
 
 #: main.lua:630
 msgid "Start with: %1"
 msgstr "初始界面：%1"
 
 #: main.lua:762
-msgid "Close Bookshelf"
-msgstr "关闭 Bookshelf"
+msgid "Go to the file browser"
+msgstr ""
 
 #: main.lua:762
-msgid "Open Bookshelf"
-msgstr "开启 Bookshelf"
+msgid "Go to home"
+msgstr ""
 
 #: main.lua:822
-msgid "Open a small overlay that lets you set the number of columns and rows of books on the shelf, with the bookshelf visible behind it. Cover size follows the column count and the top panel fills the space left over. Changes preview in realtime; Accept keeps them, Cancel reverts."
-msgstr "弹出一个小型悬浮面板，可在书架页面可见状态下设置书架上书籍的列数和行数。封面尺寸跟随列数变化，顶部面板填满剩余空间。修改实时预览，点击接受保存设置、点击取消恢复原有参数。"
+msgid "Open a small overlay that lets you set the number of columns and rows of books on the shelf, with the shelves visible behind it. Cover size follows the column count and the top panel fills the space left over. Changes preview in realtime; Accept keeps them, Cancel reverts."
+msgstr ""
 
 #: main.lua:837
 msgid "Edit shelves…"
@@ -6531,80 +6513,80 @@ msgid "About"
 msgstr "关于"
 
 #: main.lua:1055
-msgid "Bookshelf couldn't open. Some of its files may be missing or corrupted after an update. Try reinstalling the plugin."
-msgstr "Bookshelf 无法打开。更新后部分文件可能丢失或损坏。请尝试重新安装插件。"
+msgid "Home couldn't open. Some of its files may be missing or corrupted after an update. Try reinstalling the plugin."
+msgstr ""
 
 #: main.lua:1129
-msgid "Bookshelf: open or close"
-msgstr "Bookshelf：打开/关闭"
+msgid "Home: open or close"
+msgstr ""
 
 #: main.lua:1135
-msgid "Bookshelf: open"
-msgstr "Bookshelf：打开"
+msgid "Home: open"
+msgstr ""
 
 #: main.lua:1138
 msgid "on"
 msgstr "开"
 
 #: main.lua:1144
-msgid "Bookshelf: next shelf"
-msgstr "Bookshelf：下一个书架"
+msgid "Home: next shelf"
+msgstr ""
 
 #: main.lua:1150
-msgid "Bookshelf: previous shelf"
-msgstr "Bookshelf：上一个书架"
+msgid "Home: previous shelf"
+msgstr ""
 
 #: main.lua:1156
-msgid "Bookshelf: next page of shelves"
-msgstr "Bookshelf：书架菜单下一页"
+msgid "Home: next page of shelves"
+msgstr ""
 
 #: main.lua:1162
-msgid "Bookshelf: previous page of shelves"
-msgstr "Bookshelf：书架菜单上一页"
+msgid "Home: previous page of shelves"
+msgstr ""
 
 #: main.lua:1168
-msgid "Bookshelf: full screen shelves on or off"
-msgstr "Bookshelf：开关全屏书架"
+msgid "Home: full screen shelves on or off"
+msgstr ""
 
 #: main.lua:1178
-msgid "Bookshelf: refresh the library"
-msgstr "Bookshelf：刷新书库"
+msgid "Home: refresh the library"
+msgstr ""
 
 #: main.lua:1184
-msgid "Bookshelf: toggle bulk selection mode"
-msgstr "Bookshelf：切换多选模式"
+msgid "Home: toggle bulk selection mode"
+msgstr ""
 
 #: main.lua:1191
-msgid "Bookshelf: toggle selection on focused book"
-msgstr "Bookshelf：勾选当前书籍"
+msgid "Home: toggle selection on focused book"
+msgstr ""
 
 #: main.lua:1200
-msgid "Bookshelf: select all books in this shelf"
-msgstr "Bookshelf：全选当前书架的书籍"
+msgid "Home: select all books in this shelf"
+msgstr ""
 
 #: main.lua:1206
-msgid "Bookshelf: add focused stack to selection"
-msgstr "Bookshelf：全选当前分组"
+msgid "Home: add focused stack to selection"
+msgstr ""
 
 #: main.lua:1212
-msgid "Bookshelf: open bulk action menu"
-msgstr "Bookshelf：打开批量操作菜单"
+msgid "Home: open bulk action menu"
+msgstr ""
 
 #: main.lua:1223
-msgid "Bookshelf: open start menu"
-msgstr "Bookshelf：打开快捷菜单"
+msgid "Home: open start menu"
+msgstr ""
 
 #: main.lua:1229
-msgid "Bookshelf: open modules"
-msgstr "Bookshelf：打开模块"
+msgid "Home: open modules"
+msgstr ""
 
 #: main.lua:1243
-msgid "Bookshelf: shuffle ornaments"
-msgstr "Bookshelf：随机排列摆件"
+msgid "Home: shuffle ornaments"
+msgstr ""
 
 #: main.lua:1249
-msgid "Bookshelf: go to home screen"
-msgstr "Bookshelf：回到主屏幕"
+msgid "Home: first shelf, first page"
+msgstr ""
 
 #: main.lua:2446
 msgid "Branch name (leave empty for stable)"

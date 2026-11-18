@@ -40,7 +40,7 @@ local M = {}
 M.ORDER = { "shelf", "dash" }
 M.NAMES = { shelf = _("Shelf"), dash = _("Dash") }
 M.DESC = {
-    shelf = _("Bookshelf's home: the book you're reading on top, your shelves as tabs, and the books under them."),
+    shelf = _("Shelves: the book you're reading on top, your shelves as tabs, and the books under them."),
     dash = _("The book you're reading, your streak, this week, what's next in a series and a pick, with one row of covers."),
 }
 

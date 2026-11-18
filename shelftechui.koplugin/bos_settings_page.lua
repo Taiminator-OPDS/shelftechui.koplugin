@@ -30,7 +30,7 @@ local S = UI.S
 
 local Page = {}
 
-Page.VERSION = "1.15.2"
+Page.VERSION = "1.16.0"
 
 -- Dispatcher's sub-menus edit tables in place and flag `caller.updated`.
 local saver = setmetatable({}, { __newindex = function() Store.save() end })
@@ -91,7 +91,7 @@ end
 
 local function startMenuItems()
     local Model = smModel()
-    if not Model then return { { text = _("Bookshelf isn't loaded."), enabled = false } } end
+    if not Model then return { { text = _("Home isn't loaded."), enabled = false } } end
     local items = {}
     local function entryPage(e)
         local function act(fn)
@@ -676,7 +676,7 @@ local function toolbarItems()
             _("The toolbar's CONTENTS, NOTEBOOK and PAGES buttons open ShelfTechUI's own pages, and KOReader's skim bar becomes PAGES too. Off: KOReader's lists, page browser and skim bar.")),
         { heading = _("What it shows") },
         toggle("status_icons", _("Status line with icons"),
-            _("The status line at the top (here, in Quick Settings, on the reading summary and in Settings): the time, then a sun with the brightness, a Wi-Fi icon, and a battery that fills with the charge next to its percentage. Off: Bookshelf's own status line.")),
+            _("The status line at the top (here, in Quick Settings, on the reading summary and in Settings): the time, then a sun with the brightness, a Wi-Fi icon, and a battery that fills with the charge next to its percentage. Off: the shelves' own status line (Top panel → Status line).")),
         {
             text = _("The STATS button"),
             description = _("What STATS opens. Holding it always opens KOReader's statistics."),
@@ -715,8 +715,116 @@ function Page.themeItems()
         })
     end
     table.insert(items, { heading = _("Note") })
-    table.insert(items, { text = _("Themes change everything ShelfTechUI restyles: its own screens, Bookshelf's home, Glimpse, the store, and KOReader's search, dictionary, text sheet, pop-ups, lists and menus. The book's own page keeps your reading font."), enabled = false })
+    table.insert(items, { text = _("Themes change everything ShelfTechUI restyles: its own screens, home, Glimpse, the store, and KOReader's search, dictionary, text sheet, pop-ups, lists and menus. The book's own page keeps your reading font."), enabled = false })
     return items
+end
+
+--- Home's own settings (the shelves' menu, KOReader tab "bookshelf_tab"),
+--- spread through the Home section under plain headings, as if they'd
+--- always been there: no separate "Bookshelf" menu inside it. Whatever
+--- isn't recognised still shows (under More), so nothing's lost when a row
+--- is added upstream.
+local function plainText(it)
+    local t = it.text
+    if t == nil and it.text_func then
+        local ok, r = pcall(it.text_func)
+        t = ok and r or nil
+    end
+    if type(t) ~= "string" then return nil end
+    -- (the menu's icon glyph in front: private-use characters, then spaces)
+    return (t:gsub("^[\xEE\xEF][\x80-\xBF][\x80-\xBF]%s*", ""))
+end
+
+local function plainRow(it, text)
+    local c = {}
+    for k, v in pairs(it) do c[k] = v end
+    c.text_func = nil
+    c.text = text or plainText(it)
+    if it.text_func and not text then
+        local f = it.text_func
+        c.text = nil
+        c.text_func = function()
+            local r = f()
+            return type(r) == "string" and (r:gsub("^[\xEE\xEF][\x80-\xBF][\x80-\xBF]%s*", "")) or r
+        end
+    end
+    c.separator = nil
+    return c
+end
+
+-- where each of the shelves' own settings goes (by its English text, or the
+-- start of it: some carry a value, "Modules: Off")
+local SHELF_GROUPS = {
+    { heading = "Shelves", rows = { "Edit shelves", "Adjust shelf/top panel size" } },
+    { heading = "Top panel", rows = { "Status line", "Edit top panel content", "Modules" } },
+    { heading = "Covers and text", rows = { "Cover display", "List view", "Text size", "Home font", "Image contrast" } },
+    { heading = "Library", rows = { "Library & search", "Hardcover enrichment" } },
+    { heading = "More", rows = { "Behavior", "Advanced" } },
+}
+
+function Page.foldShelves(home, tabs, used, pick)
+    local tab = tabs.bookshelf_tab
+    local rows = {}
+    local to_files
+    if tab then
+        used.bookshelf_tab = true
+        home.tabs = home.tabs or {}
+        table.insert(home.tabs, tab)
+        for _i, it in ipairs(tab) do
+            local t = plainText(it)
+            if it.sub_item_table_func and t == _("Settings") then
+                -- the settings page: its rows, lifted out of it
+                local ok, sub = pcall(it.sub_item_table_func)
+                if ok and type(sub) == "table" then
+                    for _j, c in ipairs(sub) do
+                        if type(c) == "table" and plainText(c) then rows[#rows + 1] = c end
+                    end
+                end
+            elseif t and it.text_func and not it.sub_item_table and not it.sub_item_table_func and it.callback
+                and (t == _("Go to the file browser") or t == _("Go to home")) then
+                to_files = it
+            elseif t and t ~= "KOMenu:separator" then
+                rows[#rows + 1] = it
+            end
+        end
+    end
+    local taken = {}
+    local function take(name)
+        local want = _(name)
+        for i, it in ipairs(rows) do
+            local t = not taken[i] and plainText(it)
+            if t and (t == want or t:sub(1, #want + 1) == want .. ":" or t:sub(1, #want) == want and t:find("\xE2\x80\xA6$")) then
+                taken[i] = true
+                return it
+            end
+        end
+    end
+    -- "Start menu" (where it opens, how wide) beside the start menu's entries
+    local sm = take("Start menu")
+    if sm then table.insert(home.items, plainRow(sm, _("Start menu position"))) end
+    for _g, g in ipairs(SHELF_GROUPS) do
+        local found = {}
+        for _r, name in ipairs(g.rows) do
+            local it = take(name)
+            if it then found[#found + 1] = plainRow(it) end
+        end
+        if g.heading == "Library" then
+            table.insert(home.items, { heading = _("Library") })
+            pick(home.items, { _("Library"), _("For you") })
+            for _r, it in ipairs(found) do table.insert(home.items, it) end
+        elseif g.heading == "More" then
+            for i, it in ipairs(rows) do
+                if not taken[i] then found[#found + 1] = plainRow(it) end
+            end
+            if #found > 0 then table.insert(home.items, { heading = _("More") }) end
+            for _r, it in ipairs(found) do table.insert(home.items, it) end
+        elseif #found > 0 then
+            table.insert(home.items, { heading = _(g.heading) })
+            for _r, it in ipairs(found) do table.insert(home.items, it) end
+        end
+    end
+    -- ("Go to the file browser": at the end, with the file browser's settings)
+    home._to_files = to_files and plainRow(to_files) or nil
 end
 
 --- The Settings app's sections, by what things are for:
@@ -771,10 +879,6 @@ function Page.sections(plugin)
             local t = it.text
             if not (t and placed[t]) then
                 local r = t and RENAME[t] and RENAME[t][sec.rename_as or sec.id]
-                -- Bookshelf's (icon-prefixed) Settings, beside the file browser's
-                if id == "bookshelf_tab" and type(t) == "string" and t:match("%s%sSettings$") then
-                    r = t:gsub("Settings$", _("Bookshelf settings"))
-                end
                 table.insert(sec.items, r and renamed(it, r) or it)
             end
         end
@@ -797,7 +901,7 @@ function Page.sections(plugin)
     pick(home.items, { _("Status bar"), _("Swipe down on home"), _("Reading summary"),
         _("Edge swipes on home"), _("Start menu entries"), _("Settings in the start menu") })
     table.insert(home.items, {
-        text = _("Bookshelf's search key"),
+        text = _("Search key on the shelf tabs"),
         description = _("The magnifier at the end of the shelf's tabs. Off: the search field at the top of home does its job (the same matching; \"All in your library\" opens the same results). On: both."),
         checked_func = function() return Store.get("shelf_search_key") == true end,
         callback = function()
@@ -805,11 +909,10 @@ function Page.sections(plugin)
             pcall(function() require("bos_home").refresh() end)
         end,
     })
-    table.insert(home.items, { heading = _("Library") })
-    pick(home.items, { _("Library"), _("For you") })
-    fold(home, "bookshelf_tab", _("Bookshelf"))
+    Page.foldShelves(home, tabs, used, pick)
     home.rename_as = "stui_home_fm"
     fold(home, "filemanager_settings", _("File browser"))
+    if home._to_files then table.insert(home.items, home._to_files) home._to_files = nil end
     fold(home, "filemanager")
 
     local reading = { id = "stui_reading", name = _("Reading"), icon = "book.opened", items = { { heading = _("In a book") } } }
@@ -1038,13 +1141,13 @@ function Page.items()
         },
         {
             text = _("Start menu entries"),
-            description = _("Every entry in Bookshelf's start menu (≡), to move or remove. Holding an entry in the menu does the same."),
+            description = _("Every entry in home's start menu (≡), to move or remove. Holding an entry in the menu does the same."),
             enabled_func = function() return smModel() ~= nil end,
             sub_item_table_func = startMenuItems,
         },
         {
             text = _("Settings in the start menu"),
-            description = _("The Settings app at the top of Bookshelf's start menu (≡). It's also an action (\"ShelfTechUI: Settings\") for any menu that takes actions: the start menu's own editor, gestures, the home status bar and Quick Settings."),
+            description = _("The Settings app at the top of home's start menu (≡). It's also an action (\"ShelfTechUI: Settings\") for any menu that takes actions: the start menu's own editor, gestures, the home status bar and Quick Settings."),
             enabled_func = function() return require("bos_startmenu").available() end,
             checked_func = function() return require("bos_startmenu").has() end,
             callback = function()
@@ -1097,7 +1200,7 @@ function Page.items()
             callback = function() require("bos_library").show() end,
         },
         toggle("home_edge_swipes", _("Edge swipes on home"),
-            _("On Bookshelf's home: slide up or down along the left edge for brightness, the right edge for warmth, and swipe diagonally anywhere for a full refresh.")),
+            _("On home: slide up or down along the left edge for brightness, the right edge for warmth, and swipe diagonally anywhere for a full refresh.")),
         {
             text = _("Interface size"),
             description = _("Everything bigger, from 100% to 120% (KOReader's screen DPI, scaled from your device's). KOReader restarts to apply it."),
@@ -1176,7 +1279,7 @@ function Page.items()
                     toggle("skin_dictionary", _("The dictionary"),
                         _("A small window (at most half the screen) with a start menu of dictionaries and DICT · WIKI · HIGHLIGHT chips. Off: KOReader's own pop-up.")),
                     toggle("skin_skim", _("The skim bar"),
-                        _("Skim document: chip buttons and Bookshelf's progress bar.")),
+                        _("Skim document: chip buttons and home's progress bar.")),
                     toggle("skin_search", _("Search"),
                         _("The search dialogs: chip buttons in a book; the file search as a themed window with themed results.")),
                     toggle("skin_highlight", _("The highlight menu"),
@@ -1203,7 +1306,7 @@ function Page.items()
                 UIManager:show(InfoMessage:new{
                     text = _("ShelfTechUI") .. " " .. Page.VERSION .. "\n\n"
                         .. _("A complete retro-tech interface for KOReader: home, reading toolbar, Quick Settings, text sheet, Contents, Notebook, Pages, pinned pages, six themes and a Settings app.") .. "\n\n"
-                        .. _("Includes Bookshelf by AndyHazz, Glimpse by Erik Fanki and the Bookdrop store with RakuYomi (all AGPL-3.0), in ShelfTechUI's themes; Bookshelf's own settings are under its tab. The reading toolbar is based on the Kobo-style toolbar by Lina (nessnos, MIT). Inspired by Shortcuts Toolbar by xusoo and KoboUI by nessnos, and by ideas from Aleph (BookOrbit); no Aleph code is used."),
+                        .. _("Home is built on Bookshelf by AndyHazz; includes Glimpse by Erik Fanki and the Bookdrop store with RakuYomi (all AGPL-3.0), in ShelfTechUI's themes. The reading toolbar is based on the Kobo-style toolbar by Lina (nessnos, MIT). Inspired by Shortcuts Toolbar by xusoo and KoboUI by nessnos, and by ideas from Aleph (BookOrbit); no Aleph code is used."),
                 })
             end,
         },

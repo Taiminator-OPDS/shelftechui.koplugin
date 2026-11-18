@@ -16,7 +16,7 @@ return {
     -- main.lua, which does carry name = "bookshelf".) name in _meta restores the
     -- correct key for the disabled-load path; tests/_test_meta.lua guards it.
     name = "bookshelf",
-    fullname = _("Bookshelf"),
+    fullname = _("Home"),
     description = _([[A nice-looking home screen for KOReader: pick a book from your shelf and read it.]]),
     version = "6.3.1",
 }

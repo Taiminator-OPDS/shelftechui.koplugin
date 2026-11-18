@@ -609,7 +609,10 @@ local function known(text)
             [_("Translate current page")] = _("This page, in another language."),
             [_("Display mode")] = _("The file browser as a list or as covers."),
             [_("Edit shelves…")] = _("Add, remove and order the shelves on home."),
-            [_("Close Bookshelf")] = _("Back to KOReader's own file browser."),
+            [_("Go to the file browser")] = _("Back to KOReader's own file browser."),
+            [_("Start menu position")] = _("Which side the start menu (≡) opens on, and how wide it is."),
+            [_("Behavior")] = _("Tapping, gestures, page turns and closing books on home."),
+            [_("Library & search")] = _("Scanning, collections, sorting, author images and what search finds."),
         }
     end
     return KNOWN[text]

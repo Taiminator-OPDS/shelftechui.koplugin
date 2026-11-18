@@ -135,7 +135,7 @@ local CATALOGUE = {
             local ui = readerUI()
             if ui then require("bos_shelf").back(ui) end
         end, closes = true },
-        says = { qs = _("Back to Bookshelf (the book stays open underneath).") },
+        says = { qs = _("Back to home (the book stays open underneath).") },
     },
     {
         id = "search", name = _("Search"), glyph = UI.GLYPH.search,

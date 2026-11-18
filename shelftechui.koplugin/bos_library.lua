@@ -417,7 +417,7 @@ function Library:toCollection()
         end })
     end
     if #items == 0 then
-        UIManager:show(require("ui/widget/infomessage"):new{ text = _("No collections yet: make one in KOReader's file browser (Collections) or Bookshelf.") })
+        UIManager:show(require("ui/widget/infomessage"):new{ text = _("No collections yet: make one in KOReader's file browser (Collections) or on home.") })
         return
     end
     require("bos_ui").openList(items, nil)

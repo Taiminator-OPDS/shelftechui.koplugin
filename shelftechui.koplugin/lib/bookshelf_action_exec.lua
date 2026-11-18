@@ -74,7 +74,7 @@ function Exec.dispatch(entry, bw)
         if not (ok_probe and items) then
             items = S:_settingsSubItems()
         end
-        MenuHost.show{ title = _("Bookshelf"), item_table = items }
+        MenuHost.show{ title = _("Home"), item_table = items }
     elseif type(entry.plugin) == "table" then
         local PluginScan = require("lib/bookshelf_plugin_scan")
         local launch = PluginScan.resolve(entry.plugin.key, entry.plugin.method)

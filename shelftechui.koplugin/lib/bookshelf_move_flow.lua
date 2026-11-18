@@ -168,7 +168,7 @@ local function offShelfWarning(dest_dir)
             FileOps.basename(home) or home)
     end
     return string.format(
-        _("Not shown on the shelf: this folder is %d levels below your home folder, and the shelf scans %d. Raise the folder walk depth in Bookshelf settings to include it."),
+        _("Not shown on the shelf: this folder is %d levels below your home folder, and the shelf scans %d. Raise the folder walk depth in Settings → Home to include it."),
         dest_depth, depth)
 end
 

@@ -74,6 +74,13 @@ function M.DEFAULTS()
     }
 end
 
+local OLD_LABELS = {
+    ["Close bookshelf"] = "Go to the file browser",
+    ["Close Bookshelf"] = "Go to the file browser",
+    ["Bookshelf menu"] = "Home menu",
+    ["Bookshelf settings"] = "Settings",
+}
+
 local function validAction(it)
     return type(it.action) == "table"
         or it.internal == "close" or it.internal == "settings"
@@ -94,6 +101,14 @@ function M.sanitize(items)
         if type(it) == "table" and type(it.id) == "string" then
             if it.type == "action" and type(it.label) == "string" and validAction(it) then
                 keep = true
+                -- (ShelfTechUI: entries saved under the old "Bookshelf" names)
+                local renamed = OLD_LABELS[it.label]
+                if renamed then
+                    entry = {}
+                    for k, v in pairs(it) do entry[k] = v end
+                    entry.label = _(renamed)
+                    changed = true
+                end
             elseif it.type == "folder" and type(it.label) == "string" then
                 -- Sanitize children, stripping nested folders.
                 local raw_children = type(it.children) == "table" and it.children or {}

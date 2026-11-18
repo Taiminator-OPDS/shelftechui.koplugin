@@ -414,7 +414,7 @@ function Bookshelf:init()
                 BookshelfSettings.save("hardcover_author_roles_notice", true)
                 local ConfirmBox = require("ui/widget/confirmbox")
                 UIManager:show(ConfirmBox:new{
-                    text = _("Bookshelf update: cached Hardcover book details from earlier versions can list audiobook narrators and translators as authors, which shows extra author cards.\n\nRefresh the details for your linked books now? (Contacts Hardcover, rate-limited, cancellable. Also available later under Hardcover > Manage Hardcover data.)"),
+                    text = _("Update: cached Hardcover book details from earlier versions can list audiobook narrators and translators as authors, which shows extra author cards.\n\nRefresh the details for your linked books now? (Contacts Hardcover, rate-limited, cancellable. Also available later under Hardcover > Manage Hardcover data.)"),
                     ok_text = _("Refresh now"),
                     cancel_text = _("Later"),
                     ok_callback = function()
@@ -428,13 +428,6 @@ function Bookshelf:init()
             end)
         end)
     end
-
-    -- Cache update-related settings on the instance for the menu's text_func
-    -- closures. Defaults match bookends: branch empty, source = "release",
-    -- background check OFF (opt-in via the menu toggle).
-    self.dev_branch          = BookshelfSettings.read("dev_branch") or ""
-    self.last_install_source = BookshelfSettings.read("last_install_source") or "release"
-    self.check_updates       = BookshelfSettings.isTrue("check_updates")
 
     -- Patch the start_with menu so users can pick Bookshelf as their home.
     self:_registerStartWithMenu()
@@ -479,11 +472,6 @@ function Bookshelf:init()
     -- for users who run Bookshelf alongside other home-screen plugins and
     -- want a quick toggle rather than digging through the FM menu.
     self:onDispatcherRegisterActions()
-
-    -- One silent background check per init when the user's opted in. After
-    -- the shelf is on screen, not before it: the request (a TLS handshake,
-    -- then the reply) ran ahead of the first paint (~0.3 s of it on the PW5).
-    afterFirstPaint(5, function() self:backgroundUpdateCheck() end)
 
     -- One-shot bookinfo_cache staleness sweep. Detects EPUBs whose
     -- on-disk size/mtime has diverged from BIM's cached values (typical
@@ -596,17 +584,17 @@ function Bookshelf:_registerStartWithMenu()
 
         -- Duplicate guard (safety net in case patch fires more than once).
         -- NB: do NOT name the loop index `_` — that would shadow the outer
-        -- gettext binding and `_("bookshelf")` below would call a number.
+        -- gettext binding and `_("home")` below would call a number.
         -- Lowercase matches the other "Start with: …" options (file
         -- browser / history / favorites / last file / folder shortcuts),
         -- which all use lowercase initial caps (issue #69).
         local already
         for _i, entry in ipairs(result.sub_item_table) do
-            if entry.text == _("bookshelf") then already = true; break end
+            if entry.text == _("home") then already = true; break end
         end
         if not already then
             table.insert(result.sub_item_table, {
-                text    = _("bookshelf"),
+                text    = _("home"),
                 radio   = true,
                 checked_func = function()
                     return G_reader_settings:readSetting("start_with") == "bookshelf"
@@ -637,7 +625,7 @@ function Bookshelf:_registerStartWithMenu()
         local orig_text_func = result.text_func
         result.text_func = function()
             if G_reader_settings:readSetting("start_with") == "bookshelf" then
-                return T(_("Start with: %1"), _("bookshelf"))
+                return T(_("Start with: %1"), _("home"))
             end
             return orig_text_func and orig_text_func() or ""
         end
@@ -761,7 +749,7 @@ function Bookshelf:buildMenuItems(menu_items)
     S._plugin = outer
 
     -- Its own icon (issue 548): KOReader's new "Reader" tab took book.opened.
-    menu_items.bookshelf_tab = { icon = require("lib/bookshelf_menu_icon").name(self.path), text = _("Bookshelf") }
+    menu_items.bookshelf_tab = { icon = require("lib/bookshelf_menu_icon").name(self.path), text = _("Home") }
 
     menu_items.bookshelf_toggle = {
         -- NO ICON, deliberately. This row and About are the secondary pair:
@@ -769,7 +757,7 @@ function Bookshelf:buildMenuItems(menu_items)
         -- what makes the icons above them read as a group of destinations
         -- rather than as decoration on every line (maintainer).
         text_func = function()
-            return outer:_isShowing() and _("Close Bookshelf") or _("Open Bookshelf")
+            return outer:_isShowing() and _("Go to the file browser") or _("Go to home")
         end,
         callback = function(touchmenu_instance)
             if outer:_isShowing() then
@@ -830,7 +818,7 @@ function Bookshelf:buildMenuItems(menu_items)
         text     = MenuIcons.label(MenuIcons.SHELF_SIZE,
                        _("Adjust shelf/top panel size") .. "\xE2\x80\xA6"),
         help_text = _("Open a small overlay that lets you set the number of"
-            .. " columns and rows of books on the shelf, with the bookshelf"
+            .. " columns and rows of books on the shelf, with the shelves"
             .. " visible behind it. Cover size follows the column count and"
             .. " the top panel fills the space left over. Changes preview in"
             .. " realtime; Accept keeps them, Cancel reverts."),
@@ -1017,7 +1005,7 @@ function Bookshelf:show()
             .. tostring(BookshelfWidget))
         local InfoMessage = require("ui/widget/infomessage")
         UIManager:show(InfoMessage:new{
-            text = _("Bookshelf couldn't open. Some of its files may be missing or corrupted after an update. Try reinstalling the plugin."),
+            text = _("Home couldn't open. Some of its files may be missing or corrupted after an update. Try reinstalling the plugin."),
         })
         return
     end
@@ -1091,13 +1079,13 @@ function Bookshelf:onDispatcherRegisterActions()
     Dispatcher:registerAction("toggle_bookshelf", {
         category = "none",
         event    = "ToggleBookshelf",
-        title    = _("Bookshelf: open or close"),
+        title    = _("Home: open or close"),
         general  = true,
     })
     Dispatcher:registerAction("set_bookshelf", {
         category  = "string",
         event     = "SetBookshelf",
-        title     = _("Bookshelf: open"),
+        title     = _("Home: open"),
         general   = true,
         args      = { true, false },
         toggle    = { _("on"), _("off") },
@@ -1106,31 +1094,31 @@ function Bookshelf:onDispatcherRegisterActions()
     Dispatcher:registerAction("bookshelf_next_tab", {
         category = "none",
         event    = "BookshelfNextChip",
-        title    = _("Bookshelf: next shelf"),
+        title    = _("Home: next shelf"),
         general  = true,
     })
     Dispatcher:registerAction("bookshelf_prev_tab", {
         category = "none",
         event    = "BookshelfPrevChip",
-        title    = _("Bookshelf: previous shelf"),
+        title    = _("Home: previous shelf"),
         general  = true,
     })
     Dispatcher:registerAction("bookshelf_next_chip_page", {
         category = "none",
         event    = "BookshelfNextChipPage",
-        title    = _("Bookshelf: next page of shelves"),
+        title    = _("Home: next page of shelves"),
         general  = true,
     })
     Dispatcher:registerAction("bookshelf_prev_chip_page", {
         category = "none",
         event    = "BookshelfPrevChipPage",
-        title    = _("Bookshelf: previous page of shelves"),
+        title    = _("Home: previous page of shelves"),
         general  = true,
     })
     Dispatcher:registerAction("bookshelf_toggle_hero", {
         category = "none",
         event    = "BookshelfToggleHero",
-        title    = _("Bookshelf: full screen shelves on or off"),
+        title    = _("Home: full screen shelves on or off"),
         general  = true,
     })
     -- The swipe down on the shelf, assignable (issue 541): a reader who turns
@@ -1140,20 +1128,20 @@ function Bookshelf:onDispatcherRegisterActions()
     Dispatcher:registerAction("bookshelf_refresh_library", {
         category = "none",
         event    = "BookshelfRefreshLibrary",
-        title    = _("Bookshelf: refresh the library"),
+        title    = _("Home: refresh the library"),
         general  = true,
     })
     Dispatcher:registerAction("bookshelf_toggle_selection_mode", {
         category  = "none",
         event     = "BookshelfToggleSelectionMode",
-        title     = _("Bookshelf: toggle bulk selection mode"),
+        title     = _("Home: toggle bulk selection mode"),
         general   = true,
         separator = true,
     })
     Dispatcher:registerAction("bookshelf_select_focused_book", {
         category = "none",
         event    = "BookshelfSelectFocusedBook",
-        title    = _("Bookshelf: toggle selection on focused book"),
+        title    = _("Home: toggle selection on focused book"),
         general  = true,
     })
     -- Select every book in the current shelf view (issue #320). Assignable so
@@ -1162,19 +1150,19 @@ function Bookshelf:onDispatcherRegisterActions()
     Dispatcher:registerAction("bookshelf_select_all_in_view", {
         category = "none",
         event    = "BookshelfSelectAllInView",
-        title    = _("Bookshelf: select all books in this shelf"),
+        title    = _("Home: select all books in this shelf"),
         general  = true,
     })
     Dispatcher:registerAction("bookshelf_add_focused_stack_to_selection", {
         category = "none",
         event    = "BookshelfAddFocusedStackToSelection",
-        title    = _("Bookshelf: add focused stack to selection"),
+        title    = _("Home: add focused stack to selection"),
         general  = true,
     })
     Dispatcher:registerAction("bookshelf_open_bulk_menu", {
         category = "none",
         event    = "BookshelfOpenBulkMenu",
-        title    = _("Bookshelf: open bulk action menu"),
+        title    = _("Home: open bulk action menu"),
         general  = true,
     })
     -- Open the start menu / full-screen micro-module view by gesture, so they're
@@ -1185,13 +1173,13 @@ function Bookshelf:onDispatcherRegisterActions()
     Dispatcher:registerAction("bookshelf_open_start_menu", {
         category = "none",
         event    = "BookshelfOpenStartMenu",
-        title    = _("Bookshelf: open start menu"),
+        title    = _("Home: open start menu"),
         general  = true,
     })
     Dispatcher:registerAction("bookshelf_open_micro_modules", {
         category = "none",
         event    = "BookshelfOpenMicroModules",
-        title    = _("Bookshelf: open modules"),
+        title    = _("Home: open modules"),
         general  = true,
     })
     -- "Take me to the main screen" (#223). Distinct from "Bookshelf: open",
@@ -1202,7 +1190,7 @@ function Bookshelf:onDispatcherRegisterActions()
     Dispatcher:registerAction("bookshelf_go_home", {
         category = "none",
         event    = "BookshelfGoHome",
-        title    = _("Bookshelf: go to home screen"),
+        title    = _("Home: first shelf, first page"),
         general  = true,
     })
 end
@@ -2323,110 +2311,6 @@ function Bookshelf:onReaderReady()
     end
 end
 
--- ---------------------------------------------------------------------------
--- Updates / dev-branch install
--- ---------------------------------------------------------------------------
--- Mirrors bookends's flow (bookends_updater.lua + Bookends:checkForUpdates,
--- editDevBranch, resetToStableRelease, backgroundUpdateCheck). Lets the user
--- bring new bookshelf code onto the device without an SSH push from the
--- laptop — useful when away from the home network.
---
--- Settings written here all use the bookshelf_ prefix on G_reader_settings:
---   bookshelf_dev_branch          — empty for stable, branch name for branch path
---   bookshelf_last_install_source — "release" or "branch:<name>"
---   bookshelf_check_updates       — boolean: silent wake-time check
-
--- Lazy-required inside each entry point: the updater is menu/wake-time
--- functionality most sessions never reach, so it shouldn't cost plugin
--- load time. require() memoizes, so repeat calls are table lookups.
-local function _updater()
-    return require("lib/bookshelf_updater")
-end
-
--- Branch-aware update entry: if a dev branch is configured, install that
--- branch's latest tip (no release needed). Otherwise hit the GitHub
--- releases API and offer the latest stable. Both paths share the same
--- download / unpack / restart-prompt pipeline inside Updater.install.
--- checkForUpdates() -- ALWAYS the release check. It used to divert to the dev
--- branch whenever one was set, which quietly broke updating for exactly the
--- users who help test: a branch name typed once (to try a fix) is never
--- cleared, so "Check for updates" stopped checking for releases forever after.
--- The background check ignores dev_branch, so those users were told an update
--- was available and then, on tapping, silently got the old branch reinstalled
--- instead of the release - restoring that branch's version and leaving the
--- notification to reappear on the next check, round and round. Only "Reset to
--- latest stable release" escaped it, because it is the one path that clears
--- dev_branch. Installing a branch has its own row under Developer updates, so
--- the diversion bought nothing.
-function Bookshelf:checkForUpdates()
-    _updater().check(function()
-        self.last_install_source = "release"
-        BookshelfSettings.save("last_install_source", "release")
-        -- A stable install supersedes the branch the user was testing: leave
-        -- dev_branch set and the NEXT "Install branch" row would still offer
-        -- it (fine), but last_install_source must not claim a branch. Clearing
-        -- the setting here also means a user who updates normally after
-        -- testing a branch cannot be left in the old hijacked state.
-        if self.dev_branch and self.dev_branch ~= "" then
-            self.dev_branch = ""
-            BookshelfSettings.save("dev_branch", "")
-        end
-        G_reader_settings:flush()
-    end)
-end
-
--- Install the tip of the configured dev branch. Reached ONLY from the
--- Developer updates row that names the branch, never from "Check for
--- updates" (see above).
-function Bookshelf:installDevBranch()
-    local branch = self.dev_branch
-    if not branch or branch == "" then
-        -- The row that calls this shows "Check for updates" when no branch is
-        -- set, so fall back to the release check rather than doing nothing.
-        return self:checkForUpdates()
-    end
-    _updater().installBranch(branch, function()
-        self.last_install_source = "branch:" .. branch
-        BookshelfSettings.save("last_install_source", self.last_install_source)
-        G_reader_settings:flush()
-    end)
-end
-
--- Open a single-line dialog to set / change / clear the dev branch.
-function Bookshelf:editDevBranch(touchmenu_instance)
-    local InputDialog = require("ui/widget/inputdialog")
-    local dlg
-    dlg = InputDialog:new{
-        title       = _("Development branch"),
-        input       = self.dev_branch or "",
-        input_hint  = _("Branch name (leave empty for stable)"),
-        buttons = {{
-            {
-                text     = _("Cancel"),
-                id       = "close",
-                callback = function() UIManager:close(dlg) end,
-            },
-            {
-                text             = _("Save"),
-                is_enter_default = true,
-                callback         = function()
-                    local raw = dlg:getInputText() or ""
-                    local trimmed = raw:gsub("^%s+", ""):gsub("%s+$", "")
-                    self.dev_branch = trimmed
-                    BookshelfSettings.save("dev_branch", trimmed)
-                    G_reader_settings:flush()
-                    UIManager:close(dlg)
-                    if touchmenu_instance and touchmenu_instance.updateItems then
-                        touchmenu_instance:updateItems()
-                    end
-                end,
-            },
-        }},
-    }
-    UIManager:show(dlg)
-    dlg:onShowKeyboard()
-end
-
 -- Trigger a full BIM metadata scan of the library directory. Uses
 -- extractBooksInDirectory which provides interactive progress dialogs and
 -- handles recursive/refresh/prune choices. After completion, invalidates
@@ -3075,43 +2959,8 @@ function Bookshelf:refreshHardcoverDetails()
     UIManager:nextTick(step)
 end
 
--- Clear dev branch + install latest stable release. Used when escaping a
--- broken branch back to a known-good release.
-function Bookshelf:resetToStableRelease()
-    local ConfirmBox = require("ui/widget/confirmbox")
-    UIManager:show(ConfirmBox:new{
-        text = _("This will clear the development branch setting and install the latest stable release of Bookshelf, then restart KOReader. Continue?"),
-        ok_text = _("Reset"),
-        ok_callback = function()
-            self.dev_branch = ""
-            BookshelfSettings.save("dev_branch", "")
-            G_reader_settings:flush()
-            _updater().installLatestStable(function()
-                self.last_install_source = "release"
-                BookshelfSettings.save("last_install_source", "release")
-                G_reader_settings:flush()
-            end)
-        end,
-    })
-end
-
--- Silent background poll: checks at most once an hour, only when the user
--- has opted in via "Notify on wake when update available". Surfaces a
--- short notification if a newer release tag is found.
-function Bookshelf:backgroundUpdateCheck()
-    if not self.check_updates then return end
-    _updater().checkBackground(function(ver)
-        local Notification = require("ui/widget/notification")
-        Notification:notify(_("Bookshelf update available: v") .. ver,
-            Notification.SOURCE_ALWAYS_SHOW)
-    end)
-end
-
--- Wake-from-sleep also fires backgroundUpdateCheck, mirroring bookends.
--- The Updater's 1-hour internal cache prevents wake-spam.
 function Bookshelf:onResume()
     self:_repaintAfterWake()
-    self:backgroundUpdateCheck()
 end
 
 -- Some Kindles use a lighter "standby" mode that broadcasts

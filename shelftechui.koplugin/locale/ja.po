@@ -10,8 +10,8 @@ msgstr ""
 "Plural-Forms: nplurals=1; plural=0;\n"
 
 #: _meta.lua:19 lib/bookshelf_action_exec.lua:77 main.lua:754
-msgid "Bookshelf"
-msgstr "Bookshelf"
+msgid "Home"
+msgstr ""
 
 #: _meta.lua:20
 msgid "A nice-looking home screen for KOReader: pick a book from your shelf and read it."
@@ -38,20 +38,20 @@ msgid "Menu action…"
 msgstr "メニューアクション…"
 
 #: lib/bookshelf_action_chooser.lua:66
-msgid "Bookshelf action…"
-msgstr "Bookshelfアクション…"
+msgid "Home action…"
+msgstr ""
 
 #: lib/bookshelf_action_chooser.lua:72
-msgid "Bookshelf actions"
-msgstr "Bookshelfアクション"
+msgid "Home actions"
+msgstr ""
 
 #: lib/bookshelf_action_chooser.lua:75 lib/bookshelf_action_chooser.lua:76
-msgid "Close bookshelf"
-msgstr "ブックシェルフを閉じる"
+msgid "Go to the file browser"
+msgstr ""
 
 #: lib/bookshelf_action_chooser.lua:79 lib/bookshelf_action_chooser.lua:80
-msgid "Bookshelf menu"
-msgstr "Bookshelfメニュー"
+msgid "Home menu"
+msgstr ""
 
 #: lib/bookshelf_action_picker.lua:53
 msgid "Choose an action"
@@ -1596,8 +1596,8 @@ msgid "Swipe down leaves full screen shelves"
 msgstr "下スワイプで全画面シェルフを終了"
 
 #: lib/bookshelf_gestures.lua:28
-msgid "When enabled, swiping down in full screen shelves brings the top panel back. Turn off to stay in full screen: the swipe then refreshes the library, as it does with the top panel showing, and the top panel comes back when you tap the book icon at the start of the shelf bar, or with a gesture set to Bookshelf: full screen shelves on or off."
-msgstr "有効にすると、全画面シェルフで下にスワイプしたときに上部パネルが再表示されます。オフにすると全画面のままになり、スワイプは上部パネル表示時と同様にライブラリを更新します。上部パネルは、シェルフバーの先頭にある本のアイコンをタップするか、「Bookshelf：全画面シェルフのオン/オフ」に設定したジェスチャーで再表示されます。"
+msgid "When enabled, swiping down in full screen shelves brings the top panel back. Turn off to stay in full screen: the swipe then refreshes the library, as it does with the top panel showing, and the top panel comes back when you tap the book icon at the start of the shelf bar, or with a gesture set to Home: full screen shelves on or off."
+msgstr ""
 
 #: lib/bookshelf_gestures.lua:34
 msgid "Swipe down on the shelf to refresh the library"
@@ -2423,8 +2423,8 @@ msgstr "シェルフには表示されません：このフォルダーはホー
 
 #: lib/bookshelf_move_flow.lua:171
 #, lua-format
-msgid "Not shown on the shelf: this folder is %d levels below your home folder, and the shelf scans %d. Raise the folder walk depth in Bookshelf settings to include it."
-msgstr "シェルフには表示されません：このフォルダーはホームフォルダーの%d階層下にあり、シェルフは%d階層までスキャンします。含めるにはBookshelf設定でフォルダーウォーク深度を上げてください。"
+msgid "Not shown on the shelf: this folder is %d levels below your home folder, and the shelf scans %d. Raise the folder walk depth in Settings → Home to include it."
+msgstr ""
 
 #: lib/bookshelf_move_flow.lua:205
 msgid "Moved 1 book."
@@ -3002,8 +3002,8 @@ msgid "Insert token"
 msgstr "トークンを挿入"
 
 #: lib/bookshelf_settings.lua:230
-msgid "Bookshelf tokens"
-msgstr "Bookshelf トークン"
+msgid "Top panel tokens"
+msgstr ""
 
 #: lib/bookshelf_settings.lua:231
 msgid ""
@@ -3714,12 +3714,12 @@ msgid "Follow KOReader"
 msgstr "KOReaderに従う"
 
 #: lib/bookshelf_settings.lua:3397
-msgid "Bookshelf UI font: %1"
-msgstr "Bookshelf UIフォント：%1"
+msgid "Home font: %1"
+msgstr ""
 
 #: lib/bookshelf_settings.lua:3399
-msgid "The font Bookshelf uses for its own UI text (shelf names, labels, metadata). Pick any installed font (same picker as the top panel); '(Default)' follows your KOReader UI font. The title and author have their own fonts in the book detail editor."
-msgstr "BookshelfがそのUIテキスト（シェルフ名、ラベル、メタデータ）に使用するフォントです。インストールされている任意のフォントを選択してください（上部パネルと同じピッカー）。「(デフォルト)」はKOReader UIフォントに従います。タイトルと著者は、書籍詳細エディタで独自のフォントを持っています。"
+msgid "The font home uses for its own UI text (shelf names, labels, metadata). Pick any installed font (same picker as the top panel); '(Default)' follows your KOReader UI font. The title and author have their own fonts in the book detail editor."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:3411
 msgid "Image contrast"
@@ -3919,8 +3919,8 @@ msgid "Clear cache (keeps links)"
 msgstr "キャッシュをクリア（リンクは保持）"
 
 #: lib/bookshelf_settings.lua:4017
-msgid "Remove Bookshelf's cached Hardcover descriptions, cover images, ratings, review counts and review text. Existing book links are kept, so you can refresh again later."
-msgstr "BookshelfのキャッシュされたHardcoverの説明、カバー画像、評価、レビュー数、レビューテキストを削除します。既存の書籍リンクは保持されるため、後で再度更新できます。"
+msgid "Remove the cached Hardcover descriptions, cover images, ratings, review counts and review text. Existing book links are kept, so you can refresh again later."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4030
 msgid "Hardcover cache cleared"
@@ -4011,8 +4011,8 @@ msgid "Instant book close (beta)"
 msgstr "書籍の即時クローズ（ベータ版）"
 
 #: lib/bookshelf_settings.lua:4181
-msgid "Show Bookshelf immediately when leaving a book. The book finishes closing at the next quiet moment - opening another book, half a minute of inactivity, or leaving Bookshelf - so browsing never has to wait for it. Until then, going straight back into the same book is instant. Turn this off to close books fully before Bookshelf appears, as before."
-msgstr "書籍を離れるときにBookshelfをすぐに表示します。書籍のクローズは次の静かなタイミング（別の書籍を開く、30秒間の操作なし、またはBookshelfを離れる）で完了するため、閲覧が待たされることはありません。それまでは、同じ書籍にそのまま戻るのは即座に行えます。以前と同様にBookshelfが表示される前に書籍を完全に閉じるには、これをオフにしてください。"
+msgid "Show home immediately when leaving a book. The book finishes closing at the next quiet moment - opening another book, half a minute of inactivity, or leaving home - so browsing never has to wait for it. Until then, going straight back into the same book is instant. Turn this off to close books fully before home appears, as before."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4202
 msgid "Use E-ink refresh rate for shelf pages"
@@ -4107,12 +4107,12 @@ msgid "What tapping a book does in full screen shelves: show that book's detail 
 msgstr "全画面シェルフで書籍をタップしたときの動作を指定します：上部パネルにその書籍の詳細を表示する、シングルタップで開く、またはダブルタップで開く（最初のタップで選択）。上部パネル自体のダブルタップで開く設定は次の行にあります。"
 
 #: lib/bookshelf_settings.lua:4482
-msgid "Bookshelf gestures"
-msgstr "Bookshelfジェスチャー"
+msgid "Home gestures"
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4483
-msgid "Switch off any of Bookshelf's own gestures. A gesture switched off does nothing on the shelf. Tapping a book and swiping between pages always work."
-msgstr "Bookshelf独自のジェスチャーを個別にオフにできます。オフにしたジェスチャーはシェルフ上で何も行いません。本のタップとページ間のスワイプは常に機能します。"
+msgid "Switch off any of home's own gestures. A gesture switched off does nothing on the shelf. Tapping a book and swiping between pages always work."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4491
 msgid "Double tap to open books"
@@ -4167,8 +4167,8 @@ msgid "Closing book notification"
 msgstr "書籍を閉じる通知"
 
 #: lib/bookshelf_settings.lua:4569
-msgid "Show a 'Closing book…' message in the center of the screen while a book is being closed back to Bookshelf. The book-close work takes a moment, so the message confirms your gesture landed during the wait. Some users on color e-ink panels see a brief flash from the message appearing. Turn it off here if you prefer no message and no flash."
-msgstr "Bookshelfに戻るために書籍を閉じている間、画面中央に「書籍を閉じています…」というメッセージを表示します。書籍を閉じる作業には時間がかかるため、このメッセージは待機中にジェスチャーが受け付けられたことを確認します。カラーEインクパネルの一部のユーザーは、メッセージが表示される際に短いフラッシュが見える場合があります。メッセージやフラッシュが不要な場合は、ここでオフにしてください。"
+msgid "Show a 'Closing book…' message in the center of the screen while a book is being closed back to home. The book-close work takes a moment, so the message confirms your gesture landed during the wait. Some users on color e-ink panels see a brief flash from the message appearing. Turn it off here if you prefer no message and no flash."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4651
 msgid "Scan all library metadata"
@@ -4239,8 +4239,8 @@ msgid "Image library"
 msgstr "画像ライブラリ"
 
 #: lib/bookshelf_settings.lua:4846
-msgid "Where Bookshelf looks for custom cover images. For stacks, place files like authors/author-name.jpg into the matching subfolder (authors, series, genres, collections). For folders, drop a cover.jpg into the folder itself. See the README for more matching options."
-msgstr "Bookshelfがカスタムカバー画像を検索する場所です。スタックの場合、authors/author-name.jpgのようなファイルを一致するサブフォルダ（authors, series, genres, collections）に配置します。フォルダの場合、cover.jpgをフォルダ自体にドロップします。その他のマッチングオプションについてはREADMEを参照してください。"
+msgid "Where home looks for custom cover images. For stacks, place files like authors/author-name.jpg into the matching subfolder (authors, series, genres, collections). For folders, drop a cover.jpg into the folder itself. See the README for more matching options."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4852
 msgid "Find author images online…"
@@ -4295,16 +4295,16 @@ msgid "Show status line"
 msgstr "ステータス行を表示"
 
 #: lib/bookshelf_settings.lua:5001
-msgid "Puts Bookshelf's status line across the top of the reader, drawn by the same code that draws it on the shelf, so it reads the same in both. Edit the line itself under Settings > Status line. If you also use Bookends, its top row and any top-anchored progress bar move down to make space."
-msgstr "Bookshelf のステータス行をリーダーの上部に表示します。棚と同じコードで描画されるため、どちらでも同じ表示になります。行そのものは 設定 > ステータス行 で編集します。Bookends も使用している場合、その最上段と上部に固定された進捗バーは場所を空けるために下に移動します。"
+msgid "Puts home's status line across the top of the reader, drawn by the same code that draws it on the shelf, so it reads the same in both. Edit the line itself under Settings > Status line. If you also use Bookends, its top row and any top-anchored progress bar move down to make space."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:5023
 msgid "Show menu button"
 msgstr "メニューボタンを表示"
 
 #: lib/bookshelf_settings.lua:5024
-msgid "Adds the Bookshelf menu button to the reader. Takes effect the next time you open a book."
-msgstr "読書画面にBookshelfのメニューボタンを追加します。次に本を開いたときに有効になります。"
+msgid "Adds the home menu button to the reader. Takes effect the next time you open a book."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:5033
 msgid "Show modules button"
@@ -4339,32 +4339,20 @@ msgid "Clears your custom shelf menu (which shelves are shown, their order, thei
 msgstr "カスタムのシェルフメニュー（表示されるシェルフ、順序、ラベルとアイコン、ソースとフィルター、並べ替え）をクリアし、初期インストール時のセット（ホーム/最近開いた項目/シリーズ/お気に入りが有効、残りは切り替え可能）を復元します。また、アクティブなシェルフをホームに戻し、ページインジケーターを1に戻します。その他の設定（上部パネルのテキスト、フォント、色）は影響を受けません。"
 
 #: lib/bookshelf_settings.lua:5089
-msgid ""
-"Reset the shelf menu to default settings?\n"
-"\n"
-"All custom shelves you have created or edited will be lost. Other Bookshelf settings (top panel text, fonts, colors) are unaffected."
+msgid "Reset the shelf menu to default settings?\n\nAll custom shelves you have created or edited will be lost. Other home settings (top panel text, fonts, colors) are unaffected."
 msgstr ""
-"シェルフメニューをデフォルト設定にリセットしますか？\n"
-"\n"
-"作成または編集したすべてのカスタムシェルフは失われます。その他のBookshelf設定（上部パネルのテキスト、フォント、色）は影響を受けません。"
 
 #: lib/bookshelf_settings.lua:5125
 msgid "Reset top panel content to defaults"
 msgstr "上部パネルの内容をデフォルトにリセット"
 
 #: lib/bookshelf_settings.lua:5126
-msgid "Clears your top-panel customizations and restores the fresh-install detail layout, including the bundled title (Inter ExtraBold) and author (Caveat) fonts. The Bookshelf UI font and shelf menu are unaffected."
-msgstr "上部パネルのカスタマイズをクリアし、バンドルされたタイトル（Inter ExtraBold）と著者（Caveat）のフォントを含む、初期インストール時の詳細レイアウトを復元します。Bookshelf UIフォントとシェルフメニューは影響を受けません。"
+msgid "Clears your top-panel customizations and restores the fresh-install detail layout, including the bundled title (Inter ExtraBold) and author (Caveat) fonts. The Home font and shelf menu are unaffected."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:5133
-msgid ""
-"Reset the top panel's content to default settings?\n"
-"\n"
-"All top-panel text and font customizations will be lost. The Bookshelf UI font and shelf menu are unaffected."
+msgid "Reset the top panel's content to default settings?\n\nAll top-panel text and font customizations will be lost. The Home font and shelf menu are unaffected."
 msgstr ""
-"上部パネルの内容をデフォルト設定にリセットしますか？\n"
-"\n"
-"上部パネルのテキストとフォントのカスタマイズはすべて失われます。Bookshelf UIフォントとシェルフメニューは影響を受けません。"
 
 #: lib/bookshelf_settings.lua:5153
 msgid "Read calibre metadata.calibre"
@@ -4795,8 +4783,8 @@ msgid "Delete this folder and everything in it?"
 msgstr "このフォルダとその中のすべてを削除しますか？"
 
 #: lib/bookshelf_start_menu_edit.lua:480
-msgid "Bookshelf module…"
-msgstr "Bookshelfモジュール…"
+msgid "Home module…"
+msgstr ""
 
 #: lib/bookshelf_start_menu_edit.lua:519
 msgid "New folder"
@@ -5592,8 +5580,8 @@ msgid "Current home folder:"
 msgstr "現在のホームフォルダ："
 
 #: lib/bookshelf_widget.lua:4774 lib/bookshelf_widget.lua:22803
-msgid "File no longer exists. The bookshelf entry is stale."
-msgstr "ファイルが存在しません。Bookshelfのエントリが古くなっています。"
+msgid "File no longer exists. The entry on home is stale."
+msgstr ""
 
 #: lib/bookshelf_widget.lua:4802
 msgid "Couldn't open this Kobo book."
@@ -5810,8 +5798,8 @@ msgid "Authentication failed for %1"
 msgstr "%1の認証に失敗しました"
 
 #: lib/bookshelf_widget.lua:18257 lib/bookshelf_widget.lua:19925
-msgid "%1 refused every format Bookshelf asked for"
-msgstr "%1はBookshelfが要求したすべてのフォーマットを拒否しました"
+msgid "%1 refused every format asked for"
+msgstr ""
 
 #: lib/bookshelf_widget.lua:18259 lib/bookshelf_widget.lua:19927
 msgid "%1 is limiting requests. Wait a minute and try again."
@@ -6463,14 +6451,8 @@ msgid "Importing calibre metadata…"
 msgstr "calibre のメタデータを読み込み中…"
 
 #: main.lua:407
-msgid ""
-"Bookshelf update: cached Hardcover book details from earlier versions can list audiobook narrators and translators as authors, which shows extra author cards.\n"
-"\n"
-"Refresh the details for your linked books now? (Contacts Hardcover, rate-limited, cancellable. Also available later under Hardcover > Manage Hardcover data.)"
+msgid "Update: cached Hardcover book details from earlier versions can list audiobook narrators and translators as authors, which shows extra author cards.\n\nRefresh the details for your linked books now? (Contacts Hardcover, rate-limited, cancellable. Also available later under Hardcover > Manage Hardcover data.)"
 msgstr ""
-"Bookshelfのアップデート: 以前のバージョンでキャッシュされたHardcoverの書籍詳細では、オーディオブックのナレーターや翻訳者が著者として登録されていることがあり、余分な著者カードが表示されます。\n"
-"\n"
-"今すぐリンク済みの書籍の詳細を更新しますか？（Hardcoverに接続します。レート制限あり、キャンセル可能。後から Hardcover > Hardcoverデータを管理 でも実行できます。）"
 
 #: main.lua:408
 msgid "Refresh now"
@@ -6485,24 +6467,24 @@ msgid "Bookshelf requires the CoverBrowser plugin. Enable it under Settings > Mo
 msgstr "BookshelfにはCoverBrowserプラグインが必要です。設定 > その他のプラグインで有効にしてください。"
 
 #: main.lua:595 main.lua:599 main.lua:630
-msgid "bookshelf"
-msgstr "ブックシェルフ"
+msgid "home"
+msgstr ""
 
 #: main.lua:630
 msgid "Start with: %1"
 msgstr "開始： %1"
 
 #: main.lua:762
-msgid "Close Bookshelf"
-msgstr "Bookshelfを閉じる"
+msgid "Go to the file browser"
+msgstr ""
 
 #: main.lua:762
-msgid "Open Bookshelf"
-msgstr "Bookshelfを開く"
+msgid "Go to home"
+msgstr ""
 
 #: main.lua:822
-msgid "Open a small overlay that lets you set the number of columns and rows of books on the shelf, with the bookshelf visible behind it. Cover size follows the column count and the top panel fills the space left over. Changes preview in realtime; Accept keeps them, Cancel reverts."
-msgstr "ブックシェルフを背景に見ながら、シェルフ上の本の列数と行数を設定できる小さなオーバーレイを開きます。カバーサイズは列数に依存し、上部パネルは残りのスペースを埋めます。変更はリアルタイムでプレビューされ、承諾すると保存され、キャンセルすると元に戻ります。"
+msgid "Open a small overlay that lets you set the number of columns and rows of books on the shelf, with the shelves visible behind it. Cover size follows the column count and the top panel fills the space left over. Changes preview in realtime; Accept keeps them, Cancel reverts."
+msgstr ""
 
 #: main.lua:837
 msgid "Edit shelves…"
@@ -6521,80 +6503,80 @@ msgid "About"
 msgstr "情報"
 
 #: main.lua:1055
-msgid "Bookshelf couldn't open. Some of its files may be missing or corrupted after an update. Try reinstalling the plugin."
-msgstr "Bookshelfを開けませんでした。アップデート後に一部のファイルが失われたり破損したりしている可能性があります。プラグインを再インストールしてみてください。"
+msgid "Home couldn't open. Some of its files may be missing or corrupted after an update. Try reinstalling the plugin."
+msgstr ""
 
 #: main.lua:1129
-msgid "Bookshelf: open or close"
-msgstr "Bookshelf：開く/閉じる"
+msgid "Home: open or close"
+msgstr ""
 
 #: main.lua:1135
-msgid "Bookshelf: open"
-msgstr "Bookshelf：開く"
+msgid "Home: open"
+msgstr ""
 
 #: main.lua:1138
 msgid "on"
 msgstr "オン"
 
 #: main.lua:1144
-msgid "Bookshelf: next shelf"
-msgstr "Bookshelf：次のシェルフ"
+msgid "Home: next shelf"
+msgstr ""
 
 #: main.lua:1150
-msgid "Bookshelf: previous shelf"
-msgstr "Bookshelf：前のシェルフ"
+msgid "Home: previous shelf"
+msgstr ""
 
 #: main.lua:1156
-msgid "Bookshelf: next page of shelves"
-msgstr "Bookshelf：シェルフの次のページ"
+msgid "Home: next page of shelves"
+msgstr ""
 
 #: main.lua:1162
-msgid "Bookshelf: previous page of shelves"
-msgstr "Bookshelf：シェルフの前のページ"
+msgid "Home: previous page of shelves"
+msgstr ""
 
 #: main.lua:1168
-msgid "Bookshelf: full screen shelves on or off"
-msgstr "Bookshelf：全画面シェルフのオン/オフ"
+msgid "Home: full screen shelves on or off"
+msgstr ""
 
 #: main.lua:1178
-msgid "Bookshelf: refresh the library"
-msgstr "Bookshelf：ライブラリを更新"
+msgid "Home: refresh the library"
+msgstr ""
 
 #: main.lua:1184
-msgid "Bookshelf: toggle bulk selection mode"
-msgstr "Bookshelf：一括選択モードを切り替える"
+msgid "Home: toggle bulk selection mode"
+msgstr ""
 
 #: main.lua:1191
-msgid "Bookshelf: toggle selection on focused book"
-msgstr "Bookshelf：フォーカス中の書籍の選択を切り替える"
+msgid "Home: toggle selection on focused book"
+msgstr ""
 
 #: main.lua:1200
-msgid "Bookshelf: select all books in this shelf"
-msgstr "Bookshelf：このシェルフの本をすべて選択"
+msgid "Home: select all books in this shelf"
+msgstr ""
 
 #: main.lua:1206
-msgid "Bookshelf: add focused stack to selection"
-msgstr "Bookshelf：フォーカス中のスタックを選択に追加"
+msgid "Home: add focused stack to selection"
+msgstr ""
 
 #: main.lua:1212
-msgid "Bookshelf: open bulk action menu"
-msgstr "Bookshelf：一括操作メニューを開く"
+msgid "Home: open bulk action menu"
+msgstr ""
 
 #: main.lua:1223
-msgid "Bookshelf: open start menu"
-msgstr "Bookshelf：スタートメニューを開く"
+msgid "Home: open start menu"
+msgstr ""
 
 #: main.lua:1229
-msgid "Bookshelf: open modules"
-msgstr "Bookshelf：モジュールを開く"
+msgid "Home: open modules"
+msgstr ""
 
 #: main.lua:1243
-msgid "Bookshelf: shuffle ornaments"
-msgstr "Bookshelf：オーナメントをシャッフル"
+msgid "Home: shuffle ornaments"
+msgstr ""
 
 #: main.lua:1249
-msgid "Bookshelf: go to home screen"
-msgstr "Bookshelf：ホーム画面に移動"
+msgid "Home: first shelf, first page"
+msgstr ""
 
 #: main.lua:2446
 msgid "Branch name (leave empty for stable)"

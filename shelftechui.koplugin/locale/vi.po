@@ -9,8 +9,8 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 
 #: _meta.lua:19 lib/bookshelf_action_exec.lua:77 main.lua:754
-msgid "Bookshelf"
-msgstr "Bookshelf"
+msgid "Home"
+msgstr ""
 
 #: _meta.lua:20
 msgid "A nice-looking home screen for KOReader: pick a book from your shelf and read it."
@@ -37,20 +37,20 @@ msgid "Menu action…"
 msgstr "Hành động menu…"
 
 #: lib/bookshelf_action_chooser.lua:66
-msgid "Bookshelf action…"
-msgstr "Hành động thùng sách…"
+msgid "Home action…"
+msgstr ""
 
 #: lib/bookshelf_action_chooser.lua:72
-msgid "Bookshelf actions"
-msgstr "Các hành động thùng sách"
+msgid "Home actions"
+msgstr ""
 
 #: lib/bookshelf_action_chooser.lua:75 lib/bookshelf_action_chooser.lua:76
-msgid "Close bookshelf"
-msgstr "Đóng kệ sách"
+msgid "Go to the file browser"
+msgstr ""
 
 #: lib/bookshelf_action_chooser.lua:79 lib/bookshelf_action_chooser.lua:80
-msgid "Bookshelf menu"
-msgstr "Menu kệ sách"
+msgid "Home menu"
+msgstr ""
 
 #: lib/bookshelf_action_picker.lua:53
 msgid "Choose an action"
@@ -1595,8 +1595,8 @@ msgid "Swipe down leaves full screen shelves"
 msgstr "Vuốt xuống để thoát kệ toàn màn hình"
 
 #: lib/bookshelf_gestures.lua:28
-msgid "When enabled, swiping down in full screen shelves brings the top panel back. Turn off to stay in full screen: the swipe then refreshes the library, as it does with the top panel showing, and the top panel comes back when you tap the book icon at the start of the shelf bar, or with a gesture set to Bookshelf: full screen shelves on or off."
-msgstr "Khi bật, vuốt xuống trong kệ toàn màn hình sẽ đưa bảng trên trở lại. Tắt để ở lại chế độ toàn màn hình: khi đó thao tác vuốt sẽ làm mới thư viện, giống như khi bảng trên đang hiển thị, và bảng trên sẽ trở lại khi bạn chạm vào biểu tượng sách ở đầu thanh kệ, hoặc bằng một cử chỉ được đặt thành Bookshelf: bật hoặc tắt kệ toàn màn hình."
+msgid "When enabled, swiping down in full screen shelves brings the top panel back. Turn off to stay in full screen: the swipe then refreshes the library, as it does with the top panel showing, and the top panel comes back when you tap the book icon at the start of the shelf bar, or with a gesture set to Home: full screen shelves on or off."
+msgstr ""
 
 #: lib/bookshelf_gestures.lua:34
 msgid "Swipe down on the shelf to refresh the library"
@@ -2422,8 +2422,8 @@ msgstr "Không hiển thị trên kệ: thư mục này nằm ngoài thư mục 
 
 #: lib/bookshelf_move_flow.lua:171
 #, lua-format
-msgid "Not shown on the shelf: this folder is %d levels below your home folder, and the shelf scans %d. Raise the folder walk depth in Bookshelf settings to include it."
-msgstr "Không hiển thị trên kệ: thư mục này nằm sâu %d cấp dưới thư mục home của bạn, trong khi kệ chỉ quét %d cấp. Tăng độ sâu quét thư mục trong cài đặt Bookshelf để bao gồm nó."
+msgid "Not shown on the shelf: this folder is %d levels below your home folder, and the shelf scans %d. Raise the folder walk depth in Settings → Home to include it."
+msgstr ""
 
 #: lib/bookshelf_move_flow.lua:205
 msgid "Moved 1 book."
@@ -3000,8 +3000,8 @@ msgid "Insert token"
 msgstr "Chèn token"
 
 #: lib/bookshelf_settings.lua:230
-msgid "Bookshelf tokens"
-msgstr "Token tủ sách"
+msgid "Top panel tokens"
+msgstr ""
 
 #: lib/bookshelf_settings.lua:231
 msgid ""
@@ -3712,12 +3712,12 @@ msgid "Follow KOReader"
 msgstr "Theo dõi KOReader"
 
 #: lib/bookshelf_settings.lua:3397
-msgid "Bookshelf UI font: %1"
-msgstr "Font UI Bookshelf: %1"
+msgid "Home font: %1"
+msgstr ""
 
 #: lib/bookshelf_settings.lua:3399
-msgid "The font Bookshelf uses for its own UI text (shelf names, labels, metadata). Pick any installed font (same picker as the top panel); '(Default)' follows your KOReader UI font. The title and author have their own fonts in the book detail editor."
-msgstr "Phông chữ Bookshelf dùng cho văn bản giao diện của chính nó (tên kệ, nhãn, meta dữ liệu). Chọn bất kỳ phông nào đã cài (cùng bộ chọn với bảng trên); '(Mặc định)' sẽ theo phông giao diện KOReader của bạn. Tiêu đề và tác giả có phông riêng trong trình chỉnh sửa chi tiết sách."
+msgid "The font home uses for its own UI text (shelf names, labels, metadata). Pick any installed font (same picker as the top panel); '(Default)' follows your KOReader UI font. The title and author have their own fonts in the book detail editor."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:3411
 msgid "Image contrast"
@@ -3917,8 +3917,8 @@ msgid "Clear cache (keeps links)"
 msgstr "Xóa cache (giữ liên kết)"
 
 #: lib/bookshelf_settings.lua:4017
-msgid "Remove Bookshelf's cached Hardcover descriptions, cover images, ratings, review counts and review text. Existing book links are kept, so you can refresh again later."
-msgstr "Xóa các mô tả, ảnh bìa, đánh giá, số lượng nhận xét và nội dung nhận xét từ Hardcover mà Bookshelf đã lưu tạm. Các liên kết sách hiện có vẫn được giữ nguyên, nên bạn có thể làm mới lại sau."
+msgid "Remove the cached Hardcover descriptions, cover images, ratings, review counts and review text. Existing book links are kept, so you can refresh again later."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4030
 msgid "Hardcover cache cleared"
@@ -4009,8 +4009,8 @@ msgid "Instant book close (beta)"
 msgstr "Đóng sách tức thì (beta)"
 
 #: lib/bookshelf_settings.lua:4181
-msgid "Show Bookshelf immediately when leaving a book. The book finishes closing at the next quiet moment - opening another book, half a minute of inactivity, or leaving Bookshelf - so browsing never has to wait for it. Until then, going straight back into the same book is instant. Turn this off to close books fully before Bookshelf appears, as before."
-msgstr "Hiển thị Bookshelf ngay khi bạn rời khỏi một cuốn sách. Cuốn sách sẽ hoàn tất việc đóng vào thời điểm rảnh tiếp theo - khi mở một cuốn khác, sau nửa phút không hoạt động, hoặc khi rời khỏi Bookshelf - nên việc duyệt xem không bao giờ phải chờ. Trước lúc đó, quay thẳng lại chính cuốn sách đó là tức thì. Tắt tùy chọn này để đóng sách hoàn toàn trước khi Bookshelf xuất hiện, như trước đây."
+msgid "Show home immediately when leaving a book. The book finishes closing at the next quiet moment - opening another book, half a minute of inactivity, or leaving home - so browsing never has to wait for it. Until then, going straight back into the same book is instant. Turn this off to close books fully before home appears, as before."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4202
 msgid "Use E-ink refresh rate for shelf pages"
@@ -4105,12 +4105,12 @@ msgid "What tapping a book does in full screen shelves: show that book's detail 
 msgstr "Việc chạm vào một cuốn sách trong kệ toàn màn hình sẽ làm gì: hiển thị chi tiết cuốn đó ở bảng trên, mở nó bằng một lần chạm, hoặc mở bằng chạm đúp (lần chạm đầu để chọn). Tùy chọn chạm đúp để mở của riêng bảng trên nằm ở hàng kế tiếp."
 
 #: lib/bookshelf_settings.lua:4482
-msgid "Bookshelf gestures"
-msgstr "Thao tác Bookshelf"
+msgid "Home gestures"
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4483
-msgid "Switch off any of Bookshelf's own gestures. A gesture switched off does nothing on the shelf. Tapping a book and swiping between pages always work."
-msgstr "Tắt bất kỳ thao tác riêng nào của Bookshelf. Một thao tác đã tắt sẽ không làm gì trên kệ. Chạm vào sách và vuốt giữa các trang luôn hoạt động."
+msgid "Switch off any of home's own gestures. A gesture switched off does nothing on the shelf. Tapping a book and swiping between pages always work."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4491
 msgid "Double tap to open books"
@@ -4165,8 +4165,8 @@ msgid "Closing book notification"
 msgstr "Thông báo đóng cuốnsách"
 
 #: lib/bookshelf_settings.lua:4569
-msgid "Show a 'Closing book…' message in the center of the screen while a book is being closed back to Bookshelf. The book-close work takes a moment, so the message confirms your gesture landed during the wait. Some users on color e-ink panels see a brief flash from the message appearing. Turn it off here if you prefer no message and no flash."
-msgstr "Hiển thị thông báo 'Đang đóng sách…' ở giữa màn hình trong khi sách đang được đóng để quay lại Bookshelf. Việc đóng sách mất một chút thời gian, nên thông báo này xác nhận rằng thao tác của bạn đã được ghi nhận trong lúc chờ. Một số người dùng màn hình e-ink màu có thể thấy nhấp nháy nhẹ khi thông báo xuất hiện. Tắt tùy chọn này nếu bạn không muốn có thông báo và không muốn nhấp nháy."
+msgid "Show a 'Closing book…' message in the center of the screen while a book is being closed back to home. The book-close work takes a moment, so the message confirms your gesture landed during the wait. Some users on color e-ink panels see a brief flash from the message appearing. Turn it off here if you prefer no message and no flash."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4651
 msgid "Scan all library metadata"
@@ -4237,8 +4237,8 @@ msgid "Image library"
 msgstr "Thư viện ảnh"
 
 #: lib/bookshelf_settings.lua:4846
-msgid "Where Bookshelf looks for custom cover images. For stacks, place files like authors/author-name.jpg into the matching subfolder (authors, series, genres, collections). For folders, drop a cover.jpg into the folder itself. See the README for more matching options."
-msgstr "Nơi Bookshelf tìm ảnh bìa tùy chỉnh. Với các chồng sách, đặt tệp như authors/author-name.jpg vào đúng thư mục con tương ứng (authors, series, genres, collections). Với thư mục, đặt một tệp cover.jpg ngay trong thư mục đó. Xem README để biết thêm các tùy chọn đối chiếu khác."
+msgid "Where home looks for custom cover images. For stacks, place files like authors/author-name.jpg into the matching subfolder (authors, series, genres, collections). For folders, drop a cover.jpg into the folder itself. See the README for more matching options."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4852
 msgid "Find author images online…"
@@ -4293,16 +4293,16 @@ msgid "Show status line"
 msgstr "Hiện hàng trạng thái"
 
 #: lib/bookshelf_settings.lua:5001
-msgid "Puts Bookshelf's status line across the top of the reader, drawn by the same code that draws it on the shelf, so it reads the same in both. Edit the line itself under Settings > Status line. If you also use Bookends, its top row and any top-anchored progress bar move down to make space."
-msgstr "Hiển thị hàng trạng thái của Bookshelf ở phía trên trình đọc, được vẽ bằng cùng đoạn mã vẽ nó trên giá sách, nên hai nơi trông giống nhau. Bản thân hàng này được chỉnh trong Cài đặt > Hàng trạng thái. Nếu bạn cũng dùng Bookends, hàng trên cùng của nó và mọi thanh tiến trình neo ở trên sẽ dịch xuống để nhường chỗ."
+msgid "Puts home's status line across the top of the reader, drawn by the same code that draws it on the shelf, so it reads the same in both. Edit the line itself under Settings > Status line. If you also use Bookends, its top row and any top-anchored progress bar move down to make space."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:5023
 msgid "Show menu button"
 msgstr "Hiển thị nút menu"
 
 #: lib/bookshelf_settings.lua:5024
-msgid "Adds the Bookshelf menu button to the reader. Takes effect the next time you open a book."
-msgstr "Thêm nút menu Bookshelf vào trình đọc. Có hiệu lực từ lần mở sách tiếp theo."
+msgid "Adds the home menu button to the reader. Takes effect the next time you open a book."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:5033
 msgid "Show modules button"
@@ -4337,32 +4337,20 @@ msgid "Clears your custom shelf menu (which shelves are shown, their order, thei
 msgstr "Xóa menu kệ tùy chỉnh của bạn (những kệ nào được hiển thị, thứ tự của chúng, nhãn và biểu tượng, nguồn, bộ lọc và cách sắp xếp của chúng) và khôi phục bộ mặc định như khi mới cài: bật Trang chủ / Gần đây / Series / Sách yêu thích, phần còn lại có thể bật lên. Đồng thời đưa kệ đang hoạt động về Trang chủ và số trang về 1. Các thiết lập khác (văn bản bảng trên, phông chữ, màu sắc) không bị ảnh hưởng."
 
 #: lib/bookshelf_settings.lua:5089
-msgid ""
-"Reset the shelf menu to default settings?\n"
-"\n"
-"All custom shelves you have created or edited will be lost. Other Bookshelf settings (top panel text, fonts, colors) are unaffected."
+msgid "Reset the shelf menu to default settings?\n\nAll custom shelves you have created or edited will be lost. Other home settings (top panel text, fonts, colors) are unaffected."
 msgstr ""
-"Đặt lại menu kệ về cài đặt mặc định?\n"
-"\n"
-"Mọi kệ tùy chỉnh bạn đã tạo hoặc chỉnh sửa sẽ bị mất. Các cài đặt khác của Bookshelf (văn bản bảng trên, font, màu sắc) không bị ảnh hưởng."
 
 #: lib/bookshelf_settings.lua:5125
 msgid "Reset top panel content to defaults"
 msgstr "Đặt nội dung bảng trên về mặc định"
 
 #: lib/bookshelf_settings.lua:5126
-msgid "Clears your top-panel customizations and restores the fresh-install detail layout, including the bundled title (Inter ExtraBold) and author (Caveat) fonts. The Bookshelf UI font and shelf menu are unaffected."
-msgstr "Xóa các tùy chỉnh bảng trên của bạn và khôi phục bố cục chi tiết như khi mới cài, bao gồm cả phông tiêu đề (Inter ExtraBold) và phông tác giả (Caveat) đi kèm. Phông giao diện Bookshelf và menu kệ không bị ảnh hưởng."
+msgid "Clears your top-panel customizations and restores the fresh-install detail layout, including the bundled title (Inter ExtraBold) and author (Caveat) fonts. The Home font and shelf menu are unaffected."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:5133
-msgid ""
-"Reset the top panel's content to default settings?\n"
-"\n"
-"All top-panel text and font customizations will be lost. The Bookshelf UI font and shelf menu are unaffected."
+msgid "Reset the top panel's content to default settings?\n\nAll top-panel text and font customizations will be lost. The Home font and shelf menu are unaffected."
 msgstr ""
-"Đặt lại nội dung bảng trên về cài đặt mặc định?\n"
-"\n"
-"Toàn bộ văn bản và tùy chỉnh phông của bảng trên sẽ bị mất. Phông giao diện Bookshelf và menu kệ không bị ảnh hưởng."
 
 #: lib/bookshelf_settings.lua:5153
 msgid "Read calibre metadata.calibre"
@@ -4793,8 +4781,8 @@ msgid "Delete this folder and everything in it?"
 msgstr "Xóa thư mục này và tất cả các mục trong đó?"
 
 #: lib/bookshelf_start_menu_edit.lua:480
-msgid "Bookshelf module…"
-msgstr "Mô-đun Bookshelf…"
+msgid "Home module…"
+msgstr ""
 
 #: lib/bookshelf_start_menu_edit.lua:519
 msgid "New folder"
@@ -5590,8 +5578,8 @@ msgid "Current home folder:"
 msgstr "Thư mục gốc hiện tại:"
 
 #: lib/bookshelf_widget.lua:4774 lib/bookshelf_widget.lua:22803
-msgid "File no longer exists. The bookshelf entry is stale."
-msgstr "Tệp không tồn tại nữa. Mục trên kệ sách đã lỗi thời."
+msgid "File no longer exists. The entry on home is stale."
+msgstr ""
 
 #: lib/bookshelf_widget.lua:4802
 msgid "Couldn't open this Kobo book."
@@ -5808,8 +5796,8 @@ msgid "Authentication failed for %1"
 msgstr "Xác thực thất bại với %1"
 
 #: lib/bookshelf_widget.lua:18257 lib/bookshelf_widget.lua:19925
-msgid "%1 refused every format Bookshelf asked for"
-msgstr "%1 từ chối mọi định dạng mà Bookshelf yêu cầu"
+msgid "%1 refused every format asked for"
+msgstr ""
 
 #: lib/bookshelf_widget.lua:18259 lib/bookshelf_widget.lua:19927
 msgid "%1 is limiting requests. Wait a minute and try again."
@@ -6461,14 +6449,8 @@ msgid "Importing calibre metadata…"
 msgstr "Đang nhập siêu dữ liệu calibre…"
 
 #: main.lua:407
-msgid ""
-"Bookshelf update: cached Hardcover book details from earlier versions can list audiobook narrators and translators as authors, which shows extra author cards.\n"
-"\n"
-"Refresh the details for your linked books now? (Contacts Hardcover, rate-limited, cancellable. Also available later under Hardcover > Manage Hardcover data.)"
+msgid "Update: cached Hardcover book details from earlier versions can list audiobook narrators and translators as authors, which shows extra author cards.\n\nRefresh the details for your linked books now? (Contacts Hardcover, rate-limited, cancellable. Also available later under Hardcover > Manage Hardcover data.)"
 msgstr ""
-"Cập nhật Bookshelf: thông tin chi tiết sách Hardcover đã lưu tạm từ các phiên bản trước có thể liệt kê người đọc sách nói và người dịch như là tác giả, khiến xuất hiện thêm các thẻ tác giả.\n"
-"\n"
-"Làm mới thông tin chi tiết cho những sách đã liên kết của bạn ngay bây giờ? (Sẽ kết nối tới Hardcover, có giới hạn tốc độ, có thể hủy. Cũng có thể dùng sau trong Hardcover > Quản lý dữ liệu Hardcover.)"
 
 #: main.lua:408
 msgid "Refresh now"
@@ -6483,24 +6465,24 @@ msgid "Bookshelf requires the CoverBrowser plugin. Enable it under Settings > Mo
 msgstr "Bookshelf yêu cầu plugin CoverBrowser. Hãy bật plugin này trong Settings > More plugins."
 
 #: main.lua:595 main.lua:599 main.lua:630
-msgid "bookshelf"
-msgstr "kệ sách"
+msgid "home"
+msgstr ""
 
 #: main.lua:630
 msgid "Start with: %1"
 msgstr "Bắt đầu với: %1"
 
 #: main.lua:762
-msgid "Close Bookshelf"
-msgstr "Đóng Kệ sách"
+msgid "Go to the file browser"
+msgstr ""
 
 #: main.lua:762
-msgid "Open Bookshelf"
-msgstr "Mở Kệ sách"
+msgid "Go to home"
+msgstr ""
 
 #: main.lua:822
-msgid "Open a small overlay that lets you set the number of columns and rows of books on the shelf, with the bookshelf visible behind it. Cover size follows the column count and the top panel fills the space left over. Changes preview in realtime; Accept keeps them, Cancel reverts."
-msgstr "Mở một lớp phủ nhỏ cho phép bạn đặt số cột và hàng sách trên kệ, với tủ sách vẫn hiển thị phía sau. Kích thước bìa theo số cột và bảng trên lấp đầy phần không gian còn lại. Thay đổi được xem trước theo thời gian thực; Chấp nhận để giữ lại, Hủy để hoàn tác."
+msgid "Open a small overlay that lets you set the number of columns and rows of books on the shelf, with the shelves visible behind it. Cover size follows the column count and the top panel fills the space left over. Changes preview in realtime; Accept keeps them, Cancel reverts."
+msgstr ""
 
 #: main.lua:837
 msgid "Edit shelves…"
@@ -6519,80 +6501,80 @@ msgid "About"
 msgstr "Về"
 
 #: main.lua:1055
-msgid "Bookshelf couldn't open. Some of its files may be missing or corrupted after an update. Try reinstalling the plugin."
-msgstr "Bookshelf không thể mở. Một số tệp của nó có thể bị thiếu hoặc hỏng sau khi cập nhật. Hãy thử cài đặt lại plugin."
+msgid "Home couldn't open. Some of its files may be missing or corrupted after an update. Try reinstalling the plugin."
+msgstr ""
 
 #: main.lua:1129
-msgid "Bookshelf: open or close"
-msgstr "Sách: mở hoặc đóng"
+msgid "Home: open or close"
+msgstr ""
 
 #: main.lua:1135
-msgid "Bookshelf: open"
-msgstr "Sách: mở"
+msgid "Home: open"
+msgstr ""
 
 #: main.lua:1138
 msgid "on"
 msgstr "trên"
 
 #: main.lua:1144
-msgid "Bookshelf: next shelf"
-msgstr "Bookshelf: kệ tiếp theo"
+msgid "Home: next shelf"
+msgstr ""
 
 #: main.lua:1150
-msgid "Bookshelf: previous shelf"
-msgstr "Bookshelf: kệ trước"
+msgid "Home: previous shelf"
+msgstr ""
 
 #: main.lua:1156
-msgid "Bookshelf: next page of shelves"
-msgstr "Bookshelf: trang kệ tiếp theo"
+msgid "Home: next page of shelves"
+msgstr ""
 
 #: main.lua:1162
-msgid "Bookshelf: previous page of shelves"
-msgstr "Bookshelf: trang kệ trước"
+msgid "Home: previous page of shelves"
+msgstr ""
 
 #: main.lua:1168
-msgid "Bookshelf: full screen shelves on or off"
-msgstr "Bookshelf: bật hoặc tắt kệ toàn màn hình"
+msgid "Home: full screen shelves on or off"
+msgstr ""
 
 #: main.lua:1178
-msgid "Bookshelf: refresh the library"
-msgstr "Sách: làm mới thư viện"
+msgid "Home: refresh the library"
+msgstr ""
 
 #: main.lua:1184
-msgid "Bookshelf: toggle bulk selection mode"
-msgstr "Sách: bật/tắt chế độ chọn hàng loạt"
+msgid "Home: toggle bulk selection mode"
+msgstr ""
 
 #: main.lua:1191
-msgid "Bookshelf: toggle selection on focused book"
-msgstr "Sách: bật/tắt chọn trên quyển sách được chọn"
+msgid "Home: toggle selection on focused book"
+msgstr ""
 
 #: main.lua:1200
-msgid "Bookshelf: select all books in this shelf"
-msgstr "Bookshelf: chọn tất cả sách trong kệ này"
+msgid "Home: select all books in this shelf"
+msgstr ""
 
 #: main.lua:1206
-msgid "Bookshelf: add focused stack to selection"
-msgstr "Sách: thêm ngăn được chọn vào chọn"
+msgid "Home: add focused stack to selection"
+msgstr ""
 
 #: main.lua:1212
-msgid "Bookshelf: open bulk action menu"
-msgstr "Sách: mở menu thao tác hàng loạt"
+msgid "Home: open bulk action menu"
+msgstr ""
 
 #: main.lua:1223
-msgid "Bookshelf: open start menu"
-msgstr "Sách: mở menu bắt đầu"
+msgid "Home: open start menu"
+msgstr ""
 
 #: main.lua:1229
-msgid "Bookshelf: open modules"
-msgstr "Bookshelf: mở mô-đun"
+msgid "Home: open modules"
+msgstr ""
 
 #: main.lua:1243
-msgid "Bookshelf: shuffle ornaments"
-msgstr "Bookshelf: xáo trộn vật trang trí"
+msgid "Home: shuffle ornaments"
+msgstr ""
 
 #: main.lua:1249
-msgid "Bookshelf: go to home screen"
-msgstr "Bookshelf: về màn hình chính"
+msgid "Home: first shelf, first page"
+msgstr ""
 
 #: main.lua:2446
 msgid "Branch name (leave empty for stable)"

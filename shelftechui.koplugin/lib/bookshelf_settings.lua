@@ -227,7 +227,7 @@ function Settings:_pickTokenViaLibraryModal(LibraryModal, dialog, filter)
     modal = LibraryModal:new{
         config = {
             title = _("Insert token"),
-            help_title = _("Bookshelf tokens"),
+            help_title = _("Top panel tokens"),
             help_text = _([==[Tokens are placeholders that get replaced with live data when the top panel or status line renders.
 
   %title — %book_pct
@@ -2282,9 +2282,9 @@ function Settings:_settingsSubItems()
             local f = Fonts.getUIFontFace()
             local label = _("Follow KOReader")
             if f then label = Fonts.displayName(f) end
-            return T(_("Bookshelf UI font: %1"), label)
+            return T(_("Home font: %1"), label)
         end,
-        help_text = _("The font Bookshelf uses for its own UI text (shelf names, "
+        help_text = _("The font home uses for its own UI text (shelf names, "
             .. "labels, metadata). Pick any installed font (same picker as the "
             .. "top panel); '(Default)' follows your KOReader UI font. The "
             .. "title and author have their own fonts in the book detail editor."),
@@ -2900,7 +2900,7 @@ function Settings:_hardcoverSubItems()
                     -- One clear for everything cached. Links are kept, so a
                     -- refresh repopulates afterwards.
                     text = _("Clear cache (keeps links)"),
-                    help_text = _("Remove Bookshelf's cached Hardcover descriptions, cover images, ratings, review counts and review text. Existing book links are kept, so you can refresh again later."),
+                    help_text = _("Remove the cached Hardcover descriptions, cover images, ratings, review counts and review text. Existing book links are kept, so you can refresh again later."),
                     callback = function(touchmenu_instance)
                         if touchmenu_instance then
                             UIManager:close(touchmenu_instance)
@@ -3036,13 +3036,13 @@ function Settings:_performanceSubItems()
         },
         {
             text = _("Instant book close (beta)"),
-            help_text = _("Show Bookshelf immediately when leaving a "
+            help_text = _("Show home immediately when leaving a "
                 .. "book. The book finishes closing at the next quiet "
                 .. "moment - opening another book, half a minute of "
-                .. "inactivity, or leaving Bookshelf - so browsing "
+                .. "inactivity, or leaving home - so browsing "
                 .. "never has to wait for it. Until then, going "
                 .. "straight back into the same book is instant. Turn "
-                .. "this off to close books fully before Bookshelf "
+                .. "this off to close books fully before home "
                 .. "appears, as before."),
             checked_func = function()
                 return BookshelfSettings.nilOrTrue("hot_park")
@@ -3337,8 +3337,8 @@ function Settings:_behaviourSubItems()
     -- setting). Tapping a book and swiping pages are not in it: without them
     -- the shelf cannot be used.
     items[#items + 1] = {
-        text = _("Bookshelf gestures"),
-        help_text = _("Switch off any of Bookshelf's own gestures. A gesture"
+        text = _("Home gestures"),
+        help_text = _("Switch off any of home's own gestures. A gesture"
             .. " switched off does nothing on the shelf. Tapping a book and"
             .. " swiping between pages always work."),
         sub_item_table_func = function()
@@ -3426,7 +3426,7 @@ function Settings:_behaviourSubItems()
         text = _("Closing book notification"),
         help_text = _("Show a 'Closing book…' message in the center "
             .. "of the screen while a book is being closed back to "
-            .. "Bookshelf. The book-close work takes a moment, so "
+            .. "home. The book-close work takes a moment, so "
             .. "the message confirms your gesture landed during the "
             .. "wait. Some users on color e-ink panels see a brief "
             .. "flash from the message appearing. Turn it off here "
@@ -3701,7 +3701,7 @@ function Settings:_librarySubItems()
                 return _("Image library") .. ": " .. (short or _("(none)"))
             end,
             keep_menu_open = true,
-            help_text = _("Where Bookshelf looks for custom cover images. For stacks, place files like authors/author-name.jpg into the matching subfolder (authors, series, genres, collections). For folders, drop a cover.jpg into the folder itself. See the README for more matching options."),
+            help_text = _("Where home looks for custom cover images. For stacks, place files like authors/author-name.jpg into the matching subfolder (authors, series, genres, collections). For folders, drop a cover.jpg into the folder itself. See the README for more matching options."),
             callback = function(touchmenu_instance)
                 self:_pickImageLibraryPath(touchmenu_instance)
             end,
@@ -3856,7 +3856,7 @@ function Settings:_whileReadingSubItems()
     -- it take effect there and then, rather than on the next book open.
     items[#items + 1] = {
         text      = _("Show status line"),
-        help_text = _("Puts Bookshelf's status line across the top of the reader, drawn by the same code that draws it on the shelf, so it reads the same in both. Edit the line itself under Settings > Status line. If you also use Bookends, its top row and any top-anchored progress bar move down to make space."),
+        help_text = _("Puts home's status line across the top of the reader, drawn by the same code that draws it on the shelf, so it reads the same in both. Edit the line itself under Settings > Status line. If you also use Bookends, its top row and any top-anchored progress bar move down to make space."),
         checked_func = function()
             return require("lib/status_line").showInReader(BookshelfSettings.view())
         end,
@@ -3879,7 +3879,7 @@ function Settings:_whileReadingSubItems()
     local RB = require("lib/bookshelf_reader_buttons")
     items[#items + 1] = {
         text = _("Show menu button"),
-        help_text = _("Adds the Bookshelf menu button to the reader. Takes effect"
+        help_text = _("Adds the home menu button to the reader. Takes effect"
             .. " the next time you open a book."),
         checked_func = function() return RB.showMenu() end,
         callback = function()
@@ -3946,7 +3946,7 @@ function Settings:_advancedSubItems()
                 UIManager:show(ConfirmBox:new{
                     text = _("Reset the shelf menu to default settings?\n\n"
                         .. "All custom shelves you have created or edited "
-                        .. "will be lost. Other Bookshelf settings (top "
+                        .. "will be lost. Other home settings (top "
                         .. "panel text, fonts, colors) are unaffected."),
                     ok_text = _("Reset"),
                     ok_callback = function()
@@ -3984,13 +3984,13 @@ function Settings:_advancedSubItems()
             help_text = _("Clears your top-panel customizations and "
                 .. "restores the fresh-install detail layout, including the "
                 .. "bundled title (Inter ExtraBold) and author (Caveat) fonts. "
-                .. "The Bookshelf UI font and shelf menu are unaffected."),
+                .. "The Home font and shelf menu are unaffected."),
             callback = function(touchmenu_instance)
                 local ConfirmBox = require("ui/widget/confirmbox")
                 UIManager:show(ConfirmBox:new{
                     text = _("Reset the top panel's content to default settings?\n\n"
                         .. "All top-panel text and font customizations will be "
-                        .. "lost. The Bookshelf UI font and shelf menu are unaffected."),
+                        .. "lost. The Home font and shelf menu are unaffected."),
                     ok_text = _("Reset"),
                     ok_callback = function()
                         local Regions = require("lib/bookshelf_hero_regions")

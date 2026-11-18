@@ -10,8 +10,8 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 
 #: _meta.lua:19 lib/bookshelf_action_exec.lua:77 main.lua:754
-msgid "Bookshelf"
-msgstr "Bookshelf"
+msgid "Home"
+msgstr ""
 
 #: _meta.lua:20
 msgid "A nice-looking home screen for KOReader: pick a book from your shelf and read it."
@@ -38,20 +38,20 @@ msgid "Menu action…"
 msgstr "Ação de menu…"
 
 #: lib/bookshelf_action_chooser.lua:66
-msgid "Bookshelf action…"
-msgstr "Ação do Bookshelf…"
+msgid "Home action…"
+msgstr ""
 
 #: lib/bookshelf_action_chooser.lua:72
-msgid "Bookshelf actions"
-msgstr "Ações do Bookshelf"
+msgid "Home actions"
+msgstr ""
 
 #: lib/bookshelf_action_chooser.lua:75 lib/bookshelf_action_chooser.lua:76
-msgid "Close bookshelf"
-msgstr "Fechar bookshelf"
+msgid "Go to the file browser"
+msgstr ""
 
 #: lib/bookshelf_action_chooser.lua:79 lib/bookshelf_action_chooser.lua:80
-msgid "Bookshelf menu"
-msgstr "Menu do Bookshelf"
+msgid "Home menu"
+msgstr ""
 
 #: lib/bookshelf_action_picker.lua:53
 msgid "Choose an action"
@@ -1596,8 +1596,8 @@ msgid "Swipe down leaves full screen shelves"
 msgstr "Deslizar para baixo sai das estantes em tela cheia"
 
 #: lib/bookshelf_gestures.lua:28
-msgid "When enabled, swiping down in full screen shelves brings the top panel back. Turn off to stay in full screen: the swipe then refreshes the library, as it does with the top panel showing, and the top panel comes back when you tap the book icon at the start of the shelf bar, or with a gesture set to Bookshelf: full screen shelves on or off."
-msgstr "Quando ativado, deslizar para baixo nas estantes em tela cheia traz o painel superior de volta. Desative para permanecer em tela cheia: o gesto passa a atualizar a biblioteca, como acontece com o painel superior visível, e o painel superior volta quando você toca no ícone de livro no início da barra de estantes, ou com um gesto definido como Bookshelf: estantes em tela cheia ligadas ou desligadas."
+msgid "When enabled, swiping down in full screen shelves brings the top panel back. Turn off to stay in full screen: the swipe then refreshes the library, as it does with the top panel showing, and the top panel comes back when you tap the book icon at the start of the shelf bar, or with a gesture set to Home: full screen shelves on or off."
+msgstr ""
 
 #: lib/bookshelf_gestures.lua:34
 msgid "Swipe down on the shelf to refresh the library"
@@ -2423,8 +2423,8 @@ msgstr "Não aparece na estante: esta pasta está fora da sua pasta inicial (%s)
 
 #: lib/bookshelf_move_flow.lua:171
 #, lua-format
-msgid "Not shown on the shelf: this folder is %d levels below your home folder, and the shelf scans %d. Raise the folder walk depth in Bookshelf settings to include it."
-msgstr "Não aparece na estante: esta pasta está %d níveis abaixo da sua pasta inicial, e a estante varre %d. Aumente a profundidade de varredura de pastas nas configurações do Bookshelf para incluí-la."
+msgid "Not shown on the shelf: this folder is %d levels below your home folder, and the shelf scans %d. Raise the folder walk depth in Settings → Home to include it."
+msgstr ""
 
 #: lib/bookshelf_move_flow.lua:205
 msgid "Moved 1 book."
@@ -3001,8 +3001,8 @@ msgid "Insert token"
 msgstr "Inserir token"
 
 #: lib/bookshelf_settings.lua:230
-msgid "Bookshelf tokens"
-msgstr "Tokens do Bookshelf"
+msgid "Top panel tokens"
+msgstr ""
 
 #: lib/bookshelf_settings.lua:231
 msgid ""
@@ -3713,12 +3713,12 @@ msgid "Follow KOReader"
 msgstr "Seguir o KOReader"
 
 #: lib/bookshelf_settings.lua:3397
-msgid "Bookshelf UI font: %1"
-msgstr "Fonte da interface do Bookshelf: %1"
+msgid "Home font: %1"
+msgstr ""
 
 #: lib/bookshelf_settings.lua:3399
-msgid "The font Bookshelf uses for its own UI text (shelf names, labels, metadata). Pick any installed font (same picker as the top panel); '(Default)' follows your KOReader UI font. The title and author have their own fonts in the book detail editor."
-msgstr "A fonte que o Bookshelf usa no seu próprio texto de interface (nomes das estantes, rótulos, metadados). Escolha qualquer fonte instalada (o mesmo seletor do painel superior); '(Padrão)' segue a fonte da interface do KOReader. O título e o autor têm suas próprias fontes no editor de detalhes do livro."
+msgid "The font home uses for its own UI text (shelf names, labels, metadata). Pick any installed font (same picker as the top panel); '(Default)' follows your KOReader UI font. The title and author have their own fonts in the book detail editor."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:3411
 msgid "Image contrast"
@@ -3918,8 +3918,8 @@ msgid "Clear cache (keeps links)"
 msgstr "Limpar cache (mantém os vínculos)"
 
 #: lib/bookshelf_settings.lua:4017
-msgid "Remove Bookshelf's cached Hardcover descriptions, cover images, ratings, review counts and review text. Existing book links are kept, so you can refresh again later."
-msgstr "Remove as descrições, imagens de capa, avaliações, contagens de resenhas e textos de resenhas do Hardcover em cache no Bookshelf. Os vínculos de livros existentes são mantidos, então você pode atualizar novamente mais tarde."
+msgid "Remove the cached Hardcover descriptions, cover images, ratings, review counts and review text. Existing book links are kept, so you can refresh again later."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4030
 msgid "Hardcover cache cleared"
@@ -4010,8 +4010,8 @@ msgid "Instant book close (beta)"
 msgstr "Fechamento instantâneo do livro (beta)"
 
 #: lib/bookshelf_settings.lua:4181
-msgid "Show Bookshelf immediately when leaving a book. The book finishes closing at the next quiet moment - opening another book, half a minute of inactivity, or leaving Bookshelf - so browsing never has to wait for it. Until then, going straight back into the same book is instant. Turn this off to close books fully before Bookshelf appears, as before."
-msgstr "Mostra o Bookshelf imediatamente ao sair de um livro. O livro termina de fechar no próximo momento ocioso - ao abrir outro livro, após meio minuto de inatividade ou ao sair do Bookshelf - para que a navegação nunca precise esperar por ele. Até lá, voltar direto para o mesmo livro é instantâneo. Desative isto para fechar os livros por completo antes de o Bookshelf aparecer, como antes."
+msgid "Show home immediately when leaving a book. The book finishes closing at the next quiet moment - opening another book, half a minute of inactivity, or leaving home - so browsing never has to wait for it. Until then, going straight back into the same book is instant. Turn this off to close books fully before home appears, as before."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4202
 msgid "Use E-ink refresh rate for shelf pages"
@@ -4106,12 +4106,12 @@ msgid "What tapping a book does in full screen shelves: show that book's detail 
 msgstr "O que tocar em um livro faz nas estantes em tela cheia: mostrar os detalhes desse livro no painel superior, abri-lo com um único toque, ou abri-lo com um toque duplo (o primeiro toque seleciona). O toque duplo para abrir do próprio painel superior está na linha seguinte."
 
 #: lib/bookshelf_settings.lua:4482
-msgid "Bookshelf gestures"
-msgstr "Gestos do Bookshelf"
+msgid "Home gestures"
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4483
-msgid "Switch off any of Bookshelf's own gestures. A gesture switched off does nothing on the shelf. Tapping a book and swiping between pages always work."
-msgstr "Desative qualquer um dos gestos próprios do Bookshelf. Um gesto desligado não faz nada na estante. Tocar em um livro e deslizar entre as páginas sempre funcionam."
+msgid "Switch off any of home's own gestures. A gesture switched off does nothing on the shelf. Tapping a book and swiping between pages always work."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4491
 msgid "Double tap to open books"
@@ -4166,8 +4166,8 @@ msgid "Closing book notification"
 msgstr "Notificação ao fechar livro"
 
 #: lib/bookshelf_settings.lua:4569
-msgid "Show a 'Closing book…' message in the center of the screen while a book is being closed back to Bookshelf. The book-close work takes a moment, so the message confirms your gesture landed during the wait. Some users on color e-ink panels see a brief flash from the message appearing. Turn it off here if you prefer no message and no flash."
-msgstr "Mostra a mensagem «Fechando livro…» no centro da tela enquanto um livro está sendo fechado e retornando ao Bookshelf. O fechamento do livro leva um instante, então a mensagem confirma que seu gesto foi registrado durante a espera. Alguns usuários com painéis e-ink coloridos veem um breve clarão quando a mensagem aparece. Desative aqui se você preferir nenhuma mensagem e nenhum clarão."
+msgid "Show a 'Closing book…' message in the center of the screen while a book is being closed back to home. The book-close work takes a moment, so the message confirms your gesture landed during the wait. Some users on color e-ink panels see a brief flash from the message appearing. Turn it off here if you prefer no message and no flash."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4651
 msgid "Scan all library metadata"
@@ -4238,8 +4238,8 @@ msgid "Image library"
 msgstr "Biblioteca de imagens"
 
 #: lib/bookshelf_settings.lua:4846
-msgid "Where Bookshelf looks for custom cover images. For stacks, place files like authors/author-name.jpg into the matching subfolder (authors, series, genres, collections). For folders, drop a cover.jpg into the folder itself. See the README for more matching options."
-msgstr "Onde o Bookshelf procura por imagens de capa personalizadas. Para pilhas, coloque arquivos como authors/author-name.jpg na subpasta correspondente (authors, series, genres, collections). Para pastas, coloque um cover.jpg dentro da própria pasta. Consulte o README para mais opções de correspondência."
+msgid "Where home looks for custom cover images. For stacks, place files like authors/author-name.jpg into the matching subfolder (authors, series, genres, collections). For folders, drop a cover.jpg into the folder itself. See the README for more matching options."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:4852
 msgid "Find author images online…"
@@ -4294,16 +4294,16 @@ msgid "Show status line"
 msgstr "Mostrar linha de status"
 
 #: lib/bookshelf_settings.lua:5001
-msgid "Puts Bookshelf's status line across the top of the reader, drawn by the same code that draws it on the shelf, so it reads the same in both. Edit the line itself under Settings > Status line. If you also use Bookends, its top row and any top-anchored progress bar move down to make space."
-msgstr "Mostra a linha de status do Bookshelf no topo do leitor, desenhada pelo mesmo código que a desenha na estante, para que fique idêntica nos dois. A linha é editada em Configurações > Linha de status. Se você também usa o Bookends, a linha superior dele e qualquer barra de progresso ancorada no topo descem para abrir espaço."
+msgid "Puts home's status line across the top of the reader, drawn by the same code that draws it on the shelf, so it reads the same in both. Edit the line itself under Settings > Status line. If you also use Bookends, its top row and any top-anchored progress bar move down to make space."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:5023
 msgid "Show menu button"
 msgstr "Mostrar botão de menu"
 
 #: lib/bookshelf_settings.lua:5024
-msgid "Adds the Bookshelf menu button to the reader. Takes effect the next time you open a book."
-msgstr "Adiciona o botão de menu do Bookshelf ao leitor. Tem efeito na próxima vez que você abrir um livro."
+msgid "Adds the home menu button to the reader. Takes effect the next time you open a book."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:5033
 msgid "Show modules button"
@@ -4338,32 +4338,20 @@ msgid "Clears your custom shelf menu (which shelves are shown, their order, thei
 msgstr "Limpa o seu menu de estantes personalizado (quais estantes são exibidas, sua ordem, seus rótulos e ícones, suas fontes, filtros e ordenações) e restaura o conjunto de instalação nova: Início / Recentes / Séries / Favoritos ativados, os demais disponíveis para ativar. Também retorna a estante ativa para Início e o indicador de página para 1. As outras configurações (texto do painel superior, fontes, cores) não são afetadas."
 
 #: lib/bookshelf_settings.lua:5089
-msgid ""
-"Reset the shelf menu to default settings?\n"
-"\n"
-"All custom shelves you have created or edited will be lost. Other Bookshelf settings (top panel text, fonts, colors) are unaffected."
+msgid "Reset the shelf menu to default settings?\n\nAll custom shelves you have created or edited will be lost. Other home settings (top panel text, fonts, colors) are unaffected."
 msgstr ""
-"Redefinir o menu de estantes para as configurações padrão?\n"
-"\n"
-"Todas as estantes personalizadas que você criou ou editou serão perdidas. Outras configurações do Bookshelf (texto do painel superior, fontes, cores) não são afetadas."
 
 #: lib/bookshelf_settings.lua:5125
 msgid "Reset top panel content to defaults"
 msgstr "Redefinir conteúdo do painel superior para padrões"
 
 #: lib/bookshelf_settings.lua:5126
-msgid "Clears your top-panel customizations and restores the fresh-install detail layout, including the bundled title (Inter ExtraBold) and author (Caveat) fonts. The Bookshelf UI font and shelf menu are unaffected."
-msgstr "Limpa as suas personalizações do painel superior e restaura o layout de detalhes de instalação nova, incluindo as fontes incluídas para o título (Inter ExtraBold) e para o autor (Caveat). A fonte da interface do Bookshelf e o menu de estantes não são afetados."
+msgid "Clears your top-panel customizations and restores the fresh-install detail layout, including the bundled title (Inter ExtraBold) and author (Caveat) fonts. The Home font and shelf menu are unaffected."
+msgstr ""
 
 #: lib/bookshelf_settings.lua:5133
-msgid ""
-"Reset the top panel's content to default settings?\n"
-"\n"
-"All top-panel text and font customizations will be lost. The Bookshelf UI font and shelf menu are unaffected."
+msgid "Reset the top panel's content to default settings?\n\nAll top-panel text and font customizations will be lost. The Home font and shelf menu are unaffected."
 msgstr ""
-"Redefinir o conteúdo do painel superior para as configurações padrão?\n"
-"\n"
-"Todo o texto do painel superior e as personalizações de fonte serão perdidos. A fonte da interface do Bookshelf e o menu de estantes não são afetados."
 
 #: lib/bookshelf_settings.lua:5153
 msgid "Read calibre metadata.calibre"
@@ -4794,8 +4782,8 @@ msgid "Delete this folder and everything in it?"
 msgstr "Excluir esta pasta e tudo dentro dela?"
 
 #: lib/bookshelf_start_menu_edit.lua:480
-msgid "Bookshelf module…"
-msgstr "Módulo do Bookshelf…"
+msgid "Home module…"
+msgstr ""
 
 #: lib/bookshelf_start_menu_edit.lua:519
 msgid "New folder"
@@ -5591,8 +5579,8 @@ msgid "Current home folder:"
 msgstr "Pasta inicial atual:"
 
 #: lib/bookshelf_widget.lua:4774 lib/bookshelf_widget.lua:22803
-msgid "File no longer exists. The bookshelf entry is stale."
-msgstr "O arquivo não existe mais. A entrada do bookshelf está desatualizada."
+msgid "File no longer exists. The entry on home is stale."
+msgstr ""
 
 #: lib/bookshelf_widget.lua:4802
 msgid "Couldn't open this Kobo book."
@@ -5809,8 +5797,8 @@ msgid "Authentication failed for %1"
 msgstr "Falha na autenticação em %1"
 
 #: lib/bookshelf_widget.lua:18257 lib/bookshelf_widget.lua:19925
-msgid "%1 refused every format Bookshelf asked for"
-msgstr "%1 recusou todos os formatos solicitados pelo Bookshelf"
+msgid "%1 refused every format asked for"
+msgstr ""
 
 #: lib/bookshelf_widget.lua:18259 lib/bookshelf_widget.lua:19927
 msgid "%1 is limiting requests. Wait a minute and try again."
@@ -6462,14 +6450,8 @@ msgid "Importing calibre metadata…"
 msgstr "Importando metadados do calibre…"
 
 #: main.lua:407
-msgid ""
-"Bookshelf update: cached Hardcover book details from earlier versions can list audiobook narrators and translators as authors, which shows extra author cards.\n"
-"\n"
-"Refresh the details for your linked books now? (Contacts Hardcover, rate-limited, cancellable. Also available later under Hardcover > Manage Hardcover data.)"
+msgid "Update: cached Hardcover book details from earlier versions can list audiobook narrators and translators as authors, which shows extra author cards.\n\nRefresh the details for your linked books now? (Contacts Hardcover, rate-limited, cancellable. Also available later under Hardcover > Manage Hardcover data.)"
 msgstr ""
-"Atualização do Bookshelf: os detalhes de livros do Hardcover armazenados em cache por versões anteriores podem listar narradores de audiolivros e tradutores como autores, o que exibe cartões de autor a mais.\n"
-"\n"
-"Atualizar agora os detalhes dos seus livros vinculados? (Contata o Hardcover, com limite de taxa, cancelável. Também disponível depois em Hardcover > Gerenciar dados do Hardcover.)"
 
 #: main.lua:408
 msgid "Refresh now"
@@ -6484,24 +6466,24 @@ msgid "Bookshelf requires the CoverBrowser plugin. Enable it under Settings > Mo
 msgstr "O Bookshelf requer o plugin CoverBrowser. Ative-o em Configurações > Mais plugins."
 
 #: main.lua:595 main.lua:599 main.lua:630
-msgid "bookshelf"
-msgstr "bookshelf"
+msgid "home"
+msgstr ""
 
 #: main.lua:630
 msgid "Start with: %1"
 msgstr "Iniciar com: %1"
 
 #: main.lua:762
-msgid "Close Bookshelf"
-msgstr "Fechar Bookshelf"
+msgid "Go to the file browser"
+msgstr ""
 
 #: main.lua:762
-msgid "Open Bookshelf"
-msgstr "Abrir Bookshelf"
+msgid "Go to home"
+msgstr ""
 
 #: main.lua:822
-msgid "Open a small overlay that lets you set the number of columns and rows of books on the shelf, with the bookshelf visible behind it. Cover size follows the column count and the top panel fills the space left over. Changes preview in realtime; Accept keeps them, Cancel reverts."
-msgstr "Abre uma pequena sobreposição que permite definir o número de colunas e linhas de livros na estante, com o bookshelf visível ao fundo. O tamanho da capa segue a contagem de colunas e o painel superior preenche o espaço restante. As alterações são previstas em tempo real; Aceitar as mantém, Cancelar as reverte."
+msgid "Open a small overlay that lets you set the number of columns and rows of books on the shelf, with the shelves visible behind it. Cover size follows the column count and the top panel fills the space left over. Changes preview in realtime; Accept keeps them, Cancel reverts."
+msgstr ""
 
 #: main.lua:837
 msgid "Edit shelves…"
@@ -6520,80 +6502,80 @@ msgid "About"
 msgstr "Sobre"
 
 #: main.lua:1055
-msgid "Bookshelf couldn't open. Some of its files may be missing or corrupted after an update. Try reinstalling the plugin."
-msgstr "O Bookshelf não pôde abrir. Alguns de seus arquivos podem estar faltando ou corrompidos após uma atualização. Tente reinstalar o plugin."
+msgid "Home couldn't open. Some of its files may be missing or corrupted after an update. Try reinstalling the plugin."
+msgstr ""
 
 #: main.lua:1129
-msgid "Bookshelf: open or close"
-msgstr "Bookshelf: abrir ou fechar"
+msgid "Home: open or close"
+msgstr ""
 
 #: main.lua:1135
-msgid "Bookshelf: open"
-msgstr "Bookshelf: abrir"
+msgid "Home: open"
+msgstr ""
 
 #: main.lua:1138
 msgid "on"
 msgstr "ligado"
 
 #: main.lua:1144
-msgid "Bookshelf: next shelf"
-msgstr "Bookshelf: próxima estante"
+msgid "Home: next shelf"
+msgstr ""
 
 #: main.lua:1150
-msgid "Bookshelf: previous shelf"
-msgstr "Bookshelf: estante anterior"
+msgid "Home: previous shelf"
+msgstr ""
 
 #: main.lua:1156
-msgid "Bookshelf: next page of shelves"
-msgstr "Bookshelf: próxima página de estantes"
+msgid "Home: next page of shelves"
+msgstr ""
 
 #: main.lua:1162
-msgid "Bookshelf: previous page of shelves"
-msgstr "Bookshelf: página anterior de estantes"
+msgid "Home: previous page of shelves"
+msgstr ""
 
 #: main.lua:1168
-msgid "Bookshelf: full screen shelves on or off"
-msgstr "Bookshelf: ativar ou desativar estantes em tela cheia"
+msgid "Home: full screen shelves on or off"
+msgstr ""
 
 #: main.lua:1178
-msgid "Bookshelf: refresh the library"
-msgstr "Bookshelf: atualizar a biblioteca"
+msgid "Home: refresh the library"
+msgstr ""
 
 #: main.lua:1184
-msgid "Bookshelf: toggle bulk selection mode"
-msgstr "Bookshelf: ativar/desativar modo de seleção em massa"
+msgid "Home: toggle bulk selection mode"
+msgstr ""
 
 #: main.lua:1191
-msgid "Bookshelf: toggle selection on focused book"
-msgstr "Bookshelf: alternar seleção no livro em foco"
+msgid "Home: toggle selection on focused book"
+msgstr ""
 
 #: main.lua:1200
-msgid "Bookshelf: select all books in this shelf"
-msgstr "Bookshelf: selecionar todos os livros nesta estante"
+msgid "Home: select all books in this shelf"
+msgstr ""
 
 #: main.lua:1206
-msgid "Bookshelf: add focused stack to selection"
-msgstr "Bookshelf: adicionar pilha em foco à seleção"
+msgid "Home: add focused stack to selection"
+msgstr ""
 
 #: main.lua:1212
-msgid "Bookshelf: open bulk action menu"
-msgstr "Bookshelf: abrir menu de ações em massa"
+msgid "Home: open bulk action menu"
+msgstr ""
 
 #: main.lua:1223
-msgid "Bookshelf: open start menu"
-msgstr "Bookshelf: abrir menu inicial"
+msgid "Home: open start menu"
+msgstr ""
 
 #: main.lua:1229
-msgid "Bookshelf: open modules"
-msgstr "Bookshelf: abrir módulos"
+msgid "Home: open modules"
+msgstr ""
 
 #: main.lua:1243
-msgid "Bookshelf: shuffle ornaments"
-msgstr "Bookshelf: embaralhar ornamentos"
+msgid "Home: shuffle ornaments"
+msgstr ""
 
 #: main.lua:1249
-msgid "Bookshelf: go to home screen"
-msgstr "Bookshelf: ir para a tela inicial"
+msgid "Home: first shelf, first page"
+msgstr ""
 
 #: main.lua:2446
 msgid "Branch name (leave empty for stable)"

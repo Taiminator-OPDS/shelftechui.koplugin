@@ -229,7 +229,7 @@ function HeroCard:_renderEmpty()
         CenterContainer:new{
             dimen = Geom:new{ w = self.width, h = self.height },
             (self.has_wallpaper and TransparentTextBox or TextBoxWidget):new{
-                text      = require("lib/bookshelf_i18n").gettext("Welcome to Bookshelf · Tap a cover to start reading"),
+                text      = require("lib/bookshelf_i18n").gettext("Welcome · Tap a cover to start reading"),
                 face      = fontFace("infofont", 14),
                 fgcolor   = _ink(),
                 width     = self.width - Space.padding.large * 2,

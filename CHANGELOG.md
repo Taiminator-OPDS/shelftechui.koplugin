@@ -2,6 +2,13 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.16.0
+
+- Bookshelf is now simply Home. Its settings are part of Settings → Home, under plain headings beside the rest: Shelves (edit shelves, shelf and top panel size), Top panel (status line, content, modules), Covers and text, Library and More (behaviour, advanced). There's no separate "Bookshelf" heading or "Bookshelf settings" page any more, and "Start menu position" sits with the start menu's entries.
+- Everywhere else too: gesture actions read "Home: …" (gestures you've set keep working), "Start with: home", "Go to the file browser", "Home font", "Home menu" and so on. Start menu entries saved under the old names are renamed.
+- Settings opens and searches more smoothly: the search index is built in the background a moment after Settings opens, in small steps, and kept for half an hour, so the first search no longer stalls.
+- Removed Bookshelf's old self-updater code, which was switched off (ShelfTechUI updates it).
+
 ## 1.15.2
 
 - A key you tap changes colour at once. Its pressed colour used to wait behind the typing of the letter and reach the screen with it. It's now sent to the screen first, in the screen's quickest mode, and the key is drawn back properly when you let go (the quick mode can't show the grey keys).

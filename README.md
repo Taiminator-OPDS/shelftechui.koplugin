@@ -8,9 +8,9 @@ ShelfTechUI is a fork of AndyHazz's Bookshelf home screen
 
 | | Where | What |
 |---|---|---|
-| **Home** | KOReader's file browser | Bookshelf's home: hero card, chips, shelves — on line shelves, square covers on hard shadows, retro footer keys. Edge swipes: left = brightness, right = warmth, diagonal = full refresh |
-| **For you** | Home shelf | Because you read…, Up next in series, Pick back up, More by authors you finish, your top genres, Discover, Want to read — from your own library (Bookshelf shelf sources) |
-| **A book's window** | Hold a book | Bookshelf's own book window (description, your review, tags, edit, cover), with a **Recommendations** tab: books from the internet for that one, big covers, "In library" on the ones you have; a tap opens the store on it |
+| **Home** | KOReader's file browser | Shelves: hero card, chips, shelves — on line shelves, square covers on hard shadows, retro footer keys. Edge swipes: left = brightness, right = warmth, diagonal = full refresh |
+| **For you** | Home shelf | Because you read…, Up next in series, Pick back up, More by authors you finish, your top genres, Discover, Want to read — from your own library (shelf sources) |
+| **A book's window** | Hold a book | The book window (description, your review, tags, edit, cover), with a **Recommendations** tab: books from the internet for that one, big covers, "In library" on the ones you have; a tap opens the store on it |
 | **Series & author pages** | From the library list (by series, by author) | A completion ruler, Up next with your time to read it, every book (and, with online picks, the ones you don't have) |
 | **Library** | Start menu | Search, sort, filter, A–Z, select several to set status or add to a collection |
 | **Online picks** (opt-in) | Settings → For you | From Open Library, Wi-Fi only, once a day: missing from your series, more by your authors, popular in your genres; FIND hands off to Bookdrop; + WANT |
@@ -23,13 +23,13 @@ ShelfTechUI is a fork of AndyHazz's Bookshelf home screen
 | **Glimpse** | GLIMPSE on the toolbar | Erik Fanki's viewer for the maps, family trees and other pictures in the book, from anywhere in it, without losing your place; in the retro look. Settings → Glimpse |
 | **Notebook** | Toolbar | Bookmarks, highlights and notes as cards, with All / Highlights / Notes / Marks |
 | **Pages** | Toolbar, or KOReader's skim bar | The carousel (the page, its neighbours, a track with chapter ticks) or a grid of thumbnails |
-| **Home layouts** | Settings → Home (or the Layout chip, if you add it to the home bar) | **Shelf** (Bookshelf's home, with a search field for your books and the store at its top) or **Dash** (now reading, streak, this week, up next in series, a pick, and one row of covers) |
+| **Home layouts** | Settings → Home (or the Layout chip, if you add it to the home bar) | **Shelf** (shelves, with a search field for your books and the store at its top) or **Dash** (now reading, streak, this week, up next in series, a pick, and one row of covers) |
 | **Highlight handles** | Select text | A knob at each end of the selection to drag |
 | **Pinned pages** | PIN on the toolbar, or PIN PAGE on a selection | A badge on the page opens a drawer with your pins |
 | **Quick Settings** | Swipe down in a book | Tiles (X-Ray when it's installed), the Wi-Fi network name, light sliders |
 | **Text sheet (Aa)** | Swipe up, or the menu | KOReader's text options as a sheet |
-| **Themes** | Settings → Themes | Six looks for the whole interface: Retro, Modern, Fantasy, Sci-fi, Rustic, Book (frames, shadows, type, tracks, handles, shelves), across ShelfTechUI's screens, Bookshelf's home, the restyled KOReader screens (text sheet, dictionary, search, dialogs, lists), Glimpse and the store. KOReader restarts to apply one. The book's own page keeps your reading font |
-| **Settings app** | ⚙, start menu, the pull-down | One app laid out like a phone's: a front page with search and the sections (Home · Reading · Look · Connect · Device · Tools · System), each a page of its own, with rows in cards, switches and values. Search finds any setting, ShelfTechUI's or KOReader's, sub-pages too, and opens its page with it marked. KOReader's and Bookshelf's own menus are folded into the section they belong to, each row with a line of explanation |
+| **Themes** | Settings → Themes | Six looks for the whole interface: Retro, Modern, Fantasy, Sci-fi, Rustic, Book (frames, shadows, type, tracks, handles, shelves), across ShelfTechUI's screens, home, the restyled KOReader screens (text sheet, dictionary, search, dialogs, lists), Glimpse and the store. KOReader restarts to apply one. The book's own page keeps your reading font |
+| **Settings app** | ⚙, start menu, the pull-down | One app laid out like a phone's: a front page with search and the sections (Home · Reading · Look · Connect · Device · Tools · System), each a page of its own, with rows in cards, switches and values. Search finds any setting, ShelfTechUI's or KOReader's, sub-pages too, and opens its page with it marked. KOReader's own menus are folded into the section they belong to, and home's own settings sit in Settings → Home under plain headings (Shelves, Top panel, Covers and text, Library, More), each row with a line of explanation |
 
 ## Install
 
@@ -45,7 +45,7 @@ Your Bookshelf settings (shelves, chips, start menu, themes) and your Bookshelf 
 
 ## Credits
 
-- **Bookshelf** by AndyHazz — AGPL-3.0, included in full (`bookshelf_main.lua`, `lib/`, `micromodules/`, `assets/`, `fonts/`, `locale/`). ShelfTechUI changes: the retro look is applied at run time by `stui_retro.lua`; Bookshelf's self-updater is switched off (it would install stock Bookshelf beside ShelfTechUI).
+- **Bookshelf** by AndyHazz — AGPL-3.0, included in full (`bookshelf_main.lua`, `lib/`, `micromodules/`, `assets/`, `fonts/`, `locale/`). ShelfTechUI changes: the retro look is applied at run time by `stui_retro.lua`; Bookshelf's self-updater is removed (it would install stock Bookshelf beside ShelfTechUI); it's called Home throughout, its settings folded into Settings → Home.
 - **Glimpse** by Erik Fanki — AGPL-3.0, included (`glimpse/`), restyled in the retro look; its self-updater is removed (it would replace the bundled copy with stock Glimpse).
 - **Bookdrop** — AGPL-3.0, included (`bookdrop/`, see `bookdrop/NOTICE`): its Z-Library client is ported from zlibrary.koplugin (AGPL-3.0), and its manga reader is RakuYomi (AGPL-3.0, `bookdrop/manga/`), whose per-device runtime is downloaded on first use rather than shipped.
 - **Transfer** — takes the place of **FilebrowserPlus** by Neeraj Patel (derived from KOReader's filebrowser.koplugin, AGPL-3.0), keeping its settings. Its server is ShelfTechUI's own, in Lua (no File Browser program any more), so it runs on every device KOReader does.

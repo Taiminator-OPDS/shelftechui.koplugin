@@ -63,21 +63,21 @@ function Chooser.actionRows(close, on_pick)
                          menu_page = picked.menu_page }
             end)
         end) } },
-        { { text = _("Bookshelf action\xE2\x80\xA6"), callback = close(function()
+        { { text = _("Home action\xE2\x80\xA6"), callback = close(function()
             local sub
             local function subClose(fn)
                 return function() UIManager:close(sub); fn() end
             end
             sub = ButtonDialog:new{
-                title = _("Bookshelf actions"), title_align = "center",
+                title = _("Home actions"), title_align = "center",
                 width_factor = 0.65,
                 buttons = {
-                    { { text = _("Close bookshelf"), callback = subClose(function()
-                        on_pick{ label = _("Close bookshelf"),
+                    { { text = _("Go to the file browser"), callback = subClose(function()
+                        on_pick{ label = _("Go to the file browser"),
                                  icon = "\xEE\xA1\x95", internal = "close" }
                     end) } },
-                    { { text = _("Bookshelf menu"), callback = subClose(function()
-                        on_pick{ label = _("Bookshelf menu"),
+                    { { text = _("Home menu"), callback = subClose(function()
+                        on_pick{ label = _("Home menu"),
                                  icon = "\xE2\x9A\x99", internal = "settings" }
                     end) } },
                 },

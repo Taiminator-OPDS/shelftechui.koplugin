@@ -30,7 +30,7 @@ function M.list(tr)
             .. " swipe then refreshes the library, as it does with the top"
             .. " panel showing, and the top panel comes back when you tap the"
             .. " book icon at the start of the shelf bar, or with a gesture"
-            .. " set to Bookshelf: full screen shelves on or off.") },
+            .. " set to Home: full screen shelves on or off.") },
     { id = "refresh",          text = _("Swipe down on the shelf to refresh the library") },
     { id = "density",          text = _("Pinch or spread to change the shelf's size") },
     { id = "top_panel_rows",   text = _("Swipe down or up on the top panel for fewer or more rows"), sep = true },

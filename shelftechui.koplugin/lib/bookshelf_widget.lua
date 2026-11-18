@@ -4745,7 +4745,7 @@ function BookshelfWidget:_openBook(book, after_open_callback, opts)
         local lfs = require("libs/libkoreader-lfs")
         if lfs.attributes(book.filepath, "mode") ~= "file" then
             UIManager:show(require("ui/widget/infomessage"):new{
-                text    = _("File no longer exists. The bookshelf entry is stale."),
+                text    = _("File no longer exists. The entry on home is stale."),
                 timeout = 3,
             })
             return
@@ -18139,7 +18139,7 @@ function BookshelfWidget:_opdsFetchMore(tab, want_count, replace, on_done)
                         text = err == "auth"
                             and T(_("Authentication failed for %1"), server.title)
                             or err == "format"
-                            and T(_("%1 refused every format Bookshelf asked for"), server.title)
+                            and T(_("%1 refused every format asked for"), server.title)
                             or err == "ratelimited"
                             and T(_("%1 is limiting requests. Wait a minute and try again."), server.title)
                             or T(_("Couldn't reach %1"), server.title),
@@ -19807,7 +19807,7 @@ function BookshelfWidget:_opdsSearch(tab, server, src, query)
                         text = err == "auth"
                             and T(_("Authentication failed for %1"), server.title)
                             or err == "format"
-                            and T(_("%1 refused every format Bookshelf asked for"), server.title)
+                            and T(_("%1 refused every format asked for"), server.title)
                             or err == "ratelimited"
                             and T(_("%1 is limiting requests. Wait a minute and try again."), server.title)
                             or  T(_("Couldn't reach %1"), server.title),
@@ -22694,7 +22694,7 @@ function BookshelfWidget:_buildBookEditTab(book, modal, avail_w, avail_h)
         local lfs = require("libs/libkoreader-lfs")
         if lfs.attributes(book.filepath, "mode") ~= "file" then
             UIManager:show(require("ui/widget/infomessage"):new{
-                text = _("File no longer exists. The bookshelf entry is stale."),
+                text = _("File no longer exists. The entry on home is stale."),
                 timeout = 3 })
             return
         end
