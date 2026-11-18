@@ -111,12 +111,82 @@ function M.code() return Server.running() and code or nil end
 
 function M.isRunning() return Server.running() ~= nil end
 
+-- The Kindle's firewall drops connections from other devices: Transfer's
+-- port is let through while it's on (as KOReader's own servers do), with
+-- three things a Kindle does handled:
+--   * the rule goes first in the list (one added at the end can come after
+--     a rule that drops everything, and never be reached);
+--   * some Kindles' firewall has no "conntrack" (the usual rule is then
+--     refused): a plain rule for the port instead;
+--   * the Kindle loads its firewall again when Wi-Fi reconnects or it wakes,
+--     which takes the rule away: looked at again then (M.onNetwork) and every
+--     minute while Transfer is on, and put back if it's gone.
+local IPT
+local function iptables()
+    if not IPT then
+        IPT = "iptables"
+        for _i, p in ipairs({ "/usr/sbin/iptables", "/sbin/iptables", "/bin/iptables" }) do
+            if exists(p) then IPT = p break end
+        end
+    end
+    return IPT
+end
+local function sh(args)
+    local r = os.execute(iptables() .. " " .. args .. " >/dev/null 2>&1")
+    return r == 0 or r == true
+end
+local function rules(port)
+    return {
+        { "INPUT", ("-p tcp --dport %d -m conntrack --ctstate NEW,ESTABLISHED -j ACCEPT"):format(port), ("-p tcp --dport %d -j ACCEPT"):format(port) },
+        { "OUTPUT", ("-p tcp --sport %d -m conntrack --ctstate ESTABLISHED -j ACCEPT"):format(port), ("-p tcp --sport %d -j ACCEPT"):format(port) },
+    }
+end
+local fw_port -- the port let through now (nil: none)
+
+--- Is the port still let through? (`-C` asks; a Kindle whose iptables is too
+--- old for it answers no, and the rule is just put back.)
+local function fwPresent(port)
+    local r = rules(port)[1]
+    return sh("-C INPUT " .. r[2]) or sh("-C INPUT " .. r[3])
+end
+
 local function firewall(open)
-    if not Device:isKindle() then return end
-    local flag = open and "-A" or "-D"
-    local port = M.port()
-    os.execute(string.format("iptables %s INPUT -p tcp --dport %d -m conntrack --ctstate NEW,ESTABLISHED -j ACCEPT 2>/dev/null", flag, port))
-    os.execute(string.format("iptables %s OUTPUT -p tcp --sport %d -m conntrack --ctstate ESTABLISHED -j ACCEPT 2>/dev/null", flag, port))
+    if not Device:isKindle() then return true end
+    local port = fw_port or M.port()
+    -- ours go first (left by an earlier run or an older version too)
+    for _i, r in ipairs(rules(port)) do
+        for k = 2, 3 do
+            for _n = 1, 6 do if not sh("-D " .. r[1] .. " " .. r[k]) then break end end
+        end
+    end
+    fw_port = nil
+    if not open then return true end
+    port = M.port()
+    local ok = true
+    for _i, r in ipairs(rules(port)) do
+        if not (sh("-I " .. r[1] .. " 1 " .. r[2]) or sh("-I " .. r[1] .. " 1 " .. r[3])) then ok = false end
+    end
+    fw_port = port
+    if not ok then logger.warn("ShelfTechUI: transfer: the Kindle's firewall didn't take the rule for port", port) end
+    return ok
+end
+
+local function fwCheck()
+    if not (fw_port and Server.running()) then return end
+    if not fwPresent(fw_port) then
+        logger.info("ShelfTechUI: transfer: the Kindle's firewall was reloaded; opening port", fw_port, "again")
+        firewall(true)
+    end
+    UIManager:scheduleIn(60, fwCheck)
+end
+
+--- Wi-Fi came back, or the device woke: the firewall may have been loaded
+--- again.
+function M.onNetwork()
+    if not (Device:isKindle() and fw_port and Server.running()) then return end
+    UIManager:scheduleIn(2, function() pcall(function()
+        if not fwPresent(fw_port) then firewall(true) end
+    end) end)
 end
 
 --- FilebrowserPlus's server, if one is still running from before: it holds
@@ -306,9 +376,12 @@ function M.start()
         end
         return false, T(_("Transfer couldn't start: %1"), tostring(why))
     end
-    firewall(true)
+    local fw_ok = firewall(true)
     keepAwake(true)
     M.status = nil
+    if not fw_ok then M.status = _("The Kindle's firewall may block other devices: see Transfer's tips.") end
+    UIManager:unschedule(fwCheck)
+    if Device:isKindle() then UIManager:scheduleIn(60, fwCheck) end
     armAutoStop()
     logger.info("ShelfTechUI: transfer on port", M.port(), "for", folder)
     return true
@@ -319,6 +392,7 @@ function M.stop(quiet)
     stop_at = nil
     if M.isRunning() then
         Server.stop()
+        UIManager:unschedule(fwCheck)
         firewall(false)
         keepAwake(false)
     end
@@ -401,7 +475,7 @@ function M.show()
     local Page = require("bos_page")
     local InfoMessage = require("ui/widget/infomessage")
     local function phoneHelp()
-        UIManager:show(InfoMessage:new{ text = _("When the page opens, this screen says \"Opened from…\". If it never does, the phone isn't reaching this device:\n\n1. Turn off any VPN on the phone (on a Pixel, \"VPN by Google\" too: Settings › Network & internet › VPN).\n2. The phone must be on the same Wi-Fi as this device (not mobile data, not a guest network).\n3. iPhone: use Safari, or allow your browser in Settings › Privacy & Security › Local Network.\n4. Type the address into the browser instead of scanning.\n5. Some routers keep Wi-Fi devices apart (\"client isolation\", \"AP isolation\"): turn that off, or use a computer.") })
+        UIManager:show(InfoMessage:new{ text = _("When the page opens, this screen says \"Opened from…\". If it never does, the phone isn't reaching this device:\n\n1. Turn off any VPN on the phone (on a Pixel, \"VPN by Google\" too: Settings › Network & internet › VPN).\n2. The phone must be on the same Wi-Fi as this device (not mobile data, not a guest network).\n3. iPhone: use Safari, or allow your browser in Settings › Privacy & Security › Local Network.\n4. Type the address into the browser instead of scanning.\n5. Some routers keep Wi-Fi devices apart (\"client isolation\", \"AP isolation\"): turn that off, or use a computer.") .. (Device:isKindle() and _("\n6. Kindle: turn Transfer off and on again (that opens the Kindle's firewall afresh).") or "") })
     end
     -- opening the page is asking for it: on at once
     -- (the page shows first, "Starting…"; the server starts just after)

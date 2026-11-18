@@ -2,6 +2,11 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.13.1
+
+- Transfer on a Kindle: phones and computers can reach it. The Kindle's firewall drops connections from other devices, and the way Transfer opened it could fail. Its rule now goes first in the list. Kindles whose firewall has no "conntrack" get a plain rule for the port instead. When the Kindle reloads its firewall (Wi-Fi reconnecting, waking up), Transfer notices within a minute and opens the port again.
+- If the firewall refuses outright, Transfer's screen says so. The phone tips gain a Kindle line.
+
 ## 1.13.0
 
 - Hardcover in your library: books on your Hardcover Reading and Want to read shelves that aren't on this device stand at the end of Home, faded, with a small GET. Tap one to open it in the store, where the libraries are searched for it. Hold it to see its Hardcover page.

@@ -463,6 +463,8 @@ local function pokeHome() pcall(function() require("bos_home").poke() end) end
 
 function BookshelfOS:onNetworkConnected()
     pokeHome()
+    -- (a Kindle loads its firewall again: Transfer's port, let through again)
+    pcall(function() if package.loaded["bos_transfer"] then require("bos_transfer").onNetwork() end end)
     pcall(function() require("bos_hardcover_sync").online() end)
     UIManager:scheduleIn(10, function() pcall(function() require("bos_update").autoCheck() end) end)
 end
@@ -491,6 +493,7 @@ end
 
 function BookshelfOS:onResume()
     pokeHome()
+    pcall(function() if package.loaded["bos_transfer"] then require("bos_transfer").onNetwork() end end)
     if not self.ui.document then UIManager:scheduleIn(3, function() BookshelfOS.wrappedNote() end) end
 end
 
