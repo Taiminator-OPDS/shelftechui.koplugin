@@ -2,6 +2,10 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.15.1
+
+- A borderless Kindle-style keyboard: with KOReader's "Key border" unchecked (Keyboard → Keyboard appearance), the keys sit on one white board, touching, with the keys that don't type (shift, backspace, return…) in a light grey and a line along its top. With it checked, the keys stand apart on the grey panel as before.
+
 ## 1.15.0
 
 - USB drive on a Kindle without leaving KOReader by hand. Plugging in asks "USB drive" or "Just charge". Choose USB drive and KOReader saves what's open and closes, the Kindle's own USB drive mode takes over, and when you eject it on the computer KOReader opens again by itself. It can't stay open meanwhile, because it lives on the drive the computer takes. Also a Quick Settings tile and home chip (USB drive), Settings → Device → USB drive, and a gesture action. "Don't ask when plugged in" turns the question off, since a Kindle can't tell a computer from a charger.

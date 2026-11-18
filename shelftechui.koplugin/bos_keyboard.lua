@@ -10,7 +10,9 @@ redraw when you pause).
 
 And it looks like a Kindle's: white rounded keys for letters, numbers and the
 space bar, darker grey ones for shift, backspace, return and the like, on a
-light grey panel; a key pressed turns darker for a moment. Done to KOReader's
+light grey panel; a key pressed turns darker for a moment. With KOReader's
+"Key border" off (Keyboard → Keyboard appearance), borderless: one white
+board, the keys touching, the ones that don't type in a light grey. Done to KOReader's
 keyboard as it's built (KOReader's own files aren't changed).
 
 Both on unless turned off: Settings → Device → Keyboard. KOReader's own
@@ -35,6 +37,14 @@ local KEY = Blitbuffer.COLOR_WHITE        -- a letter, a number, the space bar
 local FUNC = Blitbuffer.Color8(0xB0)      -- shift, backspace, return, SYM…
 local ACTIVE = Blitbuffer.Color8(0x80)    -- shift or caps on
 local PRESSED = Blitbuffer.Color8(0x70)   -- held down
+-- borderless (KOReader's "Key border" off): one white board, the keys
+-- touching; the ones that do something rather than type a light grey
+local FLAT_FUNC = Blitbuffer.Color8(0xE0)
+local FLAT_ACTIVE = Blitbuffer.Color8(0xB0)
+local FLAT_PRESSED = Blitbuffer.Color8(0xC0)
+
+--- KOReader's own "Key border" setting (Keyboard → Keyboard appearance).
+function M.bordered() return G_reader_settings:nilOrTrue("keyboard_key_border") end
 
 -- keys that do something rather than type (by their label)
 local FUNC_LABELS = { ["\u{2190}"] = true, ["\u{2192}"] = true, ["\u{2191}"] = true, ["\u{2193}"] = true,
@@ -64,13 +74,20 @@ local function isFunctionKey(k)
 end
 
 --- One key in the Kindle's look (after KOReader has built it).
-local function dressKey(k)
+local function dressKey(k, bordered)
     local frame = k[1]
     if type(frame) ~= "table" then return end
     local active = frame.background == Blitbuffer.COLOR_LIGHT_GRAY -- (KOReader's mark for shift/caps on)
-    frame.radius = Device.screen:scaleBySize(10)
     frame.bordersize = 0
-    frame.background = active and ACTIVE or (isFunctionKey(k) and FUNC or KEY)
+    if bordered then
+        frame.radius = Device.screen:scaleBySize(10)
+        frame.background = active and ACTIVE or (isFunctionKey(k) and FUNC or KEY)
+        k._stui_pressed = PRESSED
+    else
+        frame.radius = 0
+        frame.background = active and FLAT_ACTIVE or (isFunctionKey(k) and FLAT_FUNC or KEY)
+        k._stui_pressed = FLAT_PRESSED
+    end
     k._stui_bg = frame.background
 end
 
@@ -91,7 +108,7 @@ local function patchKey(VirtualKey)
     local orig_invert = VirtualKey.invert
     VirtualKey.invert = function(self, invert, hold)
         if not (self._stui_bg and self[1]) then return orig_invert(self, invert, hold) end
-        self[1].background = invert and PRESSED or self._stui_bg
+        self[1].background = invert and (self._stui_pressed or PRESSED) or self._stui_bg
         self:update_keyboard(hold, true)
     end
     local orig_tap = VirtualKey.onTapSelect
@@ -125,8 +142,11 @@ function M.install()
         local Size = require("ui/size")
         VirtualKeyboard.addKeys = function(self, ...)
             local kindle = M.kindleLook()
-            -- (a little more room between keys, so each stands on its own)
-            if kindle then self.key_padding = math.max(Size.padding.default, self.key_padding or 0)
+            local bordered = M.bordered()
+            -- (with borders: a little more room between keys, so each stands
+            -- on its own; without: none, one board)
+            if kindle and bordered then self.key_padding = Size.padding.default
+            elseif kindle then self.key_padding = 0
             else self.key_padding = Size.padding.small end
             -- (the Kindle's keys are in a plain sans-serif: KOReader's UI
             -- font, not its fixed-width keyboard font)
@@ -149,12 +169,19 @@ function M.install()
             if kindle then
                 local ok, err = pcall(function()
                     for _r, row in ipairs(self.layout or {}) do
-                        for _c, k in ipairs(row) do dressKey(k) end
+                        for _c, k in ipairs(row) do dressKey(k, bordered) end
                     end
                     local frame = self[1] and self[1][1]
                     if frame then
-                        frame.background = PANEL
-                        frame.bordersize = 0
+                        if bordered then
+                            frame.background = PANEL
+                            frame.bordersize = 0
+                        else
+                            -- (one white board, a thin grey line along its top)
+                            frame.background = KEY
+                            frame.bordersize = Size.border.default
+                            frame.color = Blitbuffer.COLOR_DARK_GRAY
+                        end
                     end
                 end)
                 if not ok then logger.warn("ShelfTechUI: keyboard look:", err) end
