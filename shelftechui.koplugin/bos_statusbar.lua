@@ -289,15 +289,22 @@ function StatusBar:onTapChip(_, ges)
         local bar = self
         UI.openChipMenu(c.home.menu, c._rect, { on_close = function()
             bar.pressed = nil
-            bar:repaint()
-            -- closed while Wi-Fi is still turning on or joining: the chip
-            -- follows it until it settles
-            if c.id == "wifi" then
-                pcall(function()
-                    local Status = require("bos_status")
-                    if Status.wifiBusy() then Status.watchWifi(function() bar:repaint() end) end
-                end)
-            end
+            -- (KOReader says a window is closing while it's still on top:
+            -- the bar is drawn again once it's gone, with what the device
+            -- says now, not the pressed look or what it showed before)
+            UIManager:nextTick(function()
+                if c.id == "wifi" then pcall(function() require("bos_status").invalidate() end) end
+                bar:repaint()
+                pcall(function() require("bos_home").poke() end)
+                -- closed while Wi-Fi is still turning on or joining: the chip
+                -- follows it until it settles
+                if c.id == "wifi" then
+                    pcall(function()
+                        local Status = require("bos_status")
+                        if Status.wifiBusy() then Status.watchWifi(function() bar:repaint() end) end
+                    end)
+                end
+            end)
         end })
         return true
     end

@@ -45,6 +45,30 @@ end
 local _net = { t = 0, ssid_t = 0 }
 local MAX_AGE, MAX_AGE_BUSY = 4, 0.75
 
+-- A Kindle can keep its Wi-Fi interface loaded after the radio is switched
+-- off, so "the interface is there" (how KOReader asks) reads as on. The
+-- Kindle's own switch, the one KOReader sets to turn it off, says. nil:
+-- not a Kindle, or it couldn't be asked.
+local kindle_lipc
+local function kindleRadio()
+    if not Device:isKindle() then return nil end
+    if kindle_lipc == nil then
+        local ok, lipc = pcall(require, "liblipclua")
+        kindle_lipc = ok and lipc or false
+    end
+    if not kindle_lipc then return nil end
+    local v
+    pcall(function()
+        local h = kindle_lipc.init("com.github.koreader.shelftechui")
+        if h then
+            v = h:get_int_property("com.lab126.cmd", "wirelessEnable")
+            h:close()
+        end
+    end)
+    if v == nil then return nil end
+    return v == 1
+end
+
 local function readNet(max_age)
     if now() - _net.t < max_age then return end
     _net.t = now()
@@ -52,16 +76,25 @@ local function readNet(max_age)
         local NM = require("ui/network/manager")
         local was = _net.connected
         _net.on = NM:isWifiOn() and true or false
+        if _net.on and kindleRadio() == false then _net.on = false end
         _net.connected = _net.on and NM:isConnected() and true or false
         if not _net.connected then
-            _net.ssid = nil
-        elseif NM.lease_ssid then
+            _net.ssid, _net.ssid_tries = nil, 0
+        elseif type(NM.lease_ssid) == "string" and NM.lease_ssid ~= "" then
             -- (what KOReader learnt when it joined: costs nothing)
             _net.ssid = NM.lease_ssid
-        elseif not was or not _net.ssid and now() - _net.ssid_t > 30 then
-            _net.ssid_t = now()
-            local nw = NM:getCurrentNetwork()
-            _net.ssid = type(nw) == "table" and nw.ssid or nil
+        elseif not _net.ssid then
+            -- just joined, the device may not say the name yet (a Kindle
+            -- answers "" for a moment): asked again every few seconds, then
+            -- once a minute if it never does
+            local wait = (_net.ssid_tries or 0) < 15 and 2 or 60
+            if not was or now() - _net.ssid_t >= wait then
+                _net.ssid_t = now()
+                _net.ssid_tries = (_net.ssid_tries or 0) + 1
+                local nw = NM:getCurrentNetwork()
+                local name = type(nw) == "table" and nw.ssid or nil
+                _net.ssid = (type(name) == "string" and name ~= "") and name or nil
+            end
         end
     end)
     if not ok then _net.on, _net.connected, _net.ssid = false, false, nil end
@@ -209,18 +242,30 @@ end
 --- says no. Returns a function that stops it.
 function M.watchWifi(fn, alive)
     local UIManager = require("ui/uimanager")
-    local last = M.wifiPhase()
+    -- (the network's name counts as a change: it can come a little after
+    -- the connection, and whatever shows it is drawn again then)
+    local function now_is()
+        local ph, ssid = M.wifiPhase()
+        return ph, ph .. "|" .. tostring(ssid or ""), ssid
+    end
+    local _p, last = now_is()
     local stopped = false
+    local nameless = 0
     local tick
     tick = function()
         if stopped or (alive and not alive()) then return end
-        local ph = M.wifiPhase()
-        if ph ~= last then
-            last = ph
+        local ph, sig, ssid = now_is()
+        if sig ~= last then
+            last = sig
             pcall(fn, ph)
         end
         if ph == "turning_on" or ph == "connecting" or ph == "turning_off" then
             UIManager:scheduleIn(1, tick)
+        elseif ph == "connected" and not ssid and nameless < 20 then
+            -- connected, the name not known yet: looked for a while longer
+            nameless = nameless + 1
+            M.invalidate()
+            UIManager:scheduleIn(1.5, tick)
         end
     end
     UIManager:scheduleIn(0.5, tick)

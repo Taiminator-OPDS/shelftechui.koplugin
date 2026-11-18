@@ -592,6 +592,13 @@ function CheckRow:onTapRow()
     if self.toggle then self.toggle() end
     -- the state may change a moment later (Wi-Fi): repaint now and shortly after
     local function again()
+        -- (the card closed in the meantime: nothing to draw, or the row
+        -- would be painted over whatever is under it)
+        if self._menu then
+            local up = false
+            for _i, e in ipairs(UIManager._window_stack or {}) do if e.widget == self._menu then up = true break end end
+            if not up then return end
+        end
         if self.dimen and self.dimen.x then
             UIManager:widgetRepaint(self, self.dimen.x, self.dimen.y)
             UIManager:setDirty(nil, "ui", self.dimen)
@@ -708,7 +715,12 @@ function ChipMenu:init()
     local w = math.min(self.width or S(340), sw - 2 * S(10))
     local inner_w = w - 2 * (M.line() + self.pad)
     self.rows = VerticalGroup:new{ align = "left" }
-    for _i, r in ipairs(self.build(self, inner_w) or {}) do table.insert(self.rows, r) end
+    for _i, r in ipairs(self.build(self, inner_w) or {}) do
+        -- (a row that draws itself again later asks whether its card is
+        -- still up first: see CheckRow:onTapRow)
+        if type(r) == "table" then r._menu = self end
+        table.insert(self.rows, r)
+    end
     -- registered as our child so its rows (sliders, switches) get the gestures
     self[1] = self.rows
     local h = self.rows:getSize().h + 2 * (M.line() + S(10))
@@ -883,8 +895,10 @@ function Menus.wifi(menu, w)
     table.insert(rows, Hairline:new{ width = w })
     table.insert(rows, ActionRow:new{ width = w, menu = menu, text = _("Choose a network…"),
         callback = function() M.chooseNetwork() end })
-    -- opened while it's already in between (toggled from somewhere else)
-    if Status.wifiBusy() then watch() end
+    -- opened while it's already in between (toggled from somewhere else), or
+    -- connected with the network's name still to come
+    local ph0, ssid0 = Status.wifiPhase()
+    if Status.wifiBusy() or (ph0 == "connected" and not ssid0) then watch() end
     return rows
 end
 

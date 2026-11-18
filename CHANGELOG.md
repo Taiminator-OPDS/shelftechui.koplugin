@@ -2,6 +2,13 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.14.1
+
+- Home's Wi-Fi chip shows the right state after its popup closes. It used to keep its pressed (inverted) look and its old on/off state, because the toolbar was asked to repaint while the popup was still on screen.
+- On a Kindle, the chip and the popup ask the Kindle's own Wi-Fi switch. Some Kindles keep the Wi-Fi interface loaded after the radio is turned off, which read as "on".
+- The popup shows the network's name as soon as the device knows it ("Connected to HomeNet"), without reopening. The name is asked for again for a little while after joining, since a Kindle gives an empty name for a moment.
+- Tapping the Wi-Fi switch and closing the popup straight away no longer leaves a ghost "Wi-Fi" row painted over home.
+
 ## 1.14.0
 
 - Settings has a search field. Type a word or two and every setting that matches shows as you type: ShelfTechUI's and KOReader's, sub-pages too, each with the way to it ("Device › Screen › Sleep screen"). Tap one to land on its page with the setting marked. "Wi-Fi" and "wifi" find the same things.
