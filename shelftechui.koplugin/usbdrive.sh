@@ -34,9 +34,9 @@ say "KOReader closed"
 
 # 2. The computer takes the drive: KOReader's folder goes away.
 # While KOReader ran, volumd (the Kindle's USB drive service) was held, so a
-# cable plugged in meanwhile went unnoticed. It's told again (as a replug
-# would): the plug-in event, then the USB link off and on. Each try's answer
-# goes in the log.
+# cable plugged in meanwhile went unnoticed. It's told again, as a replug
+# would: the USB link off and on (then, if need be, the plug-in event). What
+# happens goes in the log.
 plugged_ok() {
     for f in /sys/devices/platform/charger/charging /sys/devices/platform/fsl-usb2-udc/charging /sys/class/power_supply/*/online; do
         [ -r "${f}" ] && [ "$(cat "${f}" 2>/dev/null)" = "1" ] && return 0
@@ -49,23 +49,19 @@ gone_within() {
     [ ! -e "${KO_DIR}/reader.lua" ]
 }
 if ! gone_within 1 && plugged_ok; then
-    say "volumd: $(lipc-probe -v com.lab126.volumd 2>&1 | tr '\n' ' ' | cut -c1-600)"
-    say "try 1: plug-in event"
-    lipc-send-event com.lab126.hal usbPlugOut >>"${LOG}" 2>&1
-    sleep 1
-    lipc-send-event com.lab126.hal usbPlugIn >>"${LOG}" 2>&1
-    if gone_within 3; then
-        say "  that did it"
-    else
-        say "try 2: USB link off and on"
-        for sc in /sys/class/udc/*/soft_connect; do
-            [ -w "${sc}" ] || continue
-            echo disconnect >"${sc}" 2>>"${LOG}"
-            sleep 1
-            echo connect >"${sc}" 2>>"${LOG}"
-            say "  ${sc}"
-        done
-        if gone_within 4; then say "  that did it"; else say "not yet: a replug will do it"; fi
+    # (the USB link off and on, as a replug: what wakes it on a Paperwhite 5;
+    # the plug-in event alone didn't)
+    for sc in /sys/class/udc/*/soft_connect; do
+        [ -w "${sc}" ] || continue
+        echo disconnect >"${sc}" 2>>"${LOG}"
+        sleep 1
+        echo connect >"${sc}" 2>>"${LOG}"
+        say "USB link off and on: ${sc}"
+    done
+    if ! gone_within 4; then
+        say "then the plug-in event"
+        lipc-send-event com.lab126.hal usbPlugIn >>"${LOG}" 2>&1
+        gone_within 4 || say "not yet: a replug will do it"
     fi
 fi
 i=0
@@ -81,10 +77,23 @@ else
 fi
 
 # 4. KOReader again, as KUAL starts it (this log kept beside it, to be read
-# over USB)
-say "starting KOReader"
+# over USB). Not if it's running or starting already (started by hand
+# meanwhile): two launchers fight over the Kindle's own interface, and the
+# one that finishes first closes the other's KOReader.
+launcher() { ps w 2>/dev/null | grep -v grep | grep -q "koreader.sh"; }
+# (a launcher with no KOReader in it is the last one, still tidying up: its
+# end is waited for, then it's looked at again)
+i=0
+while launcher && ! pidof reader.lua >/dev/null 2>&1 && [ "${i}" -lt 90 ]; do sleep 1; i=$((i + 1)); done
+sleep 2
+running() { pidof reader.lua >/dev/null 2>&1 || launcher; }
 cd / || exit 1
-/bin/sh "${KO_DIR}/koreader.sh" --kual ${FLAGS} </dev/null >/dev/null 2>&1 &
+if running; then
+    say "KOReader is already running or starting: not started again"
+else
+    say "starting KOReader"
+    /bin/sh "${KO_DIR}/koreader.sh" --kual ${FLAGS} </dev/null >/dev/null 2>&1 &
+fi
 # (this log, kept beside KOReader to be read over USB: once the drive is
 # writable again)
 for n in 1 2 3 4 5 6; do
