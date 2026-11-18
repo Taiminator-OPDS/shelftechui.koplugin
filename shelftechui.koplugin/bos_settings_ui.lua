@@ -1,17 +1,18 @@
 --[[--
-The Settings app: a full-screen app with Bookshelf's chip navigation. A chip
-strip of sections (ShelfTechUI, Navigation, Typesetting, …) at the top; when
-you open a sub-menu, the strip becomes a breadcrumb trail ([‹] [SECTION] [Menu]
-…) as Bookshelf's own drill-down does. One page per settings sub-menu. Items keep the exact semantics they have in KOReader's
-pull-down menu (callbacks receive a TouchMenu-like object, `keep_menu_open`,
-`checked_func`, `sub_item_table_func`, `tap_input`, ... are all honoured).
+The Settings app, as a phone's: a front page with a big title, a search field
+and the sections as rows (an icon, the name, what's in it); each section a
+page of its own, ‹ back to the front page. Rows stand in cards (iOS's inset
+grouped lists), with a switch for on/off, a tick for a choice and the value
+in grey on the right. Search looks through every setting as you type.
+
+Items keep the exact semantics they have in KOReader's pull-down menu
+(callbacks receive a TouchMenu-like object, `keep_menu_open`, `checked_func`,
+`sub_item_table_func`, `tap_input`, ... are all honoured).
 ]]
 
 local Blitbuffer = require("ffi/blitbuffer")
-local ButtonDialog = require("ui/widget/buttondialog")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
-local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
@@ -27,7 +28,6 @@ local RightContainer = require("ui/widget/container/rightcontainer")
 local Size = require("ui/size")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
-local TitleBar = require("ui/widget/titlebar")
 local TopContainer = require("ui/widget/container/topcontainer")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
@@ -98,32 +98,16 @@ function Tappable:onHoldSelect()
     end
 end
 
--- Empty box of a given size (used as a knob / spacer with a real size).
-local function box(w, h)
-    return CenterContainer:new{ dimen = Geom:new{ w = w, h = h }, VerticalSpan:new{ width = 0 } }
-end
-
 -- Bookshelf's UI font, as every ShelfTechUI surface
 local UI = require("bos_ui")
 local function face(size) return UI.face(size) end
-local function smallface(size) return UI.face(size) end
 local function bface(size) return (UI.boldFace(size)) end
 local function bflag(size) local _f, b = UI.boldFace(size) return b end
 
-local function upper(text)
-    if not require("bos_look").theme.upper then return text end
-    local ok, Utf8Proc = pcall(require, "ffi/utf8proc")
-    if ok and Utf8Proc.uppercase_dumb then
-        local ok2, res = pcall(Utf8Proc.uppercase_dumb, text)
-        if ok2 and res then return res end
-    end
-    return require("bos_look").case(text)
-end
 
 -- ---------------------------------------------------------------------------
 -- Bookshelf-style design tokens (AndyHazz/bookshelf.koplugin): 2px black
--- outlines, small corner radius, hard down-right drop shadow, grey hairlines,
--- bold uppercase strip labels, outlined chips.
+-- outlines, the theme's corners, hard down-right drop shadow, grey hairlines.
 -- ---------------------------------------------------------------------------
 
 local Look = require("bos_look")
@@ -136,22 +120,6 @@ local Heading = require("ui/widget/widget"):extend{ width = nil, text = "", heig
 function Heading:getSize() return Geom:new{ w = self.width, h = self.height or S(26) } end
 function Heading:paintTo(bb, x, y)
     Look.heading(bb, self.text, x, y, self.width, self.height or S(26))
-end
-
---- A widget on a hard black shadow (the shadow inside its size).
-local OnShadow = WidgetContainer:extend{ shadow = nil }
-function OnShadow:getSize()
-    local s = self[1]:getSize()
-    local sh = self.shadow or Look.SHADOW_SMALL
-    return Geom:new{ w = s.w + sh, h = s.h + sh }
-end
-function OnShadow:paintTo(bb, x, y)
-    local s = self[1]:getSize()
-    local sh = self.shadow or Look.SHADOW_SMALL
-    self.dimen = Geom:new{ x = x, y = y, w = s.w + sh, h = s.h + sh }
-    Look.shadow(bb, x, y, s.w, s.h, sh)
-    self[1]:paintTo(bb, x, y)
-    Look.decorate(bb, x, y, s.w, s.h)
 end
 
 -- Outlined rounded panel with an optional hard drop shadow. Painted as two
@@ -176,53 +144,80 @@ function Card:paintTo(bb, x, y)
     self[1]:paintTo(bb, x + t + self.padding, y + t + self.padding)
 end
 
--- Square checkbox (bookshelf's check-square): filled with a white tick when on.
-local function makeCheckbox(on, enabled)
-    local d = S(26)
-    local ink = enabled and BLACK or GRAY_TEXT
-    local inner_d = d - 2 * LINE - S(4)
-    local inner = CenterContainer:new{ dimen = Geom:new{ w = inner_d, h = inner_d },
-        on and TextWidget:new{ text = "✓", face = bface(17), bold = bflag(17), fgcolor = WHITE }
-           or VerticalSpan:new{ width = 0 } }
-    return Card:new{
-        bordersize = LINE, padding = S(2), radius = RADIUS,
-        color = ink, background = on and ink or WHITE,
-        inner,
-    }
+-- ----- controls, the way a phone draws them ----------------------------------
+
+local Widget = require("ui/widget/widget")
+
+--- An on/off switch (Android, iOS): a pill, filled with the knob at its
+--- right when on; outlined with the knob at its left when off.
+local Switch = Widget:extend{ on = false, enabled = true }
+function Switch:getSize() return Geom:new{ w = S(50), h = S(28) } end
+function Switch:paintTo(bb, x, y)
+    local w, h = S(50), S(28)
+    self.dimen = Geom:new{ x = x, y = y, w = w, h = h }
+    local ink = self.enabled and BLACK or GRAY_TEXT
+    local r = math.floor(h / 2)
+    local b = math.max(LINE, S(2))
+    if self.on then
+        bb:paintRoundedRect(x, y, w, h, ink, r)
+        Look.disc(bb, x + w - r, y + r, r - b - S(1), WHITE)
+    else
+        bb:paintRoundedRect(x, y, w, h, ink, r)
+        bb:paintRoundedRect(x + b, y + b, w - 2 * b, h - 2 * b, WHITE, r - b)
+        Look.disc(bb, x + r, y + r, r - b - S(3), ink)
+    end
 end
 
-local function makeRadio(on, enabled)
-    local d = S(26)
-    local ink = enabled and BLACK or GRAY_TEXT
-    local dot_d = S(12)
-    local inner_d = d - 2 * LINE
-    local dot = on and Card:new{ bordersize = 0, radius = 0,
-                                 background = ink, box(dot_d, dot_d) }
-                    or box(dot_d, dot_d)
-    return Card:new{
-        bordersize = LINE, radius = 0, color = ink, background = WHITE,
-        CenterContainer:new{ dimen = Geom:new{ w = inner_d, h = inner_d }, dot },
-    }
+--- A choice in a list (iOS): a tick at the right of the one chosen; the
+--- others, an empty ring (so it reads as a choice on paper too).
+local Check = Widget:extend{ on = false, enabled = true }
+function Check:getSize() return Geom:new{ w = S(28), h = S(28) } end
+function Check:paintTo(bb, x, y)
+    local d = S(28)
+    self.dimen = Geom:new{ x = x, y = y, w = d, h = d }
+    local ink = self.enabled and BLACK or GRAY_TEXT
+    local r = math.floor(d / 2)
+    if self.on then
+        Look.disc(bb, x + r, y + r, r, ink)
+        local t = TextWidget:new{ text = "\u{2713}", face = bface(16), bold = bflag(16), fgcolor = WHITE }
+        local sz = t:getSize()
+        t:paintTo(bb, x + math.floor((d - sz.w) / 2), y + math.floor((d - sz.h) / 2))
+        t:free()
+    else
+        Look.disc(bb, x + r, y + r, r, HAIRLINE)
+        Look.disc(bb, x + r, y + r, r - math.max(LINE, S(2)), WHITE)
+    end
 end
 
--- Outlined chip (bookshelf's genre tags) for current values.
-local function makeChip(text, max_w, enabled)
-    local tw = TextWidget:new{
-        text = upper(text), face = Look.mono(13), bold = true,
-        fgcolor = enabled and BLACK or GRAY_TEXT,
-        max_width = max_w - 2 * (LINE + S(10)),
-    }
-    return Card:new{
-        bordersize = LINE, radius = 0, color = enabled and BLACK or GRAY_TEXT,
-        shadow = enabled and S(2) or 0,
-        FrameContainer:new{ bordersize = 0, margin = 0, padding = 0,
-            padding_left = S(10), padding_right = S(10), padding_top = S(2), padding_bottom = S(2),
-            tw },
-    }
+--- A section's icon on a small tile (iOS's coloured squares, in ink).
+local IconTile = Widget:extend{ icon = nil, size = nil }
+function IconTile:getSize() return Geom:new{ w = self.size, h = self.size } end
+function IconTile:paintTo(bb, x, y)
+    local d = self.size
+    self.dimen = Geom:new{ x = x, y = y, w = d, h = d }
+    local r = math.max(S(6), Look.RADIUS)
+    bb:paintRoundedRect(x, y, d, d, BLACK, r)
+    local isz = math.floor(d * 0.62)
+    if self.icon then
+        pcall(UI.paintIcon, bb, self.icon, x + math.floor((d - isz) / 2), y + math.floor((d - isz) / 2), isz, true)
+    end
 end
+
+--- A bar down a row's left edge: the setting a search led to.
+local Marker = Widget:extend{ h = 0 }
+function Marker:getSize() return Geom:new{ w = S(5), h = self.h } end
+function Marker:paintTo(bb, x, y) bb:paintRect(x, y + S(8), S(5), self.h - S(16), BLACK) end
 
 -- ---------------------------------------------------------------------------
 -- The screen
+--
+-- As a phone's Settings app: a front page with a big title, a search field
+-- and the sections as rows (an icon, the name, what's in it); a section is a
+-- page of its own with ‹ back to the front page. Rows stand in cards, a
+-- switch for on/off, a tick for a choice, the value in grey on the right.
+-- Search looks through every setting, sub-pages too (ShelfTechUI's and
+-- KOReader's), as you type; a result opens the page it's on, the setting
+-- marked.
 -- ---------------------------------------------------------------------------
 
 local HubScreen = InputContainer:extend{
@@ -234,20 +229,14 @@ local HubScreen = InputContainer:extend{
 function HubScreen:init()
     self.W, self.H = Screen:getWidth(), Screen:getHeight()
     self.dimen = Geom:new{ x = 0, y = 0, w = self.W, h = self.H }
-    self.stack = {}
     self.margin = S(18)
     self.row_h = S(58)
-    self.group_gap = S(14)
+    self.group_gap = S(16)
     self.footer_h = S(60)
-    self.strip_h = S(44)
-    self.strip_page = 1
+    self.field_h = S(44)
 
     self.ges_events = {
         Swipe = { GestureRange:new{ ges = "swipe", range = self.dimen } },
-        -- the whole top-left corner (the clock and the strip's close box)
-        -- closes the app: a generous target, as a corner should be
-        CloseCorner = { GestureRange:new{ ges = "tap",
-            range = function() return Geom:new{ x = 0, y = 0, w = S(96), h = self.top_h or S(60) } end } },
     }
     if Device:hasKeys() then
         local Input = Device.input
@@ -281,25 +270,102 @@ function HubScreen:init()
         return screen[k]
     end })
 
+    -- the search field: KOReader's own text input (keyboard layouts, a real
+    -- keyboard, the cursor) inside our box
+    local InputText = require("ui/widget/inputtext")
+    self.input = InputText:new{
+        text = "", hint = _("Search settings"),
+        width = self:inputWidth(), face = face(17),
+        bordersize = 0, margin = 0, padding = S(4),
+        parent = self, focused = false,
+        edit_callback = function(edited) if edited then self:onTyped() end end,
+        enter_callback = function() self:hideKeyboard() end,
+    }
+
     self.sections = self.plugin:getSections()
-    local want = require("bos_settings_store").get("settings_section")
-    local idx = 1
-    for i, sec in ipairs(self.sections) do if sec.id == want then idx = i end end
-    self:openSection(idx, true)
+    self.stack = { self:rootLevel() }
+    -- asked to open on a section (the store's "Libraries, formats and
+    -- language"): once
+    local Store = require("bos_settings_store")
+    local want = Store.get("settings_open_at")
+    if want then
+        Store.set("settings_open_at", nil)
+        for i, sec in ipairs(self.sections) do
+            if sec.id == want then self:openSection(i) return end
+        end
+    end
+    self:render()
+end
+
+--- The text's room in the field: the search page's (beside Cancel), less
+--- the magnifier and the ×; the same on the front page.
+function HubScreen:inputWidth()
+    local cancel = TextWidget:new{ text = _("Cancel"), face = face(17) }
+    local cw = cancel:getSize().w + S(24)
+    cancel:free()
+    return self.W - 2 * self.margin - cw - S(6) - 2 * LINE - Look.SHADOW_SMALL - S(44) - S(44) - S(6)
 end
 
 -- ----- navigation -----------------------------------------------------------
 
---- Show section `idx` (a chip): its menu, at the top level.
-function HubScreen:openSection(idx, quiet)
+--- What a section holds, in a few words (its headings, else its first rows),
+--- as Android says under each section.
+local SUMMARY
+local function summary(sec)
+    if not SUMMARY then
+        SUMMARY = {
+            stui_home = _("Layout, status bar, library, start menu"),
+            stui_reading = _("Toolbar, Quick Settings, navigation, typesetting"),
+            stui_look = _("Themes, interface size, KOReader's screens"),
+            stui_connect = _("Transfer, store, Hardcover, recommendations"),
+            stui_device = _("Light, night mode, Wi-Fi, screen, keyboard"),
+            stui_tools = _("Statistics, Calibre, highlights, look-up"),
+            stui_system = _("Updates, shortcuts, power, about"),
+        }
+    end
+    if SUMMARY[sec.id] then return SUMMARY[sec.id] end
+    local heads, rows = {}, {}
+    for _i, it in ipairs(sec.items or {}) do
+        if it.heading then
+            if it.heading ~= sec.name then heads[#heads + 1] = it.heading end
+        elseif it.text ~= "KOMenu:separator" and #rows < 4 then
+            local ok, t = pcall(function() return it.text_func and it.text_func() or it.text end)
+            if ok and type(t) == "string" and t ~= "" then rows[#rows + 1] = t end
+        end
+    end
+    local list = #heads >= 2 and heads or rows
+    local out = {}
+    for i = 1, math.min(4, #list) do out[i] = list[i] end
+    return table.concat(out, ", ")
+end
+
+--- The front page: the sections, as rows.
+function HubScreen:rootLevel()
+    local level = { kind = "root", title = _("Settings"), page = 1 }
+    level.build = function()
+        local elements = {}
+        local w = self:innerWidth()
+        for i, sec in ipairs(self.sections) do
+            -- ShelfTechUI's own sections, then the device's and KOReader's
+            local group = i <= 4 and 1 or 2
+            local spec = { text = sec.name, description = summary(sec), has_sub = true, icon = sec.icon,
+                callback = function() self:openSection(i) end }
+            spec.h = self:rowHeight(spec, w)
+            table.insert(elements, { kind = "row", group = group, spec = spec })
+        end
+        return elements
+    end
+    return level
+end
+
+--- Open section `idx` from the front page.
+function HubScreen:openSection(idx)
     local sec = self.sections[idx]
     if not sec then return end
     self.section_idx = idx
-    require("bos_settings_store").set("settings_section", sec.id)
-    self.stack = { { kind = "list", title = sec.name, items = sec.items, page = 1 } }
-    self.strip_page = nil -- recomputed to show the selected chip
-    self.rail_page = nil  -- the rail pages to show the open section
-    if not quiet then self:render() else self:render() end
+    self.stack = { self.stack[1] or self:rootLevel(),
+        { kind = "list", title = sec.name, items = sec.items, page = 1 } }
+    self:render()
 end
 
 function HubScreen:push(level)
@@ -309,8 +375,13 @@ function HubScreen:push(level)
 end
 
 function HubScreen:back(no_close)
+    if self:keyboardUp() then
+        self:hideKeyboard()
+        return
+    end
     if #self.stack > 1 then
-        table.remove(self.stack)
+        local gone = table.remove(self.stack)
+        if gone.kind == "search" then self:clearField() end
         local lvl = self.stack[#self.stack]
         if lvl and lvl.rebuild then
             local ok, items = pcall(lvl.rebuild)
@@ -322,13 +393,14 @@ function HubScreen:back(no_close)
     end
 end
 
---- Back to level `depth` (1: the section's top).
+--- Back to level `depth` (1: the front page).
 function HubScreen:popTo(depth)
     while #self.stack > depth do table.remove(self.stack) end
     self:render()
 end
 
 function HubScreen:closeAll()
+    self:hideKeyboard(true)
     -- (an editor opened from a row may have taken this screen off the stack
     -- and put it back itself, as Bookshelf's line editors do: by then the
     -- plugin had let go of it, and asking the plugin to close it did nothing)
@@ -341,11 +413,6 @@ end
 
 function HubScreen:onBack() self:back() return true end
 
-function HubScreen:onCloseCorner()
-    self:closeAll()
-    return true
-end
-
 function HubScreen:onNextPage() self:gotoPage(1, true) return true end
 
 function HubScreen:onPrevPage() self:gotoPage(-1, true) return true end
@@ -353,10 +420,15 @@ function HubScreen:onPrevPage() self:gotoPage(-1, true) return true end
 function HubScreen:onSwipe(arg, ges)
     local dir = ges.direction
     if dir == "west" then
-        self:gotoPage(1, true)
+        self:gotoPage(1, false)
         return true
     elseif dir == "east" then
-        self:gotoPage(-1, true)
+        -- (on a page's first page: back, as a phone's edge swipe)
+        local lvl = self.stack[#self.stack]
+        if (lvl.page or 1) <= 1 and #self.stack > 1 then self:back() else self:gotoPage(-1, false) end
+        return true
+    elseif dir == "south" and self:keyboardUp() then
+        self:hideKeyboard()
         return true
     end
 end
@@ -373,6 +445,55 @@ function HubScreen:gotoPage(delta, wrap)
         lvl.page = p
         self:render()
     end
+end
+
+-- ----- the search field ------------------------------------------------------
+
+function HubScreen:keyboardUp()
+    return self.input and self.input:isKeyboardVisible() or false
+end
+
+--- KOReader's text input calls this when it's tapped.
+function HubScreen:onSwitchFocus() self:startSearch() end
+function HubScreen:getFocusableWidgetXY() return nil end
+
+--- The search page, the keyboard up.
+function HubScreen:startSearch()
+    local lvl = self.stack[#self.stack]
+    if lvl.kind ~= "search" then
+        self:push{ kind = "search", title = _("Search"), page = 1 }
+    end
+    if not self:keyboardUp() then
+        self.is_always_active = true -- taps reach us under the keyboard
+        self.input:focus()
+        self.input:onShowKeyboard()
+    end
+    self:render()
+end
+
+function HubScreen:hideKeyboard(quiet)
+    if not self:keyboardUp() then return end
+    self.input:onCloseKeyboard()
+    self.input:unfocus()
+    self.is_always_active = nil
+    if not quiet then self:render() end
+end
+
+function HubScreen:clearField()
+    self.setting_text = true
+    self.input:setText("")
+    self.setting_text = nil
+end
+
+function HubScreen:onTyped()
+    if self.setting_text then return end
+    local lvl = self.stack[#self.stack]
+    if lvl.kind ~= "search" then self:push{ kind = "search", title = _("Search"), page = 1 } lvl = self.stack[#self.stack] end
+    lvl.page = 1
+    -- (a burst of keys: looked up once it pauses)
+    self._typed = self._typed or function() if self.stack[#self.stack].kind == "search" then self:render() end end
+    UIManager:unschedule(self._typed)
+    UIManager:scheduleIn(0.15, self._typed)
 end
 
 -- ----- item semantics (port of TouchMenu:onMenuSelect / onMenuHold) ---------
@@ -561,22 +682,164 @@ function HubScreen:itemElements(items, w)
     return elements
 end
 
+-- ----- the index -------------------------------------------------------------
+
+local Utf8Proc
+local function norm(s)
+    s = tostring(s or "")
+    if Utf8Proc == nil then
+        local ok, m = pcall(require, "ffi/utf8proc")
+        Utf8Proc = ok and m or false
+    end
+    if Utf8Proc and Utf8Proc.lowercase then
+        local ok, low = pcall(Utf8Proc.lowercase, s)
+        s = ok and low or s:lower()
+    else
+        s = s:lower()
+    end
+    -- "Wi-Fi" is "wifi", "e-ink" "eink"; other marks are spaces
+    s = s:gsub("[%-'\u{2019}]", ""):gsub("[%p]", " "):gsub("%s+", " ")
+    return s
+end
+
+--- Every setting, once (sub-pages too, as KOReader's own menu search walks
+--- them): { text, desc, trail, sec, chain = { { item, items } }, item }.
+function HubScreen:buildIndex()
+    if self.index then return self.index end
+    local index, seen = {}, {}
+    local function walk(items, sec_i, chain, trail, depth)
+        if type(items) ~= "table" or items.ignored_by_menu_search or depth > 8 then return end
+        for _i, item in ipairs(items) do
+            if type(item) == "table" and not item.heading and item.text ~= "KOMenu:separator"
+                    and not item.ignored_by_menu_search and not seen[item] then
+                seen[item] = true
+                local okT, text = pcall(itemText, item)
+                if okT and text ~= "" then
+                    local desc = item.description
+                    if not desc and item.description_func then
+                        local okD, d = pcall(item.description_func) desc = okD and d or nil
+                    end
+                    if not desc and type(item.help_text) == "string" then desc = item.help_text end
+                    desc = desc or known(text)
+                    local e = { text = text, desc = type(desc) == "string" and desc or nil, trail = trail,
+                        sec = sec_i, chain = chain, item = item, siblings = #items }
+                    e.n_text = norm(text)
+                    e.n_all = e.n_text .. " | " .. norm(table.concat(trail, " ")) .. " | " .. norm(e.desc or "")
+                    index[#index + 1] = e
+                    local sub = item.sub_item_table
+                    if item.stui_search_shallow then sub = nil
+                    elseif item.sub_item_table_func then
+                        local okS, s = pcall(item.sub_item_table_func)
+                        sub = okS and s or nil
+                    end
+                    if type(sub) == "table" and #sub > 0 then
+                        local c2 = { unpack(chain) }
+                        c2[#c2 + 1] = { item = item, items = sub }
+                        local t2 = { unpack(trail) }
+                        t2[#t2 + 1] = text
+                        walk(sub, sec_i, c2, t2, depth + 1)
+                    end
+                end
+            end
+        end
+    end
+    for i, sec in ipairs(self.sections) do
+        index[#index + 1] = { text = sec.name, desc = summary(sec), trail = {}, sec = i, chain = {}, section = true,
+            n_text = norm(sec.name), n_all = norm(sec.name) }
+        walk(sec.items, i, {}, { sec.name }, 1)
+    end
+    self.index = index
+    return index
+end
+
+--- The settings matching `q`: every word somewhere (its name, the way to it,
+--- its explanation), the best first: a name that starts with it, a word of
+--- the name that does, the name holding it, then the rest.
+function HubScreen:search(q)
+    local words = {}
+    for wd in norm(q):gmatch("%S+") do words[#words + 1] = wd end
+    if #words == 0 then return {} end
+    local out = {}
+    for _i, e in ipairs(self:buildIndex()) do
+        local score, ok = 0, true
+        for k, wd in ipairs(words) do
+            local at = e.n_all:find(wd, 1, true)
+            if not at then ok = false break end
+            local t = e.n_text:find(wd, 1, true)
+            if t == 1 then score = score + (k == 1 and 8 or 4)
+            elseif t and e.n_text:sub(t - 1, t - 1) == " " then score = score + 4
+            elseif t then score = score + 2
+            else score = score + 1 end
+        end
+        if ok then
+            if e.section then score = score + 3 end
+            -- a name in a long list is mostly a catalogue (the tiles you can
+            -- add, the languages): the setting itself comes before it
+            if (e.siblings or 0) > 15 then score = score - 1.5 end
+            out[#out + 1] = { e = e, score = score - #e.chain * 0.3 }
+        end
+    end
+    table.sort(out, function(a, b)
+        if a.score ~= b.score then return a.score > b.score end
+        return a.e.text < b.e.text
+    end)
+    local res = {}
+    for i = 1, math.min(80, #out) do res[i] = out[i].e end
+    return res
+end
+
+--- Open the page a search result is on, the setting marked.
+function HubScreen:goTo(e)
+    self:hideKeyboard(true)
+    self:clearField()
+    local sec = self.sections[e.sec]
+    self.section_idx = e.sec
+    self.stack = { self.stack[1], { kind = "list", title = sec.name, items = sec.items, page = 1 } }
+    for _i, step in ipairs(e.chain or {}) do
+        table.insert(self.stack, { kind = "list", title = itemText(step.item), items = step.items, page = 1,
+            rebuild = step.item.sub_item_table_func })
+    end
+    if e.item then self.stack[#self.stack].target_item = e.item end
+    self:render()
+end
+
+--- The search page's rows.
+function HubScreen:searchElements(w)
+    local q = (self.input:getText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if q == "" then
+        return { { kind = "note", text = _("Every setting, ShelfTechUI's and KOReader's, sub-pages too: type a word or two.") } }
+    end
+    local found = self:search(q)
+    if #found == 0 then
+        return { { kind = "note", text = T(_("No settings match \u{201C}%1\u{201D}."), q) } }
+    end
+    local elements = { { kind = "label", text = T(_("%1 found"), #found) } }
+    for _i, e in ipairs(found) do
+        local where = #e.trail > 0 and table.concat(e.trail, "  \u{203A}  ") or _("Section")
+        local spec = { text = e.text, description = where, icon = e.section and self.sections[e.sec].icon or nil,
+            has_sub = true, callback = function() self:goTo(e) end }
+        spec.h = self:rowHeight(spec, w)
+        table.insert(elements, { kind = "row", group = 1, spec = spec })
+    end
+    return elements
+end
+
 --- Open `tab` (a KOReader menu) on its section and walk the item indexes in
---- `path` (as found by menu search): intermediate indexes open sub-pages,
---- the last one is shown highlighted.
+--- `path` (as found by KOReader's menu search): intermediate indexes open
+--- sub-pages, the last one is shown marked.
 function HubScreen:openPath(tab, path)
     local idx
     for i, sec in ipairs(self.sections) do
         if sec.items == tab then idx = i end
         for _j, t in ipairs(sec.tabs or {}) do if t == tab then idx = i end end
     end
+    local root = self.stack[1] or self:rootLevel()
     if idx then
         self.section_idx = idx
-        self.stack = { { kind = "list", title = self.sections[idx].name, items = tab, page = 1 } }
+        self.stack = { root, { kind = "list", title = self.sections[idx].name, items = tab, page = 1 } }
     else
-        self.stack = { { kind = "list", title = self.plugin:tabName(tab), items = tab, page = 1 } }
+        self.stack = { root, { kind = "list", title = self.plugin:tabName(tab), items = tab, page = 1 } }
     end
-    self.strip_page = nil
     local items = tab
     for i, n in ipairs(path) do
         local item = items[n]
@@ -593,18 +856,24 @@ function HubScreen:openPath(tab, path)
     self:render()
 end
 
+-- ----- laying out a page -----------------------------------------------------
+
+-- a card's own edges (outline above and below, its shadow)
+local function cardChrome() return 2 * LINE + Look.SHADOW_SMALL end
+
 function HubScreen:gapBefore(prev, el)
-    if not prev then return 0 end
-    if el.kind == "label" then return S(16) end
-    if prev.kind == "label" then return S(2) end
+    if not prev then return el.kind == "row" and cardChrome() or 0 end
+    if el.kind == "label" or el.kind == "note" then return S(18) end
+    if prev.kind == "label" then return S(6) + cardChrome() end
     if el.kind == "row" and prev.kind == "row" and el.group == prev.group then
         return Size.line.medium
     end
-    return self.group_gap
+    return self.group_gap + cardChrome()
 end
 
 function HubScreen:elementHeight(el)
     if el.kind == "row" then return el.spec.h or self.row_h end
+    if el.kind == "note" then return S(90) end
     return S(26)
 end
 
@@ -618,7 +887,7 @@ function HubScreen:paginate(elements, avail)
                 or (el.kind == "label" and used + need + self.row_h > avail)) then
             table.insert(pages, cur)
             cur, used = {}, 0
-            need = self:elementHeight(el)
+            need = self:gapBefore(nil, el) + self:elementHeight(el)
         end
         table.insert(cur, el)
         used = used + need
@@ -627,7 +896,9 @@ function HubScreen:paginate(elements, avail)
     return pages
 end
 
--- The right-hand side of a row: [chip] [checkbox | radio | › | custom]
+local PAD = 14 -- a row's inner margin (scaled)
+
+-- The right-hand side of a row: [value] [switch | tick | ›]
 function HubScreen:rightGroup(spec, w)
     local enabled = spec.enabled ~= false
     local right_group = HorizontalGroup:new{ align = "center" }
@@ -636,23 +907,28 @@ function HubScreen:rightGroup(spec, w)
         if spec.checkable or spec.has_sub then table.insert(right_group, HorizontalSpan:new{ width = S(10) }) end
     end
     if spec.value then
-        table.insert(right_group, makeChip(tostring(spec.value), math.floor(w * 0.4), enabled))
-        if spec.checkable or spec.has_sub then
-            table.insert(right_group, HorizontalSpan:new{ width = S(10) })
-        end
+        table.insert(right_group, TextWidget:new{ text = tostring(spec.value), face = face(16),
+            fgcolor = GRAY_TEXT, max_width = math.floor(w * 0.36) })
+        if spec.checkable or spec.has_sub then table.insert(right_group, HorizontalSpan:new{ width = S(8) }) end
     end
     if spec.checkable then
-        table.insert(right_group, spec.radio and makeRadio(spec.checked, enabled)
-                                              or makeCheckbox(spec.checked, enabled))
+        if spec.radio then
+            table.insert(right_group, Check:new{ on = spec.checked, enabled = enabled })
+        else
+            table.insert(right_group, Switch:new{ on = spec.checked, enabled = enabled })
+        end
     elseif spec.has_sub then
-        table.insert(right_group, IconWidget:new{ icon = "chevron.right", width = S(22), height = S(22) })
+        table.insert(right_group, IconWidget:new{ icon = "chevron.right", width = S(20), height = S(20), dim = not enabled })
     end
     return right_group
 end
 
+function HubScreen:iconSize() return S(36) end
+
 function HubScreen:textWidth(spec, w)
     local right_w = self:rightGroup(spec, w):getSize().w
-    return w - 2 * S(6) - right_w - (right_w > 0 and S(12) or 0)
+    local icon_w = spec.icon and (self:iconSize() + S(12)) or 0
+    return w - 2 * S(PAD) - icon_w - right_w - (right_w > 0 and S(12) or 0)
 end
 
 --- A row's height: one line, or more with its description.
@@ -661,18 +937,18 @@ function HubScreen:rowHeight(spec, w)
     local tb = TextBoxWidget:new{ text = spec.description, face = face(15), width = self:textWidth(spec, w) }
     local dh = tb:getSize().h
     tb:free()
-    return math.max(self.row_h, S(14) + S(28) + dh + S(12))
+    return math.max(self.row_h, S(12) + S(27) + dh + S(12))
 end
 
--- A list row: title (with its description under it) ........ [chip|checkbox|›]
+-- A row: [icon] title, its description under it in grey ..... [value][control]
 function HubScreen:makeRow(spec, w)
     local h = spec.h or self.row_h
-    local pad = S(6)
+    local pad = S(PAD)
     local enabled = spec.enabled ~= false
     local right_group = self:rightGroup(spec, w)
     local text_max = self:textWidth(spec, w)
     local text_w = TextWidget:new{
-        text = spec.text, face = face(20), max_width = text_max,
+        text = spec.text, face = face(19), max_width = text_max,
         bold = spec.highlight or spec.bold,
         fgcolor = enabled and BLACK or GRAY_TEXT,
     }
@@ -687,14 +963,20 @@ function HubScreen:makeRow(spec, w)
     else
         left = text_w
     end
+    local lead = HorizontalGroup:new{ align = "center", HorizontalSpan:new{ width = pad } }
+    if spec.icon then
+        table.insert(lead, IconTile:new{ icon = spec.icon, size = self:iconSize() })
+        table.insert(lead, HorizontalSpan:new{ width = S(12) })
+    end
+    table.insert(lead, left)
     local dim = Geom:new{ w = w, h = h }
     local content = OverlapGroup:new{
         dimen = dim:copy(),
-        LeftContainer:new{ dimen = dim:copy(),
-            HorizontalGroup:new{ HorizontalSpan:new{ width = pad }, left } },
+        LeftContainer:new{ dimen = dim:copy(), lead },
         RightContainer:new{ dimen = dim:copy(),
             HorizontalGroup:new{ right_group, HorizontalSpan:new{ width = pad } } },
     }
+    if spec.highlight then table.insert(content, 1, Marker:new{ h = h }) end
     return Tappable:new{
         width = w, height = h,
         enabled = enabled,
@@ -704,17 +986,30 @@ function HubScreen:makeRow(spec, w)
     }
 end
 
--- A group of rows: flat list with grey hairlines between rows (bookshelf list view).
+-- A group of rows in a card (iOS's inset grouped list): hairlines between
+-- rows, starting where the words do.
 function HubScreen:makeCard(rows, card_w)
+    local inner_w = card_w - 2 * LINE - Look.SHADOW_SMALL
     local vg = VerticalGroup:new{ align = "left" }
     for i, spec in ipairs(rows) do
         if i > 1 then
-            table.insert(vg, LineWidget:new{ dimen = Geom:new{ w = card_w, h = Size.line.medium },
-                                             background = HAIRLINE })
+            local inset = S(PAD) + (spec.icon and (self:iconSize() + S(12)) or 0)
+            table.insert(vg, HorizontalGroup:new{
+                HorizontalSpan:new{ width = inset },
+                LineWidget:new{ dimen = Geom:new{ w = inner_w - inset, h = Size.line.medium }, background = HAIRLINE } })
         end
-        table.insert(vg, self:makeRow(spec, card_w))
+        table.insert(vg, self:makeRow(spec, inner_w))
     end
-    return vg
+    return Card:new{ bordersize = LINE, shadow = Look.SHADOW_SMALL, vg }
+end
+
+function HubScreen:bodyWidth()
+    return self.W - 2 * self.margin
+end
+
+--- The width of a row inside its card.
+function HubScreen:innerWidth()
+    return self:bodyWidth() - 2 * LINE - Look.SHADOW_SMALL
 end
 
 function HubScreen:buildBody(page, avail_w)
@@ -728,25 +1023,22 @@ function HubScreen:buildBody(page, avail_w)
         end
     end
     for __, el in ipairs(page) do
-        local gap = self:gapBefore(prev, el)
         if el.kind == "row" then
-            if prev and prev.kind == "row" and prev.group == el.group then
-                -- same group
-            else
+            if not (prev and prev.kind == "row" and prev.group == el.group) then
                 flush()
+                local gap = self:gapBefore(prev, el) - cardChrome()
                 if gap > 0 then table.insert(body, VerticalSpan:new{ width = gap }) end
-                if prev and prev.kind == "row" then
-                    -- a new group starts: a solid rule, as between bookshelf sections
-                    table.insert(body, LineWidget:new{ dimen = Geom:new{ w = avail_w, h = Size.line.medium },
-                                                       background = GRAY_TEXT })
-                end
             end
             table.insert(card_rows, self:liveSpec(el))
         else
             flush()
+            local gap = self:gapBefore(prev, el)
             if gap > 0 then table.insert(body, VerticalSpan:new{ width = gap }) end
             if el.kind == "label" then
                 table.insert(body, Heading:new{ width = avail_w, text = el.text })
+            elseif el.kind == "note" then
+                table.insert(body, TextBoxWidget:new{ text = el.text, face = face(17), width = avail_w,
+                    fgcolor = GRAY_TEXT, alignment = "center" })
             end
         end
         prev = el
@@ -755,122 +1047,120 @@ function HubScreen:buildBody(page, avail_w)
     return body
 end
 
--- ----- chrome: status line, chip strip / breadcrumbs, footer ------------------
-
-local function clockText()
-    local ok, datetime = pcall(require, "datetime")
-    if ok and datetime.secondsToHour then
-        return datetime.secondsToHour(os.time(), G_reader_settings:isTrue("twelve_hour_clock"))
-    end
-    return os.date("%H:%M")
-end
-
-local function batteryText()
-    local ok, txt = pcall(function()
-        local powerd = Device:getPowerDevice()
-        if Device:hasBattery() then return powerd:getCapacity() .. "%" end
-    end)
-    return ok and txt or nil
-end
+-- ----- around the page: the status line, the header, the page keys -----------
 
 -- Bookshelf's status line: the same one as on the shelf, in Quick Settings
 -- and on the reading toolbar.
 function HubScreen:buildStatusLine(w)
     local row = UI.buildStatusRow(w)
     if row then return row end
-    local h = S(34)
-    local right = clockText()
-    local batt = batteryText()
-    if batt then right = right .. "   " .. batt end
-    return VerticalGroup:new{
-        align = "left",
-        RightContainer:new{ dimen = Geom:new{ w = w, h = h },
-            TextWidget:new{ text = right, face = smallface(17) } },
-        LineWidget:new{ dimen = Geom:new{ w = w, h = Size.line.medium }, background = GRAY_TEXT },
+    return VerticalSpan:new{ width = S(10) }
+end
+
+--- A key: a glyph or a word in a box (the theme's), on its shadow.
+function HubScreen:key(label, cb, opts)
+    opts = opts or {}
+    local h = opts.h or S(40)
+    local inner
+    if opts.glyph then
+        inner = TextWidget:new{ text = label, face = UI.symbolFace(UI.ptForPx(math.floor(h * 0.4))) }
+    else
+        inner = TextWidget:new{ text = label, face = opts.face or face(17), bold = opts.bold }
+    end
+    local w = opts.w or math.max(h, inner:getSize().w + S(24))
+    local card = Card:new{ bordersize = opts.plain and 0 or LINE, shadow = opts.plain and 0 or Look.SHADOW_SMALL,
+        CenterContainer:new{ dimen = Geom:new{ w = w - (opts.plain and 0 or 2 * LINE), h = h - (opts.plain and 0 or 2 * LINE) }, inner } }
+    local sz = card:getSize()
+    return Tappable:new{ width = sz.w, height = sz.h, callback = cb, card }
+end
+
+--- The search field: [magnifier  text …  ×]
+function HubScreen:searchField(w)
+    local h = self.field_h
+    local inner_w = w - 2 * LINE - Look.SHADOW_SMALL
+    local glyph = TextWidget:new{ text = UI.GLYPH.search, face = UI.symbolFace(UI.ptForPx(math.floor(h * 0.36))), fgcolor = GRAY_TEXT }
+    local has_text = (self.input:getText() or "") ~= ""
+    local clear_w = has_text and S(44) or 0
+    local row = HorizontalGroup:new{ align = "center",
+        CenterContainer:new{ dimen = Geom:new{ w = S(44), h = h - 2 * LINE }, glyph },
+        self.input,
     }
+    if has_text then
+        local d = S(26)
+        local x_btn = Tappable:new{ width = clear_w, height = h - 2 * LINE,
+            callback = function()
+                self:clearField()
+                self.stack[#self.stack].page = 1
+                self:render()
+            end,
+            CenterContainer:new{ dimen = Geom:new{ w = clear_w, h = h - 2 * LINE },
+                Card:new{ bordersize = 0, background = GRAY_TEXT,
+                    CenterContainer:new{ dimen = Geom:new{ w = d, h = d },
+                        TextWidget:new{ text = "\u{00D7}", face = bface(16), bold = bflag(16), fgcolor = WHITE } } } } }
+        table.insert(row, HorizontalSpan:new{ width = math.max(0, inner_w - S(44) - self.input:getSize().w - clear_w) })
+        table.insert(row, x_btn)
+    end
+    local field = Card:new{ bordersize = LINE, shadow = Look.SHADOW_SMALL,
+        LeftContainer:new{ dimen = Geom:new{ w = inner_w, h = h - 2 * LINE }, row } }
+    -- a tap anywhere on it starts a search (not just on the words)
+    local sz = field:getSize()
+    return Tappable:new{ width = sz.w, height = sz.h, callback = function() self:startSearch() end, field }
 end
 
-local CHIP_FONT = 16
-
--- One segmented strip (Bookshelf's chip bar): thin outline, thin separators,
--- bold capitals; the selected cell filled black.
--- cells: { { text = | icon =, width = (fixed) | nil (shares the rest), selected, callback } }
-function HubScreen:strip(cells, w)
-    local h = self.strip_h
-    local b = Size.border.default
-    local inner_w = w - 2 * b
-    local fixed, n_flex, nat = 0, 0, {}
-    local f, bold = Look.mono(CHIP_FONT - 3), true
-    b = LINE
-    inner_w = w - Look.SHADOW_SMALL - 2 * b
-    for i, c in ipairs(cells) do
-        if c.width then fixed = fixed + c.width
-        else
-            n_flex = n_flex + 1
-            local tw = TextWidget:new{ text = upper(c.text), face = f, bold = bold }
-            nat[i] = tw:getSize().w + 2 * S(12)
-            tw:free()
-        end
+--- Above the page.
+---   front page:  Settings (big)                         [×]
+---                [ search                              ]
+---   a page:      [‹ Settings]                       [⌕] [×]
+---                Typesetting (big)
+---   search:      [ search …                ×] [Cancel]
+function HubScreen:pageHeader(w)
+    local vg = VerticalGroup:new{ align = "left" }
+    local lvl = self.stack[#self.stack]
+    local close = self:key("\u{00D7}", function() self:closeAll() end, { face = bface(22), bold = bflag(22) })
+    local function spread(left, right)
+        local lw = left:getSize().w
+        local rw = right:getSize().w
+        return HorizontalGroup:new{ align = "center", left, HorizontalSpan:new{ width = math.max(0, w - lw - rw) }, right }
     end
-    local seps = (#cells - 1) * b
-    local flex_total = inner_w - fixed - seps
-    -- equal shares when every label fits, else in proportion
-    local maxnat, sumnat = 0, 0
-    for _i, v in pairs(nat) do maxnat = math.max(maxnat, v); sumnat = sumnat + v end
-    local equal = n_flex > 0 and maxnat * n_flex <= flex_total
-    local widths, used, last = {}, 0, nil
-    for i, c in ipairs(cells) do
-        if c.width then widths[i] = c.width
-        else
-            widths[i] = equal and math.floor(flex_total / n_flex)
-                or math.floor(flex_total * nat[i] / math.max(1, sumnat))
-            last = i
-        end
-        used = used + widths[i]
+    if lvl.kind == "root" then
+        local title = TextWidget:new{ text = _("Settings"), face = bface(30), bold = bflag(30), max_width = w - S(80) }
+        table.insert(vg, spread(title, close))
+        table.insert(vg, VerticalSpan:new{ width = S(12) })
+        table.insert(vg, self:searchField(w))
+        table.insert(vg, VerticalSpan:new{ width = S(4) })
+    elseif lvl.kind == "search" then
+        local cancel = self:key(_("Cancel"), function()
+            self:hideKeyboard(true)
+            self:clearField()
+            self:popTo(math.max(1, #self.stack - 1))
+        end, { plain = true, h = self.field_h + Look.SHADOW_SMALL })
+        local fw = w - cancel:getSize().w - S(6)
+        table.insert(vg, HorizontalGroup:new{ align = "center", self:searchField(fw), HorizontalSpan:new{ width = S(6) }, cancel })
+        table.insert(vg, VerticalSpan:new{ width = S(4) })
+    else
+        local prev = self.stack[#self.stack - 1]
+        local back_text = TextWidget:new{ text = "\u{2039}  " .. (prev and prev.title or _("Settings")),
+            face = face(18), max_width = math.floor(w * 0.55) }
+        local back = Tappable:new{ width = back_text:getSize().w + S(16), height = S(40), callback = function() self:back() end,
+            LeftContainer:new{ dimen = Geom:new{ w = back_text:getSize().w + S(16), h = S(40) }, back_text } }
+        local find = self:key(UI.GLYPH.search, function() self:startSearch() end, { glyph = true })
+        local right = HorizontalGroup:new{ align = "center", find, HorizontalSpan:new{ width = S(10) }, close }
+        table.insert(vg, spread(back, right))
+        table.insert(vg, VerticalSpan:new{ width = S(6) })
+        table.insert(vg, TextWidget:new{ text = lvl.title or "", face = bface(26), bold = bflag(26), max_width = w })
     end
-    if last then widths[last] = widths[last] + (inner_w - seps - used) end
-    local hg = HorizontalGroup:new{}
-    for i, c in ipairs(cells) do
-        if i > 1 then
-            table.insert(hg, LineWidget:new{ dimen = Geom:new{ w = b, h = h }, background = BLACK })
-        end
-        local cw = widths[i]
-        local sel = c.selected
-        local inner
-        if c.icon then
-            inner = IconWidget:new{ icon = c.icon, width = S(24), height = S(24), invert = sel, alpha = true,
-                dim = c.enabled == false }
-        else
-            inner = TextWidget:new{ text = upper(c.text), face = f, bold = bold,
-                fgcolor = sel and WHITE or (c.dim and GRAY_TEXT or BLACK), max_width = cw - S(10) }
-        end
-        table.insert(hg, Tappable:new{
-            width = cw, height = h,
-            enabled = c.enabled ~= false,
-            callback = c.callback,
-            FrameContainer:new{
-                bordersize = 0, margin = 0, padding = 0,
-                background = sel and BLACK or WHITE,
-                CenterContainer:new{ dimen = Geom:new{ w = cw, h = h }, inner },
-            },
-        })
-    end
-    return OnShadow:new{ FrameContainer:new{
-        bordersize = b, margin = 0, padding = 0, color = BLACK, background = WHITE, hg,
-    } }
+    table.insert(vg, VerticalSpan:new{ width = S(6) })
+    return vg
 end
 
--- Footer: ✕ close, and the page controls when there's more than one page.
+-- Footer: the page keys, when there's more than one page.
 function HubScreen:buildFooter(page, count, w)
     local h = self.footer_h
-    w = w or (self.W - 2 * self.margin)
-    -- (closing is the box in the SETTINGS strip at the top)
     if count <= 1 then return VerticalSpan:new{ width = h } end
     local cell = S(54)
-    -- square retro buttons on a hard shadow (flat and grey when disabled)
     local function btn(icon, cb, enabled)
         local bw, bh = S(44), S(38)
-        local face_ = Card:new{ bordersize = LINE, radius = 0, color = enabled and BLACK or GRAY_TEXT,
+        local face_ = Card:new{ bordersize = LINE, color = enabled and BLACK or GRAY_TEXT,
             shadow = enabled and Look.SHADOW_SMALL or 0,
             CenterContainer:new{ dimen = Geom:new{ w = bw - 2 * LINE, h = bh - 2 * LINE },
                 IconWidget:new{ icon = icon, width = S(22), height = S(22), dim = not enabled } } }
@@ -878,8 +1168,15 @@ function HubScreen:buildFooter(page, count, w)
             CenterContainer:new{ dimen = Geom:new{ w = cell, h = h }, face_ } }
     end
     local mid_w = w - 4 * cell
-    local label = TextWidget:new{ text = string.format("%d / %d", page, count),
-        face = Look.mono(16), bold = true, max_width = mid_w }
+    -- page dots, as a phone shows pages (a number past a dozen)
+    local label
+    if count <= 12 then
+        local dots = {}
+        for i = 1, count do dots[i] = i == page and "\u{25CF}" or "\u{25CB}" end
+        label = TextWidget:new{ text = table.concat(dots, " "), face = face(14), max_width = mid_w }
+    else
+        label = TextWidget:new{ text = string.format("%d / %d", page, count), face = Look.mono(16), bold = true, max_width = mid_w }
+    end
     return HorizontalGroup:new{
         align = "center",
         btn("chevron.first", function() self:gotoFirstLast(-1) end, page > 1),
@@ -899,194 +1196,30 @@ function HubScreen:gotoFirstLast(dir)
     end
 end
 
-
--- ----- the side rail: the sections as bookmarks ------------------------------
-
---[[ The sections run down the left edge as tabs, like bookmarks in the side of
-a book: each a square tab with its icon and name, tucked in against the page's
-edge (a black rule). The open one is black, sticks out further, and has a
-ribbon's V-notch at its end. When they don't all fit, ▲ ▼ page the rail.
---]]
-local Rail = InputContainer:extend{ width = nil, height = nil, hub = nil }
-
-function Rail:init()
-    self.dimen = Geom:new{ w = self.width, h = self.height }
-    self.ges_events = {
-        TapRail = { GestureRange:new{ ges = "tap", range = function() return self.dimen end } },
-        SwipeRail = { GestureRange:new{ ges = "swipe", range = function() return self.dimen end } },
-    }
-    local hub = self.hub
-    self.tab_h = S(64)
-    self.gap = S(8)
-    self.arrows_h = S(40)
-    local n = #hub.sections
-    local fit = math.max(1, math.floor((self.height + self.gap) / (self.tab_h + self.gap)))
-    if n > fit then
-        fit = math.max(1, math.floor((self.height - self.arrows_h - S(6) + self.gap) / (self.tab_h + self.gap)))
-    end
-    self.per = fit
-    self.pages = math.max(1, math.ceil(n / fit))
-    if not hub.rail_page then hub.rail_page = math.ceil((hub.section_idx or 1) / fit) end
-    hub.rail_page = math.max(1, math.min(self.pages, hub.rail_page))
-end
-
-function Rail:getSize() return Geom:new{ w = self.width, h = self.height } end
-
-function Rail:paintTo(bb, x, y)
-    self.dimen = Geom:new{ x = x, y = y, w = self.width, h = self.height }
-    local hub = self.hub
-    local w, h = self.width, self.height
-    bb:paintRect(x, y, w, h, WHITE)
-    -- the page's edge
-    local edge = x + w - LINE
-    bb:paintRect(edge, y, LINE, h, BLACK)
-    self.hits = {}
-    local first = (hub.rail_page - 1) * self.per + 1
-    local last = math.min(#hub.sections, first + self.per - 1)
-    local ty = y
-    for i = first, last do
-        local sec = hub.sections[i]
-        local sel = i == hub.section_idx
-        local pressed = self.pressed == i
-        local tuck = sel and 0 or S(14)          -- the open tab sticks out further
-        local tx = x + tuck
-        local tw = edge - tx + (sel and LINE or 0) -- the open one runs into the page
-        local th = self.tab_h
-        if sel then
-            -- the bookmark: black, a hard shadow, a V-notch at its end
-            bb:paintRect(tx + Look.SHADOW_SMALL, ty + Look.SHADOW_SMALL, tw - Look.SHADOW_SMALL, th, BLACK)
-            bb:paintRect(tx, ty, tw, th, BLACK)
-            local notch = S(9)
-            local half = math.floor(th / 2)
-            for k = 0, notch - 1 do
-                local span = math.floor(half * (notch - k) / notch)
-                bb:paintRect(tx + k, ty, 1, span, WHITE)
-                bb:paintRect(tx + k, ty + th - span, 1, span, WHITE)
-            end
-        else
-            Look.box(bb, tx, ty, tw + LINE, th, { fill = pressed and BLACK or WHITE })
-        end
-        local ink_white = sel or pressed
-        local ink = ink_white and WHITE or BLACK
-        local cx0 = tx + (sel and S(10) or 0)
-        local cw = edge - cx0
-        local isz = S(22)
-        if sec.icon then
-            pcall(UI.paintIcon, bb, sec.icon, cx0 + math.floor((cw - isz) / 2), ty + S(8), isz, ink_white)
-        end
-        Look.label(bb, sec.name, cx0 + S(4), ty + S(34), cw - S(8), S(24), 10, { align = "center", color = ink })
-        table.insert(self.hits, { rect = Geom:new{ x = x, y = ty, w = w, h = th }, idx = i })
-        ty = ty + th + self.gap
-    end
-    -- ▲ ▼ when the sections don't all fit
-    self.up_rect, self.down_rect = nil, nil
-    if self.pages > 1 then
-        local bw = math.floor((edge - x - S(10) - Look.SHADOW_SMALL) / 2)
-        local by = y + h - self.arrows_h
-        self.up_rect = Look.button(bb, x, by, bw, self.arrows_h - Look.SHADOW_SMALL, "\u{25B2}",
-            { enabled = hub.rail_page > 1, size = 12 })
-        self.down_rect = Look.button(bb, x + bw + S(8), by, bw, self.arrows_h - Look.SHADOW_SMALL, "\u{25BC}",
-            { enabled = hub.rail_page < self.pages, size = 12 })
-    end
-end
-
-local function inside(pos, r)
-    return pos and r and pos.x >= r.x and pos.x < r.x + r.w and pos.y >= r.y and pos.y < r.y + r.h
-end
-
-function Rail:onTapRail(_, ges)
-    local hub = self.hub
-    if inside(ges.pos, self.up_rect) then
-        if hub.rail_page > 1 then hub.rail_page = hub.rail_page - 1 hub:render() end
-        return true
-    end
-    if inside(ges.pos, self.down_rect) then
-        if hub.rail_page < self.pages then hub.rail_page = hub.rail_page + 1 hub:render() end
-        return true
-    end
-    for _i, hit in ipairs(self.hits or {}) do
-        if inside(ges.pos, hit.rect) then
-            if hit.idx == hub.section_idx and #hub.stack == 1 then return true end
-            -- pressed for a moment, then the section opens
-            self.pressed = hit.idx
-            UIManager:widgetRepaint(self, self.dimen.x, self.dimen.y)
-            UIManager:setDirty(nil, "fast", self.dimen)
-            UIManager:forceRePaint()
-            self.pressed = nil
-            hub:openSection(hit.idx)
-            return true
-        end
-    end
-    return true
-end
-
-function Rail:onSwipeRail(_, ges)
-    local hub = self.hub
-    if ges.direction == "north" and hub.rail_page < self.pages then hub.rail_page = hub.rail_page + 1 hub:render()
-    elseif ges.direction == "south" and hub.rail_page > 1 then hub.rail_page = hub.rail_page - 1 hub:render() end
-    return true
-end
-
---- Above the page: on a sub-page, [‹] and the way here (SECTION › Menu);
---- then the page's name.
-function HubScreen:pageHeader(w)
-    local vg = VerticalGroup:new{ align = "left" }
-    local depth = #self.stack
-    local lvl = self.stack[depth]
-    local sec = self.sections[self.section_idx]
-    -- a section's own page: the black tab already names it
-    if depth == 1 then return VerticalSpan:new{ width = 0 } end
-    if depth > 1 then
-        local trail = { sec and sec.name or "" }
-        for d = 2, depth - 1 do table.insert(trail, self.stack[d].title or "") end
-        local bh = S(34)
-        local back_btn = Tappable:new{
-            width = bh + Look.SHADOW_SMALL, height = bh + Look.SHADOW_SMALL,
-            callback = function() self:back() end,
-            Card:new{ bordersize = LINE, radius = 0, shadow = Look.SHADOW_SMALL,
-                CenterContainer:new{ dimen = Geom:new{ w = bh - 2 * LINE, h = bh - 2 * LINE },
-                    IconWidget:new{ icon = "chevron.left", width = S(20), height = S(20) } } },
-        }
-        local trail_w = TextWidget:new{ text = upper(table.concat(trail, "  \u{203A}  ")),
-            face = Look.mono(11), bold = true, fgcolor = GRAY_TEXT, max_width = w - bh - S(20) }
-        table.insert(vg, HorizontalGroup:new{ align = "center",
-            back_btn, HorizontalSpan:new{ width = S(12) },
-            Tappable:new{ width = trail_w:getSize().w, height = bh, callback = function() self:popTo(1) end,
-                CenterContainer:new{ dimen = Geom:new{ w = trail_w:getSize().w, h = bh }, trail_w } } })
-        table.insert(vg, VerticalSpan:new{ width = S(8) })
-    end
-    table.insert(vg, TextWidget:new{ text = lvl.title or (sec and sec.name) or "", face = bface(22),
-        bold = bflag(22), max_width = w })
-    table.insert(vg, VerticalSpan:new{ width = S(4) })
-    table.insert(vg, LineWidget:new{ dimen = Geom:new{ w = w, h = LINE }, background = BLACK })
-    table.insert(vg, VerticalSpan:new{ width = S(4) })
-    return vg
-end
-
 function HubScreen:render()
     local lvl = self.stack[#self.stack]
-    local full_w = self.W - 2 * self.margin
-    -- status line; the pinstriped SETTINGS strip (its box closes the app)
-    local Retro = require("bos_retro")
+    local full_w = self:bodyWidth()
+    local header = self:pageHeader(full_w)
     local top = VerticalGroup:new{
         align = "left",
         VerticalSpan:new{ width = S(6) },
         self:buildStatusLine(full_w),
-        VerticalSpan:new{ width = S(6) },
-        Retro.TitleStrip:new{ width = full_w, height = S(34), caption = _("Settings"), size = 14,
-            close_callback = function() self:closeAll() end },
-        VerticalSpan:new{ width = S(12) },
+        VerticalSpan:new{ width = S(10) },
+        header,
     }
     local top_h = top:getSize().h
-    self.top_h = top_h - S(10) -- (not the space under the strip: the rail starts there)
-    -- the rail on the left, the page on the right
-    local rail_w = math.min(S(118), math.floor(full_w * 0.27))
-    local gap = S(14)
-    local avail_w = full_w - rail_w - gap
-    local below_h = self.H - top_h - S(8)
-    local header = self:pageHeader(avail_w)
-    local avail_h = below_h - header:getSize().h - self.footer_h
-    local elements = lvl.build and lvl.build() or self:itemElements(lvl.items, avail_w)
+    -- the keyboard takes the bottom of the screen while it's up
+    local bottom = self.H
+    if self:keyboardUp() then
+        local kd = self.input:getKeyboardDimen()
+        if kd and kd.h and kd.h > 0 then bottom = self.H - kd.h end
+    end
+    local footer_h = self:keyboardUp() and 0 or self.footer_h
+    local avail_h = math.max(self.row_h, bottom - top_h - footer_h - S(6))
+    local elements
+    if lvl.kind == "search" then elements = self:searchElements(self:innerWidth())
+    elseif lvl.build then elements = lvl.build()
+    else elements = self:itemElements(lvl.items, self:innerWidth()) end
     local pages = self:paginate(elements, avail_h)
     self.page_count = #pages
     if lvl.target_item and not lvl.target_paged then
@@ -1099,29 +1232,24 @@ function HubScreen:render()
     end
     lvl.page = math.max(1, math.min(lvl.page or 1, #pages))
 
-    local body = self:buildBody(pages[lvl.page], avail_w)
-    local page_col = VerticalGroup:new{
-        align = "left",
-        header,
-        TopContainer:new{ dimen = Geom:new{ w = avail_w, h = avail_h }, body },
-        self:buildFooter(lvl.page, #pages, avail_w),
-    }
-    local rail = Rail:new{ width = rail_w, height = below_h - S(4), hub = self }
+    local body = self:buildBody(pages[lvl.page], full_w)
     local column = VerticalGroup:new{
         align = "left",
-        HorizontalGroup:new{ HorizontalSpan:new{ width = self.margin }, top },
-        HorizontalGroup:new{ align = "top",
-            HorizontalSpan:new{ width = self.margin }, rail, HorizontalSpan:new{ width = gap }, page_col },
+        top,
+        TopContainer:new{ dimen = Geom:new{ w = full_w, h = avail_h }, body },
     }
+    if footer_h > 0 then table.insert(column, self:buildFooter(lvl.page, #pages, full_w)) end
     self[1] = FrameContainer:new{
         bordersize = 0, margin = 0, padding = 0, background = WHITE,
         width = self.W, height = self.H,
-        column,
+        HorizontalGroup:new{ HorizontalSpan:new{ width = self.margin }, column },
     }
     UIManager:setDirty(self, function() return "ui", self.dimen end)
 end
 
 function HubScreen:onCloseWidget()
+    if self._typed then UIManager:unschedule(self._typed) end
+    pcall(function() self:hideKeyboard(true) end)
     if self.plugin and self.plugin.screen == self then self.plugin.screen = nil end
     UIManager:setDirty(nil, "flashui")
 end
@@ -1139,6 +1267,7 @@ function HubScreen:onShow()
                 local ok, items = pcall(lvl.rebuild)
                 if ok and type(items) == "table" then lvl.items = items end
             end
+            self.index = nil
             self:render()
         end)
     end

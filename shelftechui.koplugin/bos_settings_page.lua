@@ -30,7 +30,7 @@ local S = UI.S
 
 local Page = {}
 
-Page.VERSION = "1.13.1"
+Page.VERSION = "1.14.0"
 
 -- Dispatcher's sub-menus edit tables in place and flag `caller.updated`.
 local saver = setmetatable({}, { __newindex = function() Store.save() end })
@@ -525,6 +525,8 @@ local function controlItems(surface)
     table.insert(items, {
         text = _("Long-press actions"),
         description = T(_("What holding each %1 does: its own default, or any KOReader action."), spec.thing),
+        -- (Settings search finds this row, not every action under every control)
+        stui_search_shallow = true,
         sub_item_table_func = function()
             local sub = {}
             for _i, c in ipairs(Controls.shown(surface)) do

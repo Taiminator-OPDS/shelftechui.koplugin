@@ -1061,7 +1061,7 @@ function Store:settings()
     local items = {
         { text = _("Libraries, formats and language"), callback = function()
             pcall(function()
-                require("bos_settings_store").set("settings_section", "stui_connect")
+                require("bos_settings_store").set("settings_open_at", "stui_connect")
                 require("bos_settings").open()
             end)
         end },

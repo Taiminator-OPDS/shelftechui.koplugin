@@ -2,6 +2,12 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.14.0
+
+- Settings has a search field. Type a word or two and every setting that matches shows as you type: ShelfTechUI's and KOReader's, sub-pages too, each with the way to it ("Device › Screen › Sleep screen"). Tap one to land on its page with the setting marked. "Wi-Fi" and "wifi" find the same things.
+- Settings looks like a phone's now. A front page has a big title, the search field, and the sections as rows: an icon, the name, and what's inside. Each section is a page of its own, with "‹ Settings" to go back and a search key at the top.
+- Rows stand in cards. On/off settings are switches, a choice in a list has a tick, and a setting's current value shows in grey on the right. Pages show dots for how many there are. Swiping right on a section's first page goes back.
+
 ## 1.13.1
 
 - Transfer on a Kindle: phones and computers can reach it. The Kindle's firewall drops connections from other devices, and the way Transfer opened it could fail. Its rule now goes first in the list. Kindles whose firewall has no "conntrack" get a plain rule for the port instead. When the Kindle reloads its firewall (Wi-Fi reconnecting, waking up), Transfer notices within a minute and opens the port again.

@@ -29,7 +29,7 @@ ShelfTechUI is a fork of AndyHazz's Bookshelf home screen
 | **Quick Settings** | Swipe down in a book | Tiles (X-Ray when it's installed), the Wi-Fi network name, light sliders |
 | **Text sheet (Aa)** | Swipe up, or the menu | KOReader's text options as a sheet |
 | **Themes** | Settings → Themes | Six looks for the whole interface: Retro, Modern, Fantasy, Sci-fi, Rustic, Book (frames, shadows, type, tracks, handles, shelves), across ShelfTechUI's screens, Bookshelf's home, the restyled KOReader screens (text sheet, dictionary, search, dialogs, lists), Glimpse and the store. KOReader restarts to apply one. The book's own page keeps your reading font |
-| **Settings app** | ⚙, start menu, the pull-down | One app, by what things are for: HOME · READING · LOOK · CONNECT · DEVICE · TOOLS · SYSTEM. KOReader's and Bookshelf's own menus are folded into the section they belong to, each row with a line of explanation |
+| **Settings app** | ⚙, start menu, the pull-down | One app laid out like a phone's: a front page with search and the sections (Home · Reading · Look · Connect · Device · Tools · System), each a page of its own, with rows in cards, switches and values. Search finds any setting, ShelfTechUI's or KOReader's, sub-pages too, and opens its page with it marked. KOReader's and Bookshelf's own menus are folded into the section they belong to, each row with a line of explanation |
 
 ## Install
 
