@@ -39,8 +39,10 @@ else
     sleep 4
 fi
 
-# 4. KOReader again, as KUAL starts it
+# 4. KOReader again, as KUAL starts it (this log kept beside it, to be read
+# over USB)
 say "starting KOReader"
+cp -f "${LOG}" "${KO_DIR}/stui_usbdrive.log" 2>/dev/null
 cd / || exit 1
 /bin/sh "${KO_DIR}/koreader.sh" --kual ${FLAGS} </dev/null >/dev/null 2>&1 &
 exit 0
