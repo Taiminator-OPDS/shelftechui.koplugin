@@ -959,10 +959,18 @@ function Store:lookFor(v)
     -- asked by the title and the author together ("Dracula Stoker": a
     -- common title doesn't bury the book); if that finds nothing, by the
     -- title alone (a library that only searches titles)
-    local surname = tostring(pick.author or ""):gsub("%s*[,;&].*$", ""):match("(%S+)%s*$")
-    local queries = { pick.title or "" }
-    if surname and #surname > 1 and not norm(pick.title):find(norm(surname), 1, true) then
-        table.insert(queries, 1, (pick.title or "") .. " " .. surname)
+    -- ("Dracula, Bram Stoker" first; a library that writes the name
+    -- otherwise, "B. Stoker", finds "Dracula Stoker"; then the title alone)
+    local full = tostring(pick.author or ""):gsub("%s*[;&].*$", ""):gsub("^%s+", ""):gsub("%s+$", "")
+    -- ("Stoker, Bram" → "Bram Stoker")
+    local last, first = full:match("^([^,]+),%s*(.+)$")
+    if last then full = first .. " " .. last end
+    local surname = full:match("(%S+)%s*$")
+    local title = pick.title or ""
+    local queries = { title }
+    if surname and #surname > 1 and not norm(title):find(norm(surname), 1, true) then
+        table.insert(queries, 1, title .. " " .. surname)
+        if full:find("%s") then table.insert(queries, 1, title .. ", " .. full) end
     end
     local all = {}   -- every match from every query so far, by key
     local function run(qi)

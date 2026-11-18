@@ -4,7 +4,7 @@ Each version's section is its release notes (GitHub releases and Storefront show
 
 ## 1.18.1
 
-- Find in the store (from Hardcover, or a pick) searches the libraries by the title and the author together ("Dracula Stoker"), so a common title doesn't bury the book. If that finds nothing, it searches by the title alone. The Internet Archive and Gallica now take a title and an author in one search (each word in any field).
+- Find in the store (from Hardcover, or a pick) searches the libraries by the title and the author's full name ("Dracula, Bram Stoker"), so a common title doesn't bury the book. If that finds nothing (a library that writes the name otherwise, "B. Stoker"), it tries the title and surname ("Dracula Stoker"), then the title alone. The Internet Archive and Gallica now take a title and an author in one search (each word in any field).
 
 ## 1.18.0
 

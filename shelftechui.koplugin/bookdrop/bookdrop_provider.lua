@@ -138,7 +138,7 @@ local function searchExpression(query, filters)
         -- no field's phrase: each word in the title, the author or the
         -- subjects, as well as the whole as a phrase)
         local words = {}
-        for w in tostring(query):gmatch("[^%s\"()]+") do
+        for w in tostring(query):gmatch("[^%s\"(),]+") do
             if #w > 1 and #words < 6 then words[#words + 1] = quoted(w) end
         end
         if #words > 1 then
