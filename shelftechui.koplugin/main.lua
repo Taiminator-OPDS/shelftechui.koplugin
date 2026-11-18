@@ -205,6 +205,8 @@ function BookshelfOS:init()
     pcall(function() require("bos_hardcover_home").install() end)
     -- your Hardcover books that aren't on the device: faded, at the end of Home
     pcall(function() require("bos_hardcover_library").install() end)
+    -- KOReader's Wi-Fi progress messages, not shown (the chip says it)
+    pcall(function() require("bos_wifi_quiet").install() end)
     -- 1.6.3 kept two big lists of Settings rows in KOReader's settings file
     -- (about 40 KB, written out each time a book closes): gone
     if not BookshelfOS._rows_cleared then

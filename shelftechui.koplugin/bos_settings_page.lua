@@ -30,7 +30,7 @@ local S = UI.S
 
 local Page = {}
 
-Page.VERSION = "1.14.1"
+Page.VERSION = "1.14.2"
 
 -- Dispatcher's sub-menus edit tables in place and flag `caller.updated`.
 local saver = setmetatable({}, { __newindex = function() Store.save() end })
@@ -831,6 +831,13 @@ function Page.sections(plugin)
 
     local Transfer = require("bos_transfer")
     local connect = { id = "stui_connect", name = _("Connect"), icon = require("bos_ui").PLUGIN_DIR .. "icons/connect.svg", items = {
+        { heading = _("Wi-Fi") },
+        {
+            text = _("Hide Wi-Fi progress messages"),
+            description = _("KOReader's \"Scanning for networks…\", \"Turning on Wi-Fi…\", \"Connecting to network…\" and the like aren't shown: the Wi-Fi chip and status line say it. Questions and the list of networks still show."),
+            checked_func = function() return Store.get("wifi_quiet") ~= false end,
+            callback = function() Store.set("wifi_quiet", Store.get("wifi_quiet") == false) end,
+        },
         { heading = _("Transfer") },
         {
             text = _("Transfer"),

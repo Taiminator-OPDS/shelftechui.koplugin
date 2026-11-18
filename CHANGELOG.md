@@ -2,6 +2,11 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.14.2
+
+- KOReader's Wi-Fi progress messages ("Scanning for networks…", "Turning on Wi-Fi…", "Connecting to network…", "Wi-Fi off.") aren't shown. The Wi-Fi chip and status line already say what Wi-Fi is doing. Questions such as "Do you want to turn on Wi-Fi?", the list of networks, and other messages that mention Wi-Fi still show. Turn it off in Settings → Connect → Wi-Fi.
+- If you used a patch to hide those messages, you can remove it. A patch that hides every popup mentioning Wi-Fi also hides questions, which makes the actions behind them do nothing (turning on Wi-Fi for the store or Hardcover, choosing a network, Transfer's code switch).
+
 ## 1.14.1
 
 - Home's Wi-Fi chip shows the right state after its popup closes. It used to keep its pressed (inverted) look and its old on/off state, because the toolbar was asked to repaint while the popup was still on screen.
