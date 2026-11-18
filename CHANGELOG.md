@@ -5,6 +5,8 @@ Each version's section is its release notes (GitHub releases and Storefront show
 ## 1.15.0
 
 - USB drive on a Kindle without leaving KOReader by hand. Plugging in asks "USB drive" or "Just charge". Choose USB drive and KOReader saves what's open and closes, the Kindle's own USB drive mode takes over, and when you eject it on the computer KOReader opens again by itself. It can't stay open meanwhile, because it lives on the drive the computer takes. Also a Quick Settings tile and home chip (USB drive), Settings → Device → USB drive, and a gesture action. "Don't ask when plugged in" turns the question off, since a Kindle can't tell a computer from a charger.
+- A quicker keyboard, as a Kindle's own: a key types at once. KOReader's keyboard waits for the screen twice for every letter, to show the key pressed and then released. Now the letter is typed straight away, the key shows pressed for a moment without waiting, and the text you type uses the screen's fast mode, tidied up when you pause. Settings → Device → Keyboard → Quick keyboard.
+- USB drive: when the cable was already plugged in before you chose USB drive, the Kindle is told again (as a replug would), so it goes into USB drive mode without unplugging.
 
 ## 1.14.2
 

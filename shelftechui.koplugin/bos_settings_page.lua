@@ -923,6 +923,13 @@ function Page.sections(plugin)
 
     local device = { id = "stui_device", name = _("Device"), icon = "appbar.settings", items = {} }
     fold(device, "setting", _("This device"))
+    table.insert(device.items, { heading = _("Keyboard") })
+    table.insert(device.items, {
+        text = _("Quick keyboard"),
+        description = _("A key types at once, as a Kindle's own keyboard does: no waiting for the screen to show the key pressed and released, and the text you type drawn in the screen's fast mode (tidied up when you pause). KOReader's \"Flash keyboard\" still decides whether keys show being pressed."),
+        checked_func = function() return Store.get("quick_keyboard") ~= false end,
+        callback = function() Store.set("quick_keyboard", Store.get("quick_keyboard") == false) end,
+    })
     if require("bos_usbdrive").available() then
         table.insert(device.items, { heading = _("USB drive") })
         table.insert(device.items, {

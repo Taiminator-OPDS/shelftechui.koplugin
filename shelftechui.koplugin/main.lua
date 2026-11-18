@@ -207,6 +207,8 @@ function BookshelfOS:init()
     pcall(function() require("bos_hardcover_library").install() end)
     -- KOReader's Wi-Fi progress messages, not shown (the chip says it)
     pcall(function() require("bos_wifi_quiet").install() end)
+    -- a key types at once (as a Kindle's own keyboard)
+    pcall(function() require("bos_keyboard").install() end)
     -- 1.6.3 kept two big lists of Settings rows in KOReader's settings file
     -- (about 40 KB, written out each time a book closes): gone
     if not BookshelfOS._rows_cleared then
