@@ -292,17 +292,25 @@ end
 local function drawTop(bw, bb, W, pad)
     local y = S(8)
     local line_h = S(22)
-    local clock = os.date(G_reader_settings:isTrue("twelve_hour_clock") and "%I:%M %p" or "%H:%M"):gsub("^0", "")
-    Look.label(bb, clock .. "  \u{00B7}  " .. os.date("%a %d %b"), pad, y, W - 2 * pad, line_h, 11,
-        { color = Look.GRAY })
-    local right
-    if Device:hasBattery() then
-        local ok, lvl = pcall(function() return Device:getPowerDevice():getCapacity() end)
-        if ok and type(lvl) == "number" then right = lvl .. "%" end
+    -- the line of the time, the date and the battery (Settings → Home: off
+    -- when the home bar has the time and battery chips)
+    local top_line = Store.get("dash_top_line") ~= false
+    if top_line then
+        local clock = os.date(G_reader_settings:isTrue("twelve_hour_clock") and "%I:%M %p" or "%H:%M"):gsub("^0", "")
+        Look.label(bb, clock .. "  \u{00B7}  " .. os.date("%a %d %b"), pad, y, W - 2 * pad, line_h, 11,
+            { color = Look.GRAY })
+        local right
+        if Device:hasBattery() then
+            local ok, lvl = pcall(function() return Device:getPowerDevice():getCapacity() end)
+            if ok and type(lvl) == "number" then right = lvl .. "%" end
+        end
+        if right then Look.label(bb, right, pad, y, W - 2 * pad, line_h, 11, { align = "right", color = Look.GRAY }) end
+        st.top_says = clock .. (right or "")
+        y = y + line_h + S(6)
+    else
+        st.top_says = nil
+        y = y + S(4)
     end
-    if right then Look.label(bb, right, pad, y, W - 2 * pad, line_h, 11, { align = "right", color = Look.GRAY }) end
-    st.top_says = clock .. (right or "")
-    y = y + line_h + S(6)
     local bh, kw, gap = S(40), S(46), S(10)
     local x = pad
     local r = glyphButton(bb, x, y, kw, bh, UI.GLYPH.bars)
@@ -336,6 +344,7 @@ local function drawTop(bw, bb, W, pad)
                 Home.bar, Home.live = st.bar, bw
                 -- Dash's own line above the bar (time, battery) counts too
                 Home.above = function()
+                    if Store.get("dash_top_line") == false then return false end
                     local now = os.date(G_reader_settings:isTrue("twelve_hour_clock") and "%I:%M %p" or "%H:%M"):gsub("^0", "")
                     local lvl = ""
                     if Device:hasBattery() then

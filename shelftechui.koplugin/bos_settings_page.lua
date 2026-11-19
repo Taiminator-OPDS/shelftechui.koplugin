@@ -30,7 +30,7 @@ local S = UI.S
 
 local Page = {}
 
-Page.VERSION = "1.18.1"
+Page.VERSION = "1.18.2"
 
 -- Dispatcher's sub-menus edit tables in place and flag `caller.updated`.
 local saver = setmetatable({}, { __newindex = function() Store.save() end })
@@ -806,7 +806,32 @@ function Page.foldShelves(home, tabs, used, pick)
         local found = {}
         for _r, name in ipairs(g.rows) do
             local it = take(name)
-            if it then found[#found + 1] = plainRow(it) end
+            if it then
+                local row = plainRow(it)
+                if name == "Status line" then
+                    -- (with ShelfTechUI's icon row on, that's what the top
+                    -- panel shows, and edits to this line didn't show: the
+                    -- switch is put beside it, and the line is only edited
+                    -- when it's the one shown)
+                    local Status = require("bos_status")
+                    found[#found + 1] = {
+                        text = _("Status line with icons"),
+                        description = _("The top panel's status line as ShelfTechUI's icons: the time, the light, Wi-Fi and the battery. Off: your own line, made below (tap it to edit it)."),
+                        checked_func = function() return Status.enabled() end,
+                        callback = function()
+                            Store.set("status_icons", not Status.enabled())
+                            pcall(function() require("bos_home").refresh() end)
+                        end,
+                    }
+                    local own_enabled = row.enabled_func
+                    row.enabled_func = function()
+                        if Status.enabled() then return false end
+                        return own_enabled == nil or own_enabled()
+                    end
+                    row.description = _("Your own status line, of tokens (the time, the battery, what you're reading…). Shown when Status line with icons is off.")
+                end
+                found[#found + 1] = row
+            end
         end
         if g.heading == "Library" then
             table.insert(home.items, { heading = _("Library") })
@@ -900,6 +925,15 @@ function Page.sections(plugin)
     table.insert(home.items, { heading = _("Home screen") })
     pick(home.items, { _("Status bar"), _("Swipe down on home"), _("Reading summary"),
         _("Edge swipes on home"), _("Start menu entries"), _("Settings in the start menu") })
+    table.insert(home.items, {
+        text = _("Time and battery line on Dash"),
+        description = _("The line across the top of Dash with the time, the date and the battery. Off: Dash starts with its keys and your home bar (put the Time and Battery chips on it, Status bar above, to keep them in view)."),
+        checked_func = function() return Store.get("dash_top_line") ~= false end,
+        callback = function()
+            Store.set("dash_top_line", Store.get("dash_top_line") == false and nil or false)
+            pcall(function() require("bos_home").refresh() end)
+        end,
+    })
     table.insert(home.items, {
         text = _("Search key on the shelf tabs"),
         description = _("The magnifier at the end of the shelf's tabs. Off: the search field at the top of home does its job (the same matching; \"All in your library\" opens the same results). On: both."),

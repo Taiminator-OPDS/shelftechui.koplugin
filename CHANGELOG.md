@@ -2,6 +2,11 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.18.2
+
+- Settings → Home → Top panel: the status line didn't take your edits while ShelfTechUI's icon row was showing in its place. The switch (Status line with icons) now sits beside it; your own line can be edited when it's off, and is what the top panel shows then.
+- Dash can do without its line of the time, date and battery: Settings → Home → Time and battery line on Dash (keep the Time and Battery chips on the home bar instead).
+
 ## 1.18.1
 
 - Find in the store (from Hardcover, or a pick) searches the libraries by the title and the author's full name ("Dracula, Bram Stoker"), so a common title doesn't bury the book. If that finds nothing (a library that writes the name otherwise, "B. Stoker"), it tries the title and surname ("Dracula Stoker"), then the title alone. The Internet Archive and Gallica now take a title and an author in one search (each word in any field).
