@@ -42,13 +42,20 @@ end
 local TABS = {
     { key = "home", text = _("Home") },
     { key = "friends", text = _("Friends") },
-    { key = "reading", text = _("Reading"), status = 2 },
-    { key = "want", text = _("Want") , status = 1 },
-    { key = "read", text = _("Read"), status = 3 },
+    { key = "library", text = _("Library") },
     { key = "explore", text = _("Explore") },
 }
--- lists reached from Explore (a genre, a mood, Popular) or the search key:
--- shown under Explore, with a way back to it
+-- the Library tab's shelves (its own row of keys)
+local SHELVES = {
+    { key = "reading", text = _("Reading"), status = 2 },
+    { key = "want", text = _("Want to read"), status = 1 },
+    { key = "read", text = _("Read"), status = 3 },
+}
+local SHELF = {}
+for _i, t in ipairs(SHELVES) do SHELF[t.key] = t end
+-- lists reached from Explore (a genre, a mood, Popular), shown under
+-- Explore with a way back to it; and a search's full list of books or
+-- readers (a way back to the search)
 local VIEWS = { search = true, popular = true, tag = true }
 
 local STATUS_NAME = { [1] = _("Want to read"), [2] = _("Reading"), [3] = _("Read"), [4] = _("Paused"), [5] = _("Did not finish") }
@@ -232,14 +239,23 @@ function App:init()
     self.signin = { mode = HC.clientId() and "link" or "key" }
     self.draw = function(page, bb, y, w) page:body(bb, y, w) end
     self.on_swipe = function(page, dir)
+        if page.searching then
+            if dir == "east" then page:endSearch() end
+            return
+        end
         if dir == "west" then page:turn(1)
         elseif dir == "east" then
-            -- (on a list of Explore's first page: back to Explore)
-            if VIEWS[page.tab] and (page.pg[page.tab] or 1) <= 1 then page:pick("explore") else page:turn(-1) end
+            -- (on the first page of a list from Explore or a search: back to it)
+            if VIEWS[page.tab] and (page.pg[page.tab] or 1) <= 1 then
+                if page.tab == "search" then page.tab = page.before_search or "home" page:search()
+                else page:pick("explore") end
+            else page:turn(-1) end
         end
     end
     self.on_more = function(page, rect) page:more(rect) end
     self.on_close = function(page)
+        if page:keyboardUp() then pcall(function() page.input:onCloseKeyboard() end) end
+        if page.typing_timer then UIManager:unschedule(page.typing_timer) end
         HC.link.cancel()
         if page.signin.qr then page.signin.qr:free() end
         if page.transfer_started then pcall(function() require("bos_transfer").hardcover(nil) end) end
@@ -376,7 +392,7 @@ function App:load(tab, force)
             HC.search(self.query or "", got)
         end
     else
-        for _i, t in ipairs(TABS) do if t.key == tab then HC.shelf(t.status, got) end end
+        if SHELF[tab] then HC.shelf(SHELF[tab].status, got) end
     end
     if not self.goal_asked then
         self.goal_asked = true
@@ -406,6 +422,9 @@ function App:loadTags(force)
 end
 
 function App:pick(tab)
+    -- (Library: the shelf last looked at)
+    if tab == "library" then tab = self.shelf or "reading" end
+    if SHELF[tab] then self.shelf = tab end
     self.tab = tab
     self:load(tab)
     self:refresh("ui")
@@ -427,30 +446,200 @@ function App:turn(d)
     if nxt ~= cur then self.pg[self.tab] = nxt self:refresh("ui") end
 end
 
+-- ---------------------------------------------------------------- search, as you type
+
+--- The search: a field at the top, the keyboard, and books and readers
+--- that match listed under it as you type (each kind under its heading).
 function App:search()
-    local InputDialog = require("ui/widget/inputdialog")
-    local dlg
-    local function go(kind)
-        local q = dlg:getInputText()
-        UIManager:close(dlg)
-        if q and q:match("%S") then
-            self.query, self.search_kind = q, kind
-            self.data.search, self.err.search, self.pg.search = nil, nil, 1
-            self:pick("search")
+    if not self.input then
+        local InputText = require("ui/widget/inputtext")
+        self.input = InputText:new{
+            text = self.live and self.live.q or "", hint = _("Books, authors, readers"),
+            width = Screen:getWidth() - 2 * self.pad - S(46) - S(12) - S(40) - S(44) - Look.SHADOW_SMALL,
+            face = tface(15), bordersize = 0, margin = 0, padding = S(4),
+            parent = self, focused = false,
+            edit_callback = function(edited) if edited then self:onTyped() end end,
+            enter_callback = function() self:hideKeyboard() end,
+        }
+        self[1] = self.input
+    end
+    if not self.searching and self.tab ~= "search" then self.before_search = self.tab end
+    self.searching = true
+    self.live = self.live or { q = "" }
+    self:showKeyboard()
+end
+
+function App:keyboardUp() return self.input and self.input:isKeyboardVisible() or false end
+
+--- KOReader's text input calls this when it's tapped.
+function App:onSwitchFocus() self:showKeyboard() end
+function App:getFocusableWidgetXY() return nil end
+
+function App:showKeyboard()
+    if not self.input or self:keyboardUp() then return end
+    self.is_always_active = true -- (taps reach the page under the keyboard)
+    self.input:focus()
+    self.input:onShowKeyboard()
+    self:refresh("ui")
+end
+
+function App:hideKeyboard()
+    if not self:keyboardUp() then return end
+    self.input:onCloseKeyboard()
+    self.input:unfocus()
+    self.is_always_active = nil
+    self:refresh("ui")
+end
+
+--- Out of the search, back to the tab it was opened from.
+function App:endSearch()
+    self:hideKeyboard()
+    self.searching = nil
+    self:refresh("ui")
+end
+
+--- Typed: books and readers asked for once the typing pauses.
+function App:onTyped()
+    local q = (self.input:getText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    local live = self.live
+    live.q = q
+    if self.typing_timer then UIManager:unschedule(self.typing_timer) end
+    if #q < 2 then
+        live.books, live.people, live.books_err, live.people_err, live.asked = nil, nil, nil, nil, nil
+        self:refresh("ui")
+        return
+    end
+    self.typing_timer = function()
+        self.typing_timer = nil
+        if self.closed or live.q ~= q then return end
+        live.asked = q
+        live.books, live.people, live.books_err, live.people_err = nil, nil, nil, nil
+        HC.search(q, function(list, why)
+            if self.closed or live.q ~= q then return end
+            live.books, live.books_err = list or {}, why
+            if list then HC.fetchCovers(list, function() if not self.closed and self.searching then self:refresh("ui") end end, 12) end
+            self:refresh("ui")
+        end)
+        HC.searchPeople(q, function(list, why)
+            if self.closed or live.q ~= q then return end
+            live.people, live.people_err = list or {}, why
+            self:refresh("ui")
+        end)
+        self:refresh("ui")
+    end
+    UIManager:scheduleIn(0.6, self.typing_timer)
+    self:refresh("ui")
+end
+
+--- All of a search's books, or all its readers, as a list of their own.
+function App:searchAll(kind)
+    local live = self.live
+    self:hideKeyboard()
+    self.searching = nil
+    self.query, self.search_kind = live.q, kind
+    self.data.search = kind == "people" and live.people or live.books
+    if self.data.search and kind == "people" then self.data.search.people = true end
+    self.err.search, self.pg.search = nil, 1
+    self.tab = "search"
+    self:refresh("ui")
+end
+
+--- One reader as a row of the search's People.
+local function personRow(host, bb, who, x, y, w, rh)
+    Page.wrap(bb, who.name or who.username or "?", tface(15, true), x, y, w - S(130), 1, S(22))
+    local facts = { "@" .. tostring(who.username or "") }
+    if who.books then facts[#facts + 1] = T(_("%1 books"), count(who.books)) end
+    if who.followers then facts[#facts + 1] = T(_("%1 followers"), count(who.followers)) end
+    Look.label(bb, table.concat(facts, "  ·  "), x, y + S(24), w - S(130), S(18), 9, { color = Look.GRAY, keep_case = true })
+    if HC.isFollowing(who.id) then Look.label(bb, _("Following"), x + w - S(126), y + S(6), S(116), S(24), 9, { align = "right" }) end
+    host:hit(Geom:new{ x = x, y = y - S(4), w = w, h = rh - S(4) }, function() M.openProfile(who) end)
+end
+
+--- The search screen: the field, then Books and People.
+function App:drawSearch(bb, x, y, w)
+    local H = Screen:getHeight()
+    local kh = S(46)
+    -- [🔍 field ………… ⓧ] [Cancel]
+    local cw = S(96)
+    local fw = w - cw - S(12) - Look.SHADOW_SMALL
+    Look.box(bb, x, y, fw, kh, { shadow = Look.SHADOW_SMALL })
+    pcall(UI.paintIcon, bb, UI.PLUGIN_DIR .. "icons/search.svg", x + S(10), y + math.floor((kh - S(20)) / 2), S(20), false)
+    local isz = self.input:getSize()
+    self.input:paintTo(bb, x + S(40), y + math.floor((kh - isz.h) / 2))
+    self:hit(Geom:new{ x = x, y = y - S(6), w = fw - S(44), h = kh + S(12) }, function() self:showKeyboard() end)
+    if (self.input:getText() or "") ~= "" then
+        local d = S(26)
+        local cx, cy = x + fw - S(10) - d, y + math.floor((kh - d) / 2)
+        Look.disc(bb, cx + math.floor(d / 2), cy + math.floor(d / 2), math.floor(d / 2), Look.GRAY)
+        Look.label(bb, "\u{00D7}", cx, cy - S(1), d, d, 15, { align = "center", color = WHITE })
+        self:hit(Geom:new{ x = x + fw - S(44), y = y - S(6), w = S(50), h = kh + S(12) }, function()
+            self.input:setText("")
+            self:onTyped()
+            self:showKeyboard()
+        end)
+    end
+    local rc = Look.button(bb, x + w - cw - Look.SHADOW_SMALL, y, cw, kh, _("Cancel"), { size = 11 })
+    self:hit(rc, function() self:endSearch() end)
+    y = y + kh + Look.SHADOW_SMALL + S(16)
+    -- where the room ends: the keyboard's top while it's up
+    local bottom = H - S(12)
+    if self:keyboardUp() then
+        local kd = self.input:getKeyboardDimen()
+        if kd and kd.h and kd.h > 0 then bottom = H - kd.h - S(8) end
+    end
+    local live = self.live or {}
+    if not live.asked then
+        Page.wrap(bb, #(live.q or "") < 2 and _("Type a title, an author or a reader's name: what matches shows here as you type.")
+            or _("Looking…"), Look.serif(15, false, true), x, y, w, 3, S(23), Look.GRAY)
+        return
+    end
+    -- BOOKS
+    local cols = 6
+    local cwid = math.floor((w - (cols - 1) * S(14) - Look.SHADOW_SMALL) / cols)
+    local row_h = math.floor(cwid * 1.5) + S(44)
+    local people_h = S(32) + 2 * S(56)
+    local books = live.books
+    Page.heading(bb, _("Books"), x, y, w, books and #books > cols and _("All") or nil)
+    if books and #books > cols then
+        self:hit(Geom:new{ x = x, y = y - S(8), w = w, h = S(34) }, function() self:searchAll("books") end)
+    end
+    y = y + S(32)
+    if not books then
+        Look.label(bb, _("Looking…"), x, y, w, S(22), 11, { color = Look.GRAY })
+        y = y + S(36)
+    elseif #books == 0 then
+        Look.label(bb, live.books_err or T(_("No books for “%1”."), live.q), x, y, w, S(22), 11, { color = Look.GRAY, keep_case = true })
+        y = y + S(36)
+    else
+        -- (as many rows as leave People room)
+        local rows = math.max(1, math.min(math.ceil(#books / cols), math.floor((bottom - y - people_h) / (row_h + S(10)))))
+        for r = 1, rows do
+            local part = {}
+            for k = 1, cols do part[#part + 1] = books[(r - 1) * cols + k] end
+            if #part == 0 then break end
+            y = y + self:coverRow(bb, part, x, y, w, cols) + S(10)
         end
     end
-    dlg = InputDialog:new{
-        title = _("Search Hardcover"),
-        input = self.query or "",
-        input_hint = _("A title or an author; or a reader's name"),
-        buttons = { {
-            { text = _("Cancel"), id = "close", callback = function() UIManager:close(dlg) end },
-            { text = _("People"), callback = function() go("people") end },
-            { text = _("Books"), is_enter_default = true, callback = function() go("books") end },
-        } },
-    }
-    UIManager:show(dlg)
-    dlg:onShowKeyboard()
+    -- PEOPLE
+    if y + S(32) + S(24) > bottom then return end
+    local people = live.people
+    Page.heading(bb, _("People"), x, y, w, people and #people > 0 and _("All") or nil)
+    if people and #people > 0 then
+        self:hit(Geom:new{ x = x, y = y - S(8), w = w, h = S(34) }, function() self:searchAll("people") end)
+    end
+    y = y + S(32)
+    if not people then
+        Look.label(bb, _("Looking…"), x, y, w, S(22), 11, { color = Look.GRAY })
+    elseif #people == 0 then
+        Look.label(bb, live.people_err or T(_("No reader called “%1”."), live.q), x, y, w, S(22), 11, { color = Look.GRAY, keep_case = true })
+    else
+        local rh = S(56)
+        for k, who in ipairs(people) do
+            if y + rh > bottom then break end
+            personRow(self, bb, who, x, y, w, rh)
+            y = y + rh
+        end
+    end
 end
 
 function App:more(rect)
@@ -475,6 +664,7 @@ function App:body(bb, y, w)
     local x = self.pad
     local H = Screen:getHeight()
     if not HC.signedIn() then return drawSignIn(self, bb, y, w) end
+    if self.searching then self.pages = 1 return self:drawSearch(bb, x, y, w) end
     -- [name · goal ...........................] [search]
     local u = HC.user() or {}
     local kh = S(40)
@@ -488,15 +678,24 @@ function App:body(bb, y, w)
     end })
     self:hit(rs, function() self:search() end)
     y = y + kh + S(12)
-    -- tabs (Search joins them once there's been one)
+    -- tabs
     local cells = {}
     for _i, t in ipairs(TABS) do cells[#cells + 1] = { key = t.key, text = t.text } end
-    -- (a search's results, a genre's or a mood's books and Popular are
-    -- Explore's: it stays marked)
-    local by_key = Look.segments(bb, x, y, w - Look.SHADOW_SMALL, S(38), cells, VIEWS[self.tab] and "explore" or self.tab,
+    -- (a genre's or a mood's books and Popular are Explore's, the shelves
+    -- Library's: those stay marked)
+    local marked = (SHELF[self.tab] and "library") or ((self.tab == "tag" or self.tab == "popular") and "explore") or self.tab
+    local by_key = Look.segments(bb, x, y, w - Look.SHADOW_SMALL, S(38), cells, marked,
         { size = 11, shadow = Look.SHADOW_SMALL })
-    for key, r in pairs(by_key) do self:hit(r, function() if self.tab ~= key then self:pick(key) end end) end
+    for key, r in pairs(by_key) do self:hit(r, function() if marked ~= key then self:pick(key) end end) end
     y = y + S(38) + Look.SHADOW_SMALL + S(16)
+    -- Library: its shelves
+    if SHELF[self.tab] then
+        local sc = {}
+        for _i, t in ipairs(SHELVES) do sc[#sc + 1] = { key = t.key, text = t.text } end
+        local sk = Look.segments(bb, x + S(30), y - S(4), w - S(60) - Look.SHADOW_SMALL, S(32), sc, self.tab, { size = 10, shadow = Look.SHADOW_SMALL })
+        for key, r in pairs(sk) do self:hit(r, function() if self.tab ~= key then self:pick(key) end end) end
+        y = y + S(32) + Look.SHADOW_SMALL + S(14)
+    end
 
     local foot = S(52)
     local bottom = H - foot - S(8)
@@ -513,8 +712,11 @@ function App:body(bb, y, w)
             what = _("Popular this month")
         end
         local bw = S(120)
-        local rb = Look.button(bb, x, y - S(6), bw, S(34), "\u{2039} " .. _("Explore"), { size = 10 })
-        self:hit(rb, function() self:pick("explore") end)
+        local back = self.tab == "search" and _("Search") or _("Explore")
+        local rb = Look.button(bb, x, y - S(6), bw, S(34), "\u{2039} " .. back, { size = 10 })
+        self:hit(rb, function()
+            if self.tab == "search" then self.tab = self.before_search or "home" self:search() else self:pick("explore") end
+        end)
         Look.label(bb, what, x + bw + S(16), y - S(6), w - bw - S(16), S(34), 11, { keep_case = true })
         y = y + S(40)
     end

@@ -2,6 +2,11 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.19.0
+
+- Hardcover's search works like the store's: the search key opens a field with the keyboard, and books and readers that match show under it as you type, under their own headings (Books, People; All opens the whole list). Cancel or a swipe right goes back.
+- Hardcover's Reading, Want and Read tabs are one tab, Library, with its shelves as keys at its top (Reading, Want to read, Read). It opens on the shelf you last looked at. Tabs: Home · Friends · Library · Explore.
+
 ## 1.18.2
 
 - Settings → Home → Top panel: the status line didn't take your edits while ShelfTechUI's icon row was showing in its place. The switch (Status line with icons) now sits beside it; your own line can be edited when it's off, and is what the top panel shows then.
