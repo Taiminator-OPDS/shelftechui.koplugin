@@ -61,7 +61,10 @@ function Handles:init()
     end
     self.ges_events = {}
     for _i, which in ipairs{ "start", "end" } do
-        for _j, g in ipairs{ "touch", "pan", "hold_pan", "pan_release", "hold_release", "hold" } do
+        -- (every way a touch can end, too: a tap, or a flick, which comes
+        -- as a swipe and not as a pan; missing those left a knob "held"
+        -- and the whole screen taken, as if the book had frozen)
+        for _j, g in ipairs{ "touch", "pan", "hold_pan", "pan_release", "hold_release", "hold", "tap", "swipe", "double_tap" } do
             self.ges_events["Handle_" .. which .. "_" .. g] = { GestureRange:new{ ges = g, range = knobRange(which) },
                 event = "HandleGesture", args = which }
         end
@@ -196,6 +199,21 @@ function Handles:onHandleGesture(which, ges)
     return true
 end
 
+--- A knob held with nothing more coming (the touch ended in a way that
+--- wasn't seen): let go after a moment, so the screen is never kept.
+function Handles:watch()
+    if self.watchdog then UIManager:unschedule(self.watchdog) end
+    self.watchdog = function()
+        self.watchdog = nil
+        if self.dragging and not self.closed then
+            self.dragging = nil
+            self:raise(false)
+            UIManager:setDirty(self, "ui", self:region())
+        end
+    end
+    UIManager:scheduleIn(3, self.watchdog)
+end
+
 function Handles:handleGesture(which, ges)
     local g = ges.ges
     which = self.dragging or which
@@ -204,6 +222,7 @@ function Handles:handleGesture(which, ges)
             self.dragging = which
             self:raise(true)
         end
+        self:watch()
         UIManager:setDirty(self, "fast", self:region())
         return true
     end
@@ -212,8 +231,17 @@ function Handles:handleGesture(which, ges)
             self.dragging = which
             self:raise(true)
         end
+        self:watch()
         self:extendTo(which, ges.pos)
         return true
+    end
+    if self.watchdog then UIManager:unschedule(self.watchdog) self.watchdog = nil end
+    -- (a flick: it ends where the swipe went)
+    if g == "swipe" and ges.distance and ges.direction then
+        local d = ges.distance
+        local dx = ges.direction:find("east") and d or (ges.direction:find("west") and -d or 0)
+        local dy = ges.direction:find("south") and d or (ges.direction:find("north") and -d or 0)
+        ges = { ges = g, pos = Geom:new{ x = ges.pos.x + dx, y = ges.pos.y + dy, w = 0, h = 0 } }
     end
     -- released: the menu again, for the new selection (its quote changes)
     if self.dragging then
@@ -255,6 +283,8 @@ function Handles:onShow()
 end
 
 function Handles:onCloseWidget()
+    self.closed = true
+    if self.watchdog then UIManager:unschedule(self.watchdog) self.watchdog = nil end
     local r = self:region()
     if r then UIManager:setDirty(self.ui, "ui", r) end
 end

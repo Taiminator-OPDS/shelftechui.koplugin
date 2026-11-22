@@ -2,6 +2,10 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.20.1
+
+- Fixed a freeze in a book after selecting text. The handles at the ends of a selection treated a quick flick or a tap on a knob as a knob still held, and kept the whole screen for it, so nothing else answered (easily hit after a selection across pages). Now any way a touch ends lets go, and a knob that's somehow left "held" is let go after 3 seconds.
+
 ## 1.20.0
 
 - The pull-down works from any screen: a swipe down from the top edge of Settings, Hardcover, the store, Bookdrop's screens and ShelfTechUI's other full-screen pages opens what a swipe down on home opens (the reading summary: today's reading and the books to jump back into; or Settings, as chosen in Settings → Home → Swipe down on home). Over a book's own pages (Contents, Notebook, Pages) it's what a swipe down in a book opens. Only a swipe that starts at the very top, so the pages' own swipes still work. Settings → Home → Swipe down from any screen.
