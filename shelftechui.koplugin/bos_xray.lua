@@ -18,7 +18,9 @@ passages and where in the book they are. All of it is kept beside the book
 (stui_xray.lua in its .sdr), so X-Ray opens at once after that, offline.
 
 Opened from the dictionary's X-RAY key: on the looked-up word's entry when
-it's a name X-Ray knows, else on the list.
+it's a name X-Ray knows, else on the list. When the book isn't found by its
+own title and author, the closest matches (Open Library's works, Wikidata's
+books) are listed to choose from, with a search of your own.
 
   M.has(ui)                 is there an X-Ray for this book?
   M.open(ui, word)          the X-Ray (asks to download it when there's none)
@@ -57,16 +59,28 @@ local function urlencode(s)
     return (tostring(s):gsub("[^%w%-%._~]", function(c) return string.format("%%%02X", c:byte()) end))
 end
 
-local function getJSON(url)
+M._net = { calls = 0, failed = 0 }
+local function getJSON(url, depth)
     local http = url:match("^https") and require("ssl.https") or require("socket.http")
     local socketutil = require("socketutil")
     local rapidjson = require("rapidjson")
     local sink = {}
     socketutil:set_timeout(8, 25)
-    local _r, code = http.request{ url = url, method = "GET", sink = socketutil.table_sink(sink),
+    local _r, code, headers = http.request{ url = url, method = "GET", sink = socketutil.table_sink(sink),
         headers = { ["User-Agent"] = M.UA, ["Accept"] = "application/json, application/sparql-results+json" } }
     socketutil:reset_timeout()
-    if code ~= 200 then return nil, code end
+    M._net.calls = M._net.calls + 1
+    if (code == 301 or code == 302 or code == 307 or code == 308) and headers and headers.location and (depth or 0) < 2 then
+        M._net.calls = M._net.calls - 1
+        local loc = headers.location
+        if loc:sub(1, 1) == "/" then loc = url:match("^(https?://[^/]+)") .. loc end
+        return getJSON(loc, (depth or 0) + 1)
+    end
+    if code ~= 200 then
+        M._net.failed = M._net.failed + 1
+        require("logger").info("ShelfTechUI: X-Ray:", code, (url:gsub("query=.*", "query=…")))
+        return nil, code
+    end
     local ok, data = pcall(rapidjson.decode, table.concat(sink))
     return ok and data or nil
 end
@@ -115,11 +129,67 @@ local function findWork(E, title, author)
     return nil
 end
 
+--- "Melville, Herman" → "Herman Melville"; the first author only.
+function M.authorName(a)
+    a = tostring(a or ""):gsub("\n.*", ""):gsub("%s*[&;].*$", "")
+    local last, first = a:match("^([^,]+),%s*(.+)$")
+    if last then a = first .. " " .. last end
+    return (a:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+--- The book's title without its subtitle ("Moby Dick; Or, The Whale" →
+--- "Moby Dick").
+function M.shortTitle(t)
+    t = tostring(t or ""):gsub("%s*[:;%(%[].*$", ""):gsub(",%s*[Oo]r,?%s.*$", ""):gsub("%s+[Oo]r,%s.*$", "")
+    return (t:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+--- Books with that name, to choose from (background only): Open Library's
+--- works and Wikidata's items, best first.
+function M.candidates(query, author)
+    local E = M.endpoints()
+    M._net = { calls = 0, failed = 0 }
+    local out = {}
+    local s = getJSON(E.ol .. "/search.json?limit=8&fields=key,title,author_name,first_publish_year,edition_count&q=" .. urlencode(query))
+    for _i, d in ipairs(s and s.docs or {}) do
+        if d.key and d.title then
+            local au = type(d.author_name) == "table" and d.author_name[1] or nil
+            table.insert(out, { ol = d.key, title = d.title, author = au, year = d.first_publish_year,
+                editions = d.edition_count, from = "Open Library" })
+        end
+    end
+    local w = getJSON(E.wd .. "/w/api.php?action=wbsearchentities&format=json&language=en&type=item&limit=10&search=" .. urlencode(query))
+    for _i, it in ipairs(w and w.search or {}) do
+        local desc = it.description or ""
+        -- (books, plays, series, films of books…: not people or places)
+        local d = desc:lower()
+        if d:find("novel") or d:find("book") or d:find("literary") or d:find("story") or d:find("play by")
+            or d:find("poem") or d:find("series") or d:find("saga") or d:find("trilogy") or d:find("work by") or d:find("fiction") then
+            table.insert(out, { qid = it.id, title = it.label or query, desc = desc, from = "Wikidata" })
+        end
+    end
+    -- by this author first, then the most printed
+    local sur = norm(author):match("(%S+)$")
+    local function score(c)
+        local v = 0
+        if sur and (norm(c.author):find(sur, 1, true) or norm(c.desc):find(sur, 1, true)) then v = v + 1000 end
+        if norm(c.title) == norm(query) then v = v + 100 end
+        return v + math.min(99, c.editions or (c.qid and 50) or 0)
+    end
+    for i, c in ipairs(out) do c.i = i c.score = score(c) end
+    table.sort(out, function(a, b) if a.score ~= b.score then return a.score > b.score end return a.i < b.i end)
+    return out, (M._net.calls > 0 and M._net.failed == M._net.calls)
+end
+
 --- What's known about the book's people and places (here and now: only in
 --- a background process). Returns { people = {…}, places = {…}, sources = {…} }.
-function M.fetch(title, author)
+--- `pick` (from M.candidates): that Open Library work and/or Wikidata item.
+function M.fetch(title, author, pick)
     local E = M.endpoints()
-    local out = { people = {}, places = {}, sources = {}, title = title, author = author }
+    M._net = { calls = 0, failed = 0 }
+    pick = pick or {}
+    author = M.authorName(author)
+    local out = { people = {}, places = {}, sources = {}, title = pick.title or title, author = author }
     local seen = {}
     local function person(name)
         local k = norm(name)
@@ -130,28 +200,49 @@ function M.fetch(title, author)
         end
         return seen[k]
     end
-    -- Open Library: the names
-    local surname = tostring(author or ""):match("(%S+)%s*$") or ""
-    local s = getJSON(E.ol .. "/search.json?limit=5&fields=key,title,author_name&title=" .. urlencode(title)
-        .. (surname ~= "" and ("&author=" .. urlencode(surname)) or ""))
-    local key = s and s.docs and s.docs[1] and s.docs[1].key
-    if key then
+    local surname = author:match("(%S+)%s*$") or ""
+    local first = author:match("^(%S+)") or ""
+    local function readWork(key)
         local w = getJSON(E.ol .. key .. ".json")
-        if w then
-            table.insert(out.sources, "Open Library")
-            local au = norm(author)
-            for _i, n in ipairs(w.subject_people or {}) do
-                n = tostring(n):gsub("%s*%(.-%)%s*$", "")
-                -- (the author is filed among the people at times)
-                if norm(n) ~= au and not (surname ~= "" and norm(n):find(norm(surname), 1, true) and norm(n):find(norm(tostring(author):match("^(%S+)") or ""), 1, true)) then
-                    person(n)
+        if not (w and (w.subject_people or w.subject_places)) then return false end
+        table.insert(out.sources, "Open Library")
+        local au = norm(author)
+        for _i, n in ipairs(w.subject_people or {}) do
+            n = tostring(n):gsub("%s*%(.-%)%s*$", "")
+            -- (the author is filed among the people at times)
+            local nn = norm(n)
+            if nn ~= au and not (surname ~= "" and nn:find(norm(surname), 1, true) and nn:find(norm(first), 1, true)) then
+                person(n)
+            end
+        end
+        for _i, n in ipairs(w.subject_places or {}) do table.insert(out.places, { name = tostring(n), names = { tostring(n) } }) end
+        return true
+    end
+    -- Open Library: the names (the first of its matches that lists any)
+    if pick.ol then
+        readWork(pick.ol)
+    else
+        if pick.qid and pick.title then title = M.shortTitle(pick.title) end
+        local queries = { "title=" .. urlencode(title) .. (surname ~= "" and ("&author=" .. urlencode(surname)) or ""),
+            "q=" .. urlencode(title .. " " .. surname) }
+        local tried = {}
+        for _q, qs in ipairs(queries) do
+            local s = getJSON(E.ol .. "/search.json?limit=5&fields=key,title,author_name&" .. qs)
+            local n = 0
+            for _i, d in ipairs(s and s.docs or {}) do
+                if d.key and not tried[d.key] and n < 3 then
+                    tried[d.key] = true
+                    n = n + 1
+                    if readWork(d.key) then break end
                 end
             end
-            for _i, n in ipairs(w.subject_places or {}) do table.insert(out.places, { name = tostring(n), names = { tostring(n) } }) end
+            if #out.sources > 0 then break end
         end
     end
     -- Wikidata: the characters, what they're also called, their articles
-    local qid = findWork(E, title, author or "")
+    local qid = pick.qid
+    if not qid and not pick.ol then qid = findWork(E, title, author or "") end
+    if not qid and pick.ol then qid = findWork(E, pick.title or title, pick.author or author or "") end
     out.wikidata = qid
     local fandom
     if qid then
@@ -228,6 +319,7 @@ function M.fetch(title, author)
         end
         if got > 0 then table.insert(out.sources, T("%1 fan wiki", fandom)) end
     end
+    out.offline = M._net.calls > 0 and M._net.failed == M._net.calls
     return out
 end
 
@@ -348,25 +440,29 @@ end
 local function notify(text) pcall(function() require("ui/widget/notification"):notify(text) end) end
 
 --- Download what's known and find it in the book; done(data | nil, why).
-function M.download(ui, done)
+--- The title and author to look for, from the book.
+function M.bookQuery(ui)
     local props = ui.doc_props or {}
-    local title = props.display_title or props.title or ""
-    local author = (props.authors or ""):gsub("\n.*", "")
-    title = title:gsub("%s*[:;%(].*$", "")
-    if title == "" then return done(nil, _("This book has no title to look for.")) end
+    return M.shortTitle(props.display_title or props.title or ""), M.authorName(props.authors)
+end
+
+--- Download what's known and find it in the book: done(data) or
+--- done(nil, why, reason), reason "offline" / "none" / "absent" / "error".
+--- `pick`: a book chosen from M.candidates.
+function M.download(ui, done, pick)
+    local title, author = M.bookQuery(ui)
+    if title == "" and not pick then return done(nil, _("This book has no title to look for."), "none") end
     local Async = require("bos_store").Async
-    local msg = require("ui/widget/infomessage"):new{ text = _("X-Ray: asking Open Library, Wikidata and Wikipedia…") }
+    local msg = require("ui/widget/infomessage"):new{ text = T(_("X-Ray: looking up “%1”…"), pick and pick.title or title) }
     UIManager:show(msg)
-    Async.run(function() return M.fetch(title, author) end, function(ok, data)
-        if not ok or type(data) ~= "table" then
-            UIManager:close(msg)
-            return done(nil, _("X-Ray: the sources couldn't be reached. Check the Wi-Fi."))
+    Async.run(function() return M.fetch(title, author, pick) end, function(ok, data)
+        UIManager:close(msg)
+        if not ok or type(data) ~= "table" or data.offline then
+            return done(nil, _("X-Ray: Open Library and Wikidata couldn't be reached. Check the Wi-Fi."), "offline")
         end
         if #data.people == 0 and #data.places == 0 then
-            UIManager:close(msg)
-            return done(nil, T(_("No X-Ray is known for “%1”: Open Library and Wikidata list no characters for it."), title))
+            return done(nil, nil, "none")
         end
-        UIManager:close(msg)
         local msg2 = require("ui/widget/infomessage"):new{ text = _("X-Ray: finding them in the book…") }
         UIManager:show(msg2)
         shortNames(data.people)
@@ -375,7 +471,7 @@ function M.download(ui, done)
             return M.findMentions(doc, data.people), M.findMentions(doc, data.places)
         end, function(ok2, people, places)
             UIManager:close(msg2)
-            if not ok2 or type(people) ~= "table" then return done(nil, _("X-Ray: the book couldn't be searched.")) end
+            if not ok2 or type(people) ~= "table" then return done(nil, _("X-Ray: the book couldn't be searched."), "error") end
             -- (only who's in this book; the most mentioned first)
             local function keep(list)
                 local out = {}
@@ -385,13 +481,93 @@ function M.download(ui, done)
             end
             data.people, data.places = keep(people), keep(places or {})
             data.version, data.at = M.VERSION, os.time()
-            if #data.people == 0 and #data.places == 0 then
-                return done(nil, _("X-Ray: none of the names found for this book appear in it."))
-            end
+            if #data.people == 0 and #data.places == 0 then return done(nil, nil, "absent") end
             M.save(ui, data)
             done(data)
         end, 600)
     end, 120)
+end
+
+--- No X-Ray found by itself: the books that match, to choose from (and a
+--- search of your own). `note` says why it's asking.
+function M.choose(ui, query, note, finish)
+    local _t, author = M.bookQuery(ui)
+    local Async = require("bos_store").Async
+    local msg = require("ui/widget/infomessage"):new{ text = T(_("X-Ray: looking for books called “%1”…"), query) }
+    UIManager:show(msg)
+    Async.run(function() return M.candidates(query, author) end, function(ok, list, offline)
+        UIManager:close(msg)
+        if not ok or offline then
+            UIManager:show(require("ui/widget/infomessage"):new{ text = _("X-Ray: Open Library and Wikidata couldn't be reached. Check the Wi-Fi."), timeout = 6 })
+            return
+        end
+        list = type(list) == "table" and list or {}
+        local o = { pg = 1 }
+        local page
+        local function another()
+            local InputDialog = require("ui/widget/inputdialog")
+            local dlg
+            dlg = InputDialog:new{ title = _("Look for X-Ray under"), input = query,
+                buttons = { { { text = _("Cancel"), id = "close", callback = function() UIManager:close(dlg) end },
+                    { text = _("Search"), is_enter_default = true, callback = function()
+                        local q = dlg:getInputText()
+                        UIManager:close(dlg)
+                        if q and q:match("%S") then page:onClose() M.choose(ui, q, nil, finish) end
+                    end } } } }
+            UIManager:show(dlg)
+            dlg:onShowKeyboard()
+        end
+        page = Page:new{ caption = _("X-Ray"),
+            draw = function(self, bb, y, w)
+                local x = self.pad
+                local H = Screen:getHeight()
+                y = y + Page.wrap(bb, note or T(_("Which book is this? Matches for “%1”:"), query), Look.serif(15), x, y, w, 3, S(22)) + S(10)
+                local r = Look.button(bb, x, y, w - Look.SHADOW_SMALL, S(38), T(_("Search for something else")), { size = 11 })
+                self:hit(r, another)
+                y = y + S(38) + Look.SHADOW_SMALL + S(16)
+                local rh = S(66)
+                local per = math.max(1, math.floor((H - y - S(60)) / rh))
+                local pages = math.max(1, math.ceil(#list / per))
+                o.pages = pages
+                o.pg = math.max(1, math.min(o.pg, pages))
+                if #list == 0 then
+                    Page.wrap(bb, _("Nothing found under that name. Try the title alone, or another spelling."), Look.serif(15, false, true), x, y, w, 3, S(23), Look.GRAY)
+                end
+                for k = 1, per do
+                    local c = list[(o.pg - 1) * per + k]
+                    if not c then break end
+                    local ry = y + (k - 1) * rh
+                    Page.wrap(bb, c.title, Look.serif(16, true), x, ry, w, 1, S(24))
+                    local sub = {}
+                    if c.author then sub[#sub + 1] = c.author end
+                    if c.year then sub[#sub + 1] = tostring(c.year) end
+                    if c.desc and c.desc ~= "" then sub[#sub + 1] = c.desc end
+                    sub[#sub + 1] = c.from
+                    Page.wrap(bb, table.concat(sub, "  ·  "), Look.serif(12, false, true), x, ry + S(26), w, 1, S(20), Look.GRAY)
+                    if k < per and list[(o.pg - 1) * per + k + 1] then bb:paintRect(x, ry + rh - S(10), w, 1, Look.LIGHT) end
+                    self:hit(Geom:new{ x = x, y = ry - S(4), w = w, h = rh - S(4) }, function()
+                        self:onClose()
+                        M.download(ui, finish, c)
+                    end)
+                end
+                if pages > 1 then
+                    local fy = H - S(52)
+                    local kw = S(56)
+                    local rp = Look.button(bb, x, fy, kw, S(38), "\u{2039}", { size = 15, enabled = o.pg > 1 })
+                    if o.pg > 1 then self:hit(rp, function() o.pg = o.pg - 1 self:refresh("ui") end) end
+                    local rn = Look.button(bb, x + w - kw - Look.SHADOW_SMALL, fy, kw, S(38), "\u{203A}", { size = 15, enabled = o.pg < pages })
+                    if o.pg < pages then self:hit(rn, function() o.pg = o.pg + 1 self:refresh("ui") end) end
+                    Look.label(bb, T(_("%1 / %2"), o.pg, pages), x + kw, fy, w - 2 * kw, S(38), 12, { align = "center" })
+                end
+            end,
+            on_swipe = function(self, dir)
+                if dir == "west" and o.pg < (o.pages or 1) then o.pg = o.pg + 1 self:refresh("ui")
+                elseif dir == "east" then if o.pg > 1 then o.pg = o.pg - 1 self:refresh("ui") else self:onClose() end end
+            end,
+        }
+        M.chooser = page
+        page:show()
+    end, 60)
 end
 
 -- ---------------------------------------------------------------- the pages
@@ -643,15 +819,23 @@ function M.open(ui, word, on_jump)
         ok_text = _("Download"),
         ok_callback = function()
             require("ui/network/manager"):runWhenOnline(function()
-                M.download(ui, function(got, why)
-                    if not got then
+                local title = M.bookQuery(ui)
+                local finish
+                finish = function(got, why, reason)
+                    if got then
+                        notify(T(_("X-Ray ready: %1 people, %2 places"), #got.people, #got.places))
+                        local e, kind = M.find(got, word)
+                        if e then M.openEntry(ui, e, kind, on_jump) else M.openList(ui, got, on_jump) end
+                    elseif reason == "none" or reason == "absent" then
+                        -- (not found by itself: the closest books, to choose from)
+                        M.choose(ui, title ~= "" and title or (word or ""), reason == "absent"
+                            and _("The names found for that book aren't in this one. Which book is this?")
+                            or T(_("No characters found for “%1” by itself. Which book is this?"), title), finish)
+                    else
                         UIManager:show(require("ui/widget/infomessage"):new{ text = why or _("X-Ray couldn't be made."), timeout = 6 })
-                        return
                     end
-                    notify(T(_("X-Ray ready: %1 people, %2 places"), #got.people, #got.places))
-                    local e, kind = M.find(got, word)
-                    if e then M.openEntry(ui, e, kind, on_jump) else M.openList(ui, got, on_jump) end
-                end)
+                end
+                M.download(ui, finish)
             end)
         end,
     })

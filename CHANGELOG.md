@@ -2,6 +2,12 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.22.2
+
+- X-Ray finds more books by itself: an author filed as "Melville, Herman" is read as Herman Melville, subtitles like "; Or, The Whale" are left out, and Open Library is asked a second, looser way, trying its first few matches until one lists characters.
+- When a book still isn't found, X-Ray lists the closest matches from Open Library and Wikidata (title, author, year, what it is), the book's own author first: pick the right one to download its X-Ray. "Search for something else" looks under another title.
+- "Couldn't be reached" (no connection) is now told apart from "not found".
+
 ## 1.22.1
 
 - Fixed the selection menu not answering (and a tap outside not closing it) while the handles kept working. With a plugin that keeps an invisible layer at the top of the screen (Bookends does), the handles were put over the menu instead of under it, and took every tap. They now always go just under the menu.
