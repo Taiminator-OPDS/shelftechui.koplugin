@@ -2,6 +2,11 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.23.0
+
+- Home: "Group books in series" for any shelf (hold the shelf's chip → View mode). A series' books show as one stack with a count, where its first book would be; a tap opens the series in order. Works in Covers and List (in Spines it's the series boxes, as before). Shelves that already had Series boxes on now group in Covers and List too.
+- X-Ray downloads in the background: you go back to the book and keep reading, and a notification says when it's ready (open it from the dictionary's X-Ray key). Much faster: Open Library and Wikidata are asked at the same time, Wikipedia in one request for up to 20 characters instead of one each, the fan wiki for fewer pages, and the book is searched for every name in one pass instead of one pass per name (about 8 times faster on Moby Dick). Shorter waits on a slow source, and one retry when Open Library drops the connection.
+
 ## 1.22.2
 
 - X-Ray finds more books by itself: an author filed as "Melville, Herman" is read as Herman Melville, subtitles like "; Or, The Whale" are left out, and Open Library is asked a second, looser way, trying its first few matches until one lists characters.

@@ -993,6 +993,7 @@ function BookshelfWidget:_afterChipEdit(info)
     -- the shelf's books and pages are as they were; only the bar moved.
     if not info or info.fetch_changed or info.source_changed then
         self._spine_fetch_cache = nil
+        self._series_group_cache = nil
     end
     self:_rebuild()
     UIManager:setDirty(self, "ui")
@@ -1170,6 +1171,7 @@ function BookshelfWidget:_rebuild()
             -- caught up once the TTL lapsed. Cover and list mode refetch per
             -- page, which is why only spine mode looked stuck.
             self._spine_fetch_cache = nil
+            self._series_group_cache = nil
         end
         self._last_collate_mixed = current_mixed
     end
@@ -3846,10 +3848,66 @@ function BookshelfWidget:_fetchChipItems(n, want_all)
             { kind = "opds", id = pay.server_key, feed_url = pay.feed_url },
             nil, nil, offset, LIMIT, fetch_opts)
     end
+    if tab and tab.series_boxes and not tip and not Repo.spine_light then
+        return self:_seriesGroupedPage(tab, offset, LIMIT)
+    end
     if tab then
         return Repo.getBySource(tab.source, tab.filter, tab.sort_priority, offset, LIMIT, fetch_opts)
     end
     return Repo.getBySource({ kind = self.chip }, nil, nil, offset, LIMIT, fetch_opts)
+end
+
+-- (ShelfTechUI) _seriesGroupedPage(tab, offset, limit) -> one page of the
+-- chip's list with each series' books as one stack (a tap opens it), and the
+-- total. The whole list is read once without covers (kept 20 s, so turning
+-- pages doesn't read it again), grouped in the chip's order (a series stands
+-- where its first book would), and only the page shown gets its covers.
+function BookshelfWidget:_seriesGroupedPage(tab, offset, limit)
+    local Boxes = require("lib/bookshelf_series_boxes")
+    local key = tostring(self.chip)
+    local c = self._series_group_cache
+    local items
+    if c and c.key == key and (os.time() - c.at) <= 20 then
+        items = c.items
+    else
+        local was = Repo.suppress_covers
+        Repo.suppress_covers = true
+        local ok, all = pcall(Repo.getBySource, tab.source, tab.filter, tab.sort_priority, 0, SPINE_ALL_LIMIT, { light_only = true })
+        Repo.suppress_covers = was
+        if not ok then error(all) end
+        -- (a book the metadata cache hasn't read yet, with no author or
+        -- series: read it, coverless)
+        local function meta(fp)
+            local m = Repo.lightMetaFor(fp)
+            if m and (m.series_name or m.series or m.authors or m.author) then return m end
+            return Repo.buildBookMeta(fp, { want_cover = false }) or m
+        end
+        items = Boxes.prepare(type(all) == "table" and all or {}, meta)
+        self._series_group_cache = { key = key, at = os.time(), items = items }
+    end
+    local ScaledCoverCache = require("lib/bookshelf_scaled_cover_cache")
+    local function hydrate(b)
+        if not (b and b.filepath) or b.is_remote then return b end
+        local opts = ScaledCoverCache:has(b.filepath) and { want_cover = false } or nil
+        return Repo.buildBookMeta(b.filepath, opts) or b
+    end
+    local page = {}
+    for i = offset + 1, math.min(offset + limit, #items) do
+        local it = items[i]
+        if Boxes.isBox(it) then
+            -- (a fresh copy: the front cover is freed after it's painted)
+            local box = Boxes.copy(it)
+            box.books = {}
+            for j, m in ipairs(it.books) do box.books[j] = (j == 1) and hydrate(m) or m end
+            box.first_book = box.books[1]
+            page[#page + 1] = box
+        elseif it.filepath and not it.books then
+            page[#page + 1] = hydrate(it)
+        else
+            page[#page + 1] = it
+        end
+    end
+    return page, #items
 end
 
 -- _groupDisplayMode() -> the style every group tile on this shelf draws

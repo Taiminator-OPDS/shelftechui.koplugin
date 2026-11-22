@@ -2410,9 +2410,6 @@ function Editor:_pickGroupDisplay(draft, on_change, chrome)
             on_pick = function(v) pick(function()
                 draft.book_binding = (v == "paperback") and "paperback" or nil
             end)() end })
-        add(onOff(pick, _("Series boxes"), draft.series_boxes, function(v)
-            draft.series_boxes = v or nil
-        end))
         -- Stored as false only, nil meaning the default (on). Not
         -- `on and false or nil`: in Lua that is always nil (#439).
         add(onOff(pick, _("Author on spine"), authorOn(), function(v)
@@ -2424,7 +2421,6 @@ function Editor:_pickGroupDisplay(draft, on_change, chrome)
             T(_("rows: %1"), numText(draft.spine_rows)) }
         if draft.spine_thickness_pct then parts[#parts + 1] = T(_("%1% thick"), draft.spine_thickness_pct) end
         if draft.book_binding == "paperback" then parts[#parts + 1] = _("paperbacks") end
-        if draft.series_boxes then parts[#parts + 1] = _("series boxes") end
         if not authorOn() then parts[#parts + 1] = _("no author on spines") end
         return Editor._capFirst(table.concat(parts, ", "))
     end
@@ -2539,6 +2535,15 @@ function Editor:_pickGroupDisplay(draft, on_change, chrome)
         local show_levels = (pin == ViewMode.AUTO)
 
         add(show_as)
+
+        -- (ShelfTechUI) A shelf's books in a series as one: a stack in Covers
+        -- and List (a tap opens it), a box set in Spines. Not for a catalogue
+        -- or a shelf of shelves.
+        if not no_spines and not is_shelves then
+            add(onOff(pick, _("Group books in series"), draft.series_boxes, function(v)
+                draft.series_boxes = v or nil
+            end))
+        end
 
         -- Auto's levels: Level 1 is the shelf's top level, collapsed or
         -- expanded; Level 2 everything drilled into. A level on its default
