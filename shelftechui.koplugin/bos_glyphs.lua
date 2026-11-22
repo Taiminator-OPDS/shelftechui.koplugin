@@ -3,7 +3,7 @@ The retro glyphs: small line icons drawn straight into the framebuffer with
 square strokes, so they match the 2px outlines round them at any size and need
 no image files. Each takes (bb, x, y, s, ink) and draws inside the s x s box.
 
-  home search bookmark contents notebook pages stats picture pin
+  home search bookmark contents notebook pages stats picture pin people
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
@@ -167,6 +167,20 @@ function G.pin(bb, x, y, s, ink)
     bb:paintRect(hx, y + math.floor(s * 0.06), hw, math.floor(s * 0.3), ink)
     bb:paintRect(x + math.floor(s * 0.14), y + math.floor(s * 0.36), s - 2 * math.floor(s * 0.14), t, ink)
     bb:paintRect(x + math.floor(s / 2) - math.floor(t / 2), y + math.floor(s * 0.36), t, math.floor(s * 0.6), ink)
+end
+
+--- A person: a head and shoulders (X-Ray's people and places).
+function G.people(bb, x, y, s, ink)
+    ink = ink or BLACK
+    local t = stroke(s)
+    local function arc(cx, cy, r, a0, a1)
+        for a = a0, a1, 5 do
+            local rad = math.rad(a)
+            bb:paintRect(math.floor(cx + r * math.cos(rad) - t / 2 + 0.5), math.floor(cy + r * math.sin(rad) - t / 2 + 0.5), t, t, ink)
+        end
+    end
+    arc(x + s * 0.5, y + s * 0.3, s * 0.2, 0, 359)
+    arc(x + s * 0.5, y + s * 0.98, s * 0.38, 180, 360)
 end
 
 G.BLACK, G.WHITE = BLACK, WHITE

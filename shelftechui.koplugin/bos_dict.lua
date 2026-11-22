@@ -542,12 +542,11 @@ local function openXray(dql)
     local ui = dql.ui
     if not (ui and ui.document) then return end
     local word = dql.word or dql.lookupword
-    UIManager:scheduleIn(0.15, function()
-        require("bos_xray").open(ui, word, function()
-            -- (a passage was chosen: the window goes too)
-            pcall(dql.onClose, dql)
-        end)
-    end)
+    -- (the pop-up takes the dictionary's place)
+    local f = dql.dict_frame and dql.dict_frame.dimen
+    local anchor = f and Geom:new{ x = f.x, y = f.y, w = f.w - ST.shadow, h = f.h - ST.shadow }
+    pcall(dql.onClose, dql)
+    UIManager:scheduleIn(0.15, function() require("bos_xray").open(ui, word, anchor) end)
 end
 
 --- The chips: Dict | Wiki · X-Ray · Highlight.

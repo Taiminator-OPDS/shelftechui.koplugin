@@ -17,8 +17,9 @@ Then, on the device and offline, the book itself is searched for every name
 passages and where in the book they are. All of it is kept beside the book
 (stui_xray.lua in its .sdr), so X-Ray opens at once after that, offline.
 
-Opened from the dictionary's X-RAY key: on the looked-up word's entry when
-it's a name X-Ray knows, else on the list. When the book isn't found by its
+From the dictionary's X-Ray key: a pop-up for the looked-up name (who it
+is, where it's mentioned; keys for its passages and everyone). From the
+reader menu's X-Ray key: the whole X-Ray, people and places. When the book isn't found by its
 own title and author, the closest matches (Open Library's works, Wikidata's
 books) are listed to choose from, with a search of your own.
 
@@ -33,6 +34,7 @@ local UIManager = require("ui/uimanager")
 local _ = require("gettext")
 local T = require("ffi/util").template
 local ConfirmBox = require("ui/widget/confirmbox")
+local askDownload
 
 local Look = require("bos_look")
 local Page = require("bos_page")
@@ -727,7 +729,7 @@ local function jump(ui, hit)
 end
 
 --- One entry: what's known, then its passages.
-function M.openEntry(ui, e, kind, on_jump)
+function M.openEntry(ui, e, kind)
     local o = { pg = 1, fan_shown = false }
     local page
     page = Page:new{ caption = _("X-Ray"),
@@ -790,8 +792,9 @@ function M.openEntry(ui, e, kind, on_jump)
                 Look.label(bb, h.page and T(_("p. %1"), h.page) or "", x, ry, S(70), S(20), 10, { color = Look.GRAY })
                 Page.wrap(bb, "…" .. h.text .. "…", Look.serif(13), x + S(76), ry, w - S(76), 2, S(21))
                 self:hit(Geom:new{ x = x, y = ry - S(4), w = w, h = rh - S(4) }, function()
-                    if on_jump then on_jump() end
+                    -- (to the book: the list goes too)
                     self:onClose()
+                    if M.list then pcall(function() M.list:onClose() end) end
                     jump(ui, h)
                 end)
                 if k < per and hits[(o.hpg - 1) * per + k + 1] then bb:paintRect(x, ry + rh - S(8), w, 1, Look.LIGHT) end
@@ -841,7 +844,7 @@ function M.more(ui, page, rect)
 end
 
 --- The list: People and Places, the most mentioned first.
-function M.openList(ui, data, on_jump)
+function M.openList(ui, data)
     local o = { tab = #data.people > 0 and "people" or "places", pg = {} }
     local list
     list = Page:new{ caption = _("X-Ray"),
@@ -873,7 +876,7 @@ function M.openList(ui, data, on_jump)
                 Look.label(bb, tostring(e.count or 0), x + w - S(80), ry, S(70), S(22), 11, { align = "right", color = Look.GRAY })
                 if e.short then Page.wrap(bb, e.short, Look.serif(12, false, true), x, ry + S(24), w - S(10), 1, S(18), Look.GRAY) end
                 strip(bb, ui, e, x, ry + S(48), w - Look.SHADOW_SMALL, S(10))
-                self:hit(Geom:new{ x = x, y = ry - S(4), w = w, h = rh - S(4) }, function() M.openEntry(ui, e, o.tab, on_jump) end)
+                self:hit(Geom:new{ x = x, y = ry - S(4), w = w, h = rh - S(4) }, function() M.openEntry(ui, e, o.tab) end)
             end
             if pages > 1 then
                 local fy = H - S(52)
@@ -900,6 +903,194 @@ function M.openList(ui, data, on_jump)
     return list
 end
 
+-- ---------------------------------------------------------------- the pop-up (from the dictionary)
+
+local InputContainer = require("ui/widget/container/inputcontainer")
+local GestureRange = require("ui/gesturerange")
+
+local function inside(p, r) return p and r and p.x >= r.x and p.x < r.x + r.w and p.y >= r.y and p.y < r.y + r.h end
+
+--- One person or place, in a window where the dictionary was: who it is,
+--- where it's mentioned, and keys for its passages and the whole X-Ray.
+local Popup = InputContainer:extend{
+    name = "stui_xray_popup",
+    ui = nil, data = nil, entry = nil, kind = nil, word = nil, anchor = nil,
+}
+
+function Popup:init()
+    local W, H = Screen:getWidth(), Screen:getHeight()
+    local all = function() return Geom:new{ x = 0, y = 0, w = W, h = H } end
+    self.ges_events = {
+        XTap = { GestureRange:new{ ges = "tap", range = all } },
+        XSwipe = { GestureRange:new{ ges = "swipe", range = all } },
+    }
+    if Device:hasKeys() then self.key_events = { Close = { { Device.input.group.Back } } } end
+    local a = self.anchor
+    self.w = math.min(W - 2 * S(10), (a and a.w and a.w > S(200)) and a.w or (W - 2 * S(10)))
+    self.x = (a and a.x) and math.max(S(10), math.min(W - self.w - S(10), a.x)) or math.floor((W - self.w) / 2)
+    self.h = self:layout(nil)
+    local y
+    if a and a.y then
+        y = a.y
+        if y + self.h > H - S(10) then y = a.y + (a.h or 0) - self.h end
+    else
+        y = H - self.h - S(40)
+    end
+    self.y = math.max(S(10), math.min(H - self.h - S(10), y))
+    self.dimen = Geom:new{ x = self.x, y = self.y, w = self.w + Look.SHADOW, h = self.h + Look.SHADOW }
+end
+
+function Popup:getSize() return self.dimen end
+
+--- Draws (or with bb nil, only measures) the card; returns its height.
+function Popup:layout(bb)
+    local pad = S(16)
+    local x0, w = (self.x or 0), self.w
+    local x, iw = x0 + pad, w - 2 * pad
+    local y0 = self.y or 0
+    local y = y0 + S(12)
+    local e, ui = self.entry, self.ui
+    self.hits = {}
+    local key = S(42)
+    if bb then
+        self.close_rect = Geom:new{ x = x0 + w - key - S(4), y = y0, w = key + S(4), h = key + S(6) }
+        Look.label(bb, "\u{00D7}", x0 + w - key - S(4), y0 + S(4), key, key, 18, { align = "center", keep_case = true })
+    end
+    local function text(t, face, lines, lh, color, width)
+        local h = Page.wrap(bb, t, face, x, y, width or iw, lines, lh, color)
+        y = y + h
+        return h
+    end
+    if e then
+        text(e.name, Look.serif(21, true), 2, S(30), nil, iw - key)
+        y = y + S(2)
+        local hits = visibleHits(ui, e)
+        local sub = {}
+        if e.short then sub[#sub + 1] = e.short end
+        local n = #hits
+        if spoilerFree() and n < (e.count or 0) then
+            sub[#sub + 1] = T(n == 1 and _("%1 mention so far") or _("%1 mentions so far"), n)
+        else
+            sub[#sub + 1] = T((e.count or 0) == 1 and _("%1 mention") or _("%1 mentions"), e.count or 0)
+        end
+        text(table.concat(sub, "  ·  "), Look.serif(13, false, true), 2, S(20), Look.GRAY)
+        y = y + S(10)
+        if bb then strip(bb, ui, e, x, y, iw, S(12)) end
+        y = y + S(24)
+        local body, label
+        if e.wiki then
+            body = e.wiki
+        elseif e.fan and self.fan_shown then
+            body = e.fan
+        elseif hits[1] then
+            label = hits[1].page and T(_("First appears, page %1"), hits[1].page) or _("First appears")
+            body = "…" .. hits[1].text .. "…"
+        end
+        if label then
+            if bb then Look.label(bb, label, x, y, iw, S(18), 9, { color = Look.GRAY }) end
+            y = y + S(22)
+        end
+        if body then text(body, Look.serif(14, false, label ~= nil), 7, S(22)) y = y + S(8) end
+        if e.fan and not e.wiki and not self.fan_shown then
+            if bb then
+                local r = Look.button(bb, x, y, S(250), S(34), _("Fan wiki (may spoil)"), { size = 10 })
+                self.hits[#self.hits + 1] = { rect = r, fn = function() self.fan_shown = true self:redraw() end }
+            end
+            y = y + S(34) + Look.SHADOW_SMALL + S(10)
+        end
+    else
+        text(_("X-Ray"), Look.serif(21, true), 1, S(30), nil, iw - key)
+        y = y + S(6)
+        text(T(_("“%1” isn't one of the people or places X-Ray knows in this book."), self.word or ""), Look.serif(14), 3, S(22))
+        y = y + S(12)
+    end
+    -- the keys
+    y = y + S(4)
+    local kh = S(38)
+    local keys = {}
+    if e then keys[#keys + 1] = { text = _("Passages"), fn = function() self:onClose() M.openEntry(ui, e, self.kind) end } end
+    keys[#keys + 1] = { text = _("Everyone in X-Ray"), fn = function() self:onClose() M.openList(ui, self.data) end }
+    local gap = S(10)
+    local kw = math.floor((iw - Look.SHADOW_SMALL - (#keys - 1) * gap) / #keys)
+    for i, k in ipairs(keys) do
+        local kx = x + (i - 1) * (kw + gap)
+        if bb then
+            local r = Look.button(bb, kx, y, kw, kh, k.text, { size = 11 })
+            self.hits[#self.hits + 1] = { rect = r, fn = k.fn }
+        end
+    end
+    y = y + kh + Look.SHADOW_SMALL + pad
+    return y - y0
+end
+
+function Popup:paintTo(bb, _x, _y)
+    Look.shadow(bb, self.x, self.y, self.w, self.h, Look.SHADOW)
+    local r = S(14)
+    bb:paintRoundedRect(self.x, self.y, self.w, self.h, Look.PAPER, r)
+    bb:paintBorder(self.x, self.y, self.w, self.h, math.max(1, S(1.5)), Look.INK, r, true)
+    local h = self:layout(bb)
+    if h ~= self.h then
+        -- (grew or shrank: the fan wiki opened) lay out again next paint
+        self.h = h
+        self.dimen.h = h + Look.SHADOW
+    end
+end
+
+function Popup:redraw()
+    local old = Geom:new{ x = self.dimen.x, y = self.dimen.y, w = self.dimen.w, h = self.dimen.h }
+    self.h = self:layout(nil)
+    local H = Screen:getHeight()
+    if self.y + self.h > H - S(10) then self.y = math.max(S(10), H - self.h - S(10)) end
+    self.dimen = Geom:new{ x = self.x, y = self.y, w = self.w + Look.SHADOW, h = self.h + Look.SHADOW }
+    UIManager:setDirty(self.ui and self.ui.dialog or "all", "ui", old)
+    UIManager:setDirty(self, "ui", self.dimen)
+end
+
+function Popup:onXTap(_, ges)
+    if inside(ges.pos, self.close_rect) then return self:onClose() end
+    for _i, h in ipairs(self.hits or {}) do
+        if inside(ges.pos, h.rect) then
+            pcall(function()
+                Screen.bb:invertRect(h.rect.x, h.rect.y, h.rect.w, h.rect.h)
+                UIManager:setDirty(nil, "fast", h.rect)
+                UIManager:forceRePaint()
+            end)
+            UIManager:nextTick(h.fn)
+            return true
+        end
+    end
+    if not inside(ges.pos, self.dimen) then return self:onClose() end
+    return true
+end
+
+function Popup:onXSwipe(_, ges)
+    if not inside(ges.pos, self.dimen) then return self:onClose() end
+    return true
+end
+
+function Popup:onClose()
+    UIManager:close(self)
+    return true
+end
+
+function Popup:onShow()
+    UIManager:setDirty(self, "ui", self.dimen)
+    return true
+end
+
+function Popup:onCloseWidget()
+    UIManager:setDirty(self.ui and self.ui.dialog or "all", "ui", self.dimen)
+end
+
+--- The pop-up for `word` (its person or place, or a line saying it's none).
+function M.popup(ui, data, word, anchor)
+    local e, kind = M.find(data, word)
+    local p = Popup:new{ ui = ui, data = data, entry = e, kind = kind, word = word, anchor = anchor }
+    M.shown = p
+    UIManager:show(p)
+    return p
+end
+
 --- The entry for `word`, if it's one of the names.
 function M.find(data, word)
     local w = norm(word)
@@ -915,16 +1106,24 @@ function M.find(data, word)
     end
 end
 
---- X-Ray for the book that's open, on `word`'s entry when it's a name.
---- With none yet: asks, then downloads it (Wi-Fi once).
-function M.open(ui, word, on_jump)
+--- From the dictionary: the pop-up for `word` (its person or place) where
+--- the dictionary was (`anchor`). With none yet: asks, then downloads it.
+function M.open(ui, word, anchor)
     if not (ui and ui.document) then return end
     local data = M.load(ui)
-    if data then
-        local e, kind = M.find(data, word)
-        if e then return M.openEntry(ui, e, kind, on_jump) end
-        return M.openList(ui, data, on_jump)
-    end
+    if data then return M.popup(ui, data, word, anchor) end
+    return askDownload(ui, word)
+end
+
+--- From the reader menu: the whole X-Ray (people and places).
+function M.openFull(ui)
+    if not (ui and ui.document) then return end
+    local data = M.load(ui)
+    if data then return M.openList(ui, data) end
+    return askDownload(ui)
+end
+
+askDownload = function(ui, word)
     if ui.document.file and M.busy[ui.document.file] then
         notify(_("X-Ray is still downloading for this book."))
         return
@@ -938,7 +1137,8 @@ function M.open(ui, word, on_jump)
                 local finish
                 finish = function(got, why, reason)
                     if got then
-                        -- (you're reading: only say so; X-Ray opens from the dictionary)
+                        -- (you're reading: only say so; X-Ray opens from a name's
+                        -- look-up or the reader menu)
                         notify(T(_("X-Ray ready for “%1”: %2 people, %3 places"), got.title or title, #got.people, #got.places))
                     elseif reason == "none" or reason == "absent" then
                         -- (not found by itself: the closest books, to choose from)
@@ -956,8 +1156,6 @@ function M.open(ui, word, on_jump)
                         UIManager:show(require("ui/widget/infomessage"):new{ text = why or _("X-Ray couldn't be made."), timeout = 6 })
                     end
                 end
-                -- (back to the book: the dictionary goes)
-                if on_jump then pcall(on_jump) end
                 notify(_("X-Ray: downloading in the background. Keep reading; it'll say when it's ready."))
                 M.download(ui, finish)
             end)

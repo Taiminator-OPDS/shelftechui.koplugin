@@ -2,6 +2,11 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.24.0
+
+- X-Ray from the dictionary is a pop-up now: look up a name and tap X-Ray, and a card takes the dictionary's place with who it is, how often they're mentioned so far, where in the book (the strip), and the start of their Wikipedia article (or the passage they first appear in). Its keys: Passages (every passage, tap one to go there) and Everyone in X-Ray. A word that isn't a name says so. A tap outside closes it.
+- The whole X-Ray (everyone, people and places) is in the reader menu, beside Contents, Notebook and Pages. With no X-Ray yet it offers to download one.
+
 ## 1.23.0
 
 - Home: "Group books in series" for any shelf (hold the shelf's chip → View mode). A series' books show as one stack with a count, where its first book would be; a tap opens the series in order. Works in Covers and List (in Spines it's the series boxes, as before). Shelves that already had Series boxes on now group in Covers and List too.

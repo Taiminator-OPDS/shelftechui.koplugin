@@ -14,7 +14,7 @@ The reading toolbar overlay (layout "book card on top", from the Aleph ideas):
                        (the page shows through)
   ═══════
   bottom  P. 65  [■■■■|■■■□|□□□□|□□□]  34%      (chapter ticks, drag to skim)
-          [CONTENTS] [NOTEBOOK] [PAGES]
+          [CONTENTS] [NOTEBOOK] [PAGES] [X-RAY]
           ─────────────────────────────────────────────
           [▣] GLIMPSE   │ [⊥] PIN      │ [▮] STATS
               3 OF 12   │     2 PINNED │     5-DAY STREAK
@@ -316,6 +316,7 @@ local TABS = {
     { key = "contents", label = _("Contents"), glyph = "contents" },
     { key = "notebook", label = _("Notebook"), glyph = "notebook" },
     { key = "pages", label = _("Pages"), glyph = "pages" },
+    { key = "xray", label = _("X-Ray"), glyph = "people" },
 }
 
 function ReadingToolbar:pageLabel(page)
@@ -357,10 +358,10 @@ function ReadingToolbar:paintBottom(bb)
     local ox = (origin_page and origin_page ~= page) and self:xForPct(self:pctForPage(origin_page)) or nil
     Look.slimTrack(bb, bx0, by, bx1 - bx0, bh, frac, ticks, self.dragging and true or false, ox)
 
-    -- CONTENTS · NOTEBOOK · PAGES
+    -- CONTENTS · NOTEBOOK · PAGES · X-RAY
     local ty = py + ph + S(12)
-    local gap = S(12)
-    local tw = math.floor((self.content_w - self.key_shadow - 2 * gap) / 3)
+    local gap = S(10)
+    local tw = math.floor((self.content_w - self.key_shadow - (#TABS - 1) * gap) / #TABS)
     self.nav_rects = {}
     for i, t in ipairs(TABS) do
         local x = pad + (i - 1) * (tw + gap)
@@ -562,6 +563,7 @@ end
 
 --- ShelfTechUI's own Contents / Notes / Go to page (or KOReader's, if turned off in Settings).
 function ReadingToolbar.nav(ui, what)
+    if what == "xray" then return require("bos_xray").openFull(ui) end
     local custom = require("bos_settings_store").get("custom_nav") ~= false
     if custom then
         local Nav = require("bos_nav")
