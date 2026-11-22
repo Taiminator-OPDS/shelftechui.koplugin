@@ -2,6 +2,10 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.20.0
+
+- The pull-down works from any screen: a swipe down from the top edge of Settings, Hardcover, the store, Bookdrop's screens and ShelfTechUI's other full-screen pages opens what a swipe down on home opens (the reading summary: today's reading and the books to jump back into; or Settings, as chosen in Settings → Home → Swipe down on home). Over a book's own pages (Contents, Notebook, Pages) it's what a swipe down in a book opens. Only a swipe that starts at the very top, so the pages' own swipes still work. Settings → Home → Swipe down from any screen.
+
 ## 1.19.0
 
 - Hardcover's search works like the store's: the search key opens a field with the keyboard, and books and readers that match show under it as you type, under their own headings (Books, People; All opens the whole list). Cancel or a swipe right goes back.

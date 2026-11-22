@@ -30,7 +30,7 @@ local S = UI.S
 
 local Page = {}
 
-Page.VERSION = "1.19.0"
+Page.VERSION = "1.20.0"
 
 -- Dispatcher's sub-menus edit tables in place and flag `caller.updated`.
 local saver = setmetatable({}, { __newindex = function() Store.save() end })
@@ -923,7 +923,7 @@ function Page.sections(plugin)
         end
     end
     table.insert(home.items, { heading = _("Home screen") })
-    pick(home.items, { _("Status bar"), _("Swipe down on home"), _("Reading summary"),
+    pick(home.items, { _("Status bar"), _("Swipe down on home"), _("Swipe down from any screen"), _("Reading summary"),
         _("Edge swipes on home"), _("Start menu entries"), _("Settings in the start menu") })
     table.insert(home.items, {
         text = _("Time and battery line on Dash"),
@@ -1254,6 +1254,12 @@ function Page.items()
             description = _("What pulling down from the top of the shelf opens."),
             mandatory_func = function() return choiceName("home_swipe", HOME_SWIPE) end,
             sub_item_table_func = function() return radios("home_swipe", HOME_SWIPE) end,
+        },
+        {
+            text = _("Swipe down from any screen"),
+            description = _("A swipe down from the top edge of Settings, Hardcover, the store, Bookdrop and ShelfTechUI's other pages opens the same thing as on home (above); over a book's pages, what a swipe down in a book opens."),
+            checked_func = function() return Store.get("pulldown_everywhere") ~= false end,
+            callback = function() Store.set("pulldown_everywhere", Store.get("pulldown_everywhere") == false and nil or false) end,
         },
         {
             text = _("Reading summary"),
