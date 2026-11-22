@@ -1,23 +1,22 @@
 --[[
-The dictionary, as a small retro window: at most half the screen, square
-corners, a hard black shadow, a pinstriped title bar with a close box, and a
-monospaced face for its chrome (the classic desktop look, in black and white,
-which suits e-ink).
+The dictionary window, modernised: rounded, the word big at the top, the
+definition without a frame, and a row of rounded keys at the bottom.
 
-    ┌─────────────────────────────────────────┐
-    │[■]≡≡≡≡≡≡≡≡[ OXFORD ENGLISH ]≡≡≡≡≡≡≡[1/3]│  title: tap = dictionaries
-    │ lamp                                [✎] │  the word (✎: look up another)
-    │ ┌─────────────────────────────────────┐ │
-    │ │ the definition, scrolling           │ │
-    │ └─────────────────────────────────────┘ │
-    │ [▤ DICTS ▴]  [DICT] [WIKI] [HIGHLIGHT]  │
-    └─────────────────────────────────────────┘▒
+    ╭─────────────────────────────────────────╮
+    │ lamp                               ✎  × │  the word (✎: look up another)
+    │ Oxford English · 1/3 ▾                  │  tap: the other dictionaries
+    │ ─────────────────────────────────────── │
+    │ the definition, scrolling               │
+    │ ─────────────────────────────────────── │
+    │ (Dicts ▾) (Dict|Wiki) (X-Ray) (Highlight)│
+    ╰─────────────────────────────────────────╯
 
-  * DICTS ▴ (the "start" button) pops a start menu up: every dictionary with
+  * Dicts ▾ (and the dictionary's name) pops a menu up: every dictionary with
     a result (the one shown, filled), then everything else the window can do
     (Search, Translate, Vocabulary builder, plugins' buttons…).
-  * DICT / WIKI / HIGHLIGHT: chips. WIKI looks the word up on Wikipedia, DICT
-    goes back to the dictionaries, HIGHLIGHT keeps the word highlighted.
+  * Dict | Wiki: the dictionaries or Wikipedia. Highlight keeps the word
+    highlighted. X-Ray: the book's people and places (bos_xray), on the word's
+    entry when it's one of them; with none downloaded yet, it asks to.
 
 KOReader's DictQuickLookup does all the work; this only re-lays its window
 out. Its own widgets (title bar, buttons) stay alive off screen, so all of its
@@ -25,23 +24,16 @@ methods keep working.
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
-local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
 local Event = require("ui/event")
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
-local HorizontalGroup = require("ui/widget/horizontalgroup")
-local HorizontalSpan = require("ui/widget/horizontalspan")
 local InputContainer = require("ui/widget/container/inputcontainer")
-local LineWidget = require("ui/widget/linewidget")
-local OverlapGroup = require("ui/widget/overlapgroup")
-local LeftContainer = require("ui/widget/container/leftcontainer")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
-local VerticalSpan = require("ui/widget/verticalspan")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local logger = require("logger")
 local _ = require("gettext")
@@ -58,14 +50,12 @@ local switchDomain
 local function Size1() return math.max(1, S(1)) end
 
 M.STYLE = {
-    border  = S(2),   -- window and control outlines
-    shadow  = S(5),   -- the window's hard shadow
-    cshadow = S(3),   -- a control's hard shadow
-    title_h = S(32),
-    word_h  = S(44),
-    bar_h   = S(50),
-    margin  = S(10),  -- inside the window
-    field_pad = S(8), -- inside the definition field
+    border  = S(1.5), -- the window's outline
+    radius  = S(14),  -- its corners
+    shadow  = S(5),   -- its shadow (as the theme draws shadows)
+    head_h  = S(76),
+    bar_h   = S(56),
+    margin  = S(12),  -- inside the window
     edge    = S(10),  -- from the screen's edges
 }
 local ST = M.STYLE
@@ -104,7 +94,6 @@ local function box(bb, x, y, w, h, opts)
     local sh = opts.shadow or 0
     require("bos_look").box(bb, x, y, w, h, { border = b, shadow = sh, color = opts.color, fill = opts.fill })
 end
-M.box = box
 
 -- ---------------------------------------------------------------------------
 -- A painted, tappable area
@@ -360,7 +349,7 @@ M.StartMenu = StartMenu
 -- The window
 -- ---------------------------------------------------------------------------
 
-local SKIP_IN_MENU = { prev_dict = true, next_dict = true, close = true, highlight = true, vocabulary = true }
+local SKIP_IN_MENU = { prev_dict = true, next_dict = true, close = true, highlight = true }
 
 --- The window's other actions, from its (hidden) button table.
 local function actionRows(dql)
@@ -437,129 +426,71 @@ end
 
 -- ----- pieces of the window --------------------------------------------------
 
-local function titleBar(dql, w)
-    local h = ST.title_h
-    local close_sz = S(18)
+--- Text in the theme's reading-UI face (as written, not in capitals); returns
+--- its width (bb nil: only measures).
+local function uiText(bb, text, x, y, w, h, opts)
+    opts = opts or {}
+    local Look = require("bos_look")
+    local size = opts.size or 14
+    local face = opts.serif and Look.serif(size, opts.bold) or Look.text(size, opts.bold) or Font:getFace("cfont", size)
+    local tw = TextWidget:new{ text = text, face = face, bold = opts.bold and not opts.serif or false,
+        fgcolor = opts.color or BLACK, max_width = math.max(1, w), truncate_with_ellipsis = true }
+    local sz = tw:getSize()
+    local tx = x
+    if opts.align == "center" then tx = x + math.floor((w - sz.w) / 2)
+    elseif opts.align == "right" then tx = x + w - sz.w end
+    if bb then tw:paintTo(bb, tx, y + math.floor((h - sz.h) / 2)) end
+    tw:free()
+    return sz.w
+end
+
+local function glyph(bb, g, x, y, w, h, px, color)
+    local t = TextWidget:new{ text = g, face = UI.symbolFace(UI.ptForPx(px)), fgcolor = color or BLACK }
+    local sz = t:getSize()
+    t:paintTo(bb, x + math.floor((w - sz.w) / 2), y + math.floor((h - sz.h) / 2))
+    t:free()
+end
+
+--- The head: the word, big; under it the dictionary and the count (tap: the
+--- other dictionaries); ✎ (look up another) and × at the right.
+local function header(dql, w)
+    local h = ST.head_h
+    local key = S(42)
     return Painted:new{
         width = w, height = h,
         draw = function(self, bb, x, y)
             bb:paintRect(x, y, w, h, WHITE)
-            -- the theme's band (Retro: pinstripes)
-            local top, bottom = y + S(7), y + h - S(7)
-            require("bos_look").stripes(bb, x + S(4), top, w - S(8), bottom - top + 1)
-            -- close box
-            local cx, cy = x + S(12), y + math.floor((h - close_sz) / 2)
-            bb:paintRect(cx - S(4), y + S(5), close_sz + S(8), h - S(10), WHITE)
-            box(bb, cx, cy, close_sz, close_sz, { border = S(2) })
-            self.close_rect = Geom:new{ x = cx - S(8), y = y, w = close_sz + S(16), h = h }
-            -- the count, at the right ("2/5")
-            local count = dql.displaynb
-            local right = x + w - S(10)
-            if count and count ~= "" then
-                local cw = textWidth(count, 13) + S(14)
-                bb:paintRect(right - cw, y + S(5), cw, h - S(10), WHITE)
-                drawText(bb, count, right - cw, y, cw, h, { size = 13, align = "center" })
-                right = right - cw - S(4)
-            end
-            -- the dictionary's name, centred in a white box over the stripes
-            local name = require("bos_look").case((dql.displaydictname or ""))
-            local left = cx + close_sz + S(12)
-            local avail = right - left - S(8)
-            local nw = math.min(avail, textWidth(name, 13) + S(20))
-            local nx = left + math.floor((avail - nw) / 2)
-            bb:paintRect(nx, y + S(4), nw, h - S(8), WHITE)
-            drawText(bb, name, nx + S(10), y, nw - S(20), h, { size = 13, align = "center" })
-            self.name_rect = Geom:new{ x = left, y = y, w = right - left, h = h }
-            -- the rule under the bar
-            bb:paintRect(x, y + h - ST.border, w, ST.border, BLACK)
+            local m = ST.margin + S(4)
+            local right = x + w - S(6)
+            self.close_rect = Geom:new{ x = right - key, y = y, w = key, h = S(50) }
+            uiText(bb, "\u{00D7}", right - key, y + S(6), key, S(38), { size = 26, align = "center" })
+            right = right - key
+            self.edit_rect = Geom:new{ x = right - key, y = y, w = key, h = S(50) }
+            glyph(bb, UI.GLYPH.pencil, right - key, y + S(6), key, S(38), S(17))
+            right = right - key - S(4)
+            uiText(bb, dql.displayword or dql.word or "", x + m, y + S(8), right - x - m, S(38),
+                { serif = true, bold = true, size = 22 })
+            local line = dql.displaydictname or ""
+            if dql.displaynb and dql.displaynb ~= "" then line = line .. "  \u{00B7}  " .. dql.displaynb end
+            local lw = uiText(bb, line .. "  \u{25BE}", x + m, y + S(46), w - 2 * m - S(10), S(22), { size = 12, color = GRAY })
+            self.name_rect = Geom:new{ x = x + m - S(6), y = y + S(42), w = lw + S(16), h = S(30) }
         end,
         tap = function(self, pos)
-            if inside(pos, self.close_rect) then
-                dql:onClose()
-                return true
-            end
-            M.openStartMenu(dql, dql._bos_start and dql._bos_start.dimen)
-            return true
+            if inside(pos, self.close_rect) then dql:onClose() return true end
+            if inside(pos, self.edit_rect) then dql:onLookupInputWord(dql.word) return true end
+            if inside(pos, self.name_rect) then M.openStartMenu(dql, self.name_rect) return true end
+            return false
         end,
         hold = function(self, pos)
-            if inside(pos, self.close_rect) then
-                dql:onHoldClose()
-                return true
-            end
+            if inside(pos, self.close_rect) then dql:onHoldClose() return true end
+            if inside(pos, self.edit_rect) then dql:onLookupInputWord(dql.lookupword) return true end
             -- hold the name: make this dictionary the preferred one (as KOReader)
-            if not dql.is_wiki and dql.ui then
+            if inside(pos, self.name_rect) and not dql.is_wiki and dql.ui then
                 dql.ui:handleEvent(Event:new("TogglePreferredDict", dql.dictionary))
                 dql:changeDictionary(dql.dict_index)
                 return true
             end
         end,
-    }
-end
-
-local function wordRow(dql, w)
-    local h = ST.word_h
-    local btn = S(34)
-    local word = dql.lookup_word_text
-    -- + VOCAB: KOReader's vocabulary builder, when it offers its button here
-    local vb = dql.button_table and dql.button_table:getButtonById("vocabulary")
-    local vocab_label = function()
-        return dql._vocabbuilder_action_state == false and "\u{2713} VOCAB" or "+ VOCAB"
-    end
-    local vocab_w = vb and (math.max(textWidth("\u{2713} VOCAB", 13), textWidth("+ VOCAB", 13)) + S(18)) or 0
-    local vocab = vb and Painted:new{
-        width = vocab_w + ST.cshadow, height = btn + ST.cshadow,
-        draw = function(self, bb, x, y)
-            local on = dql._vocabbuilder_action_state == false
-            local down = on or self.pressed
-            local ox = down and ST.cshadow or 0
-            box(bb, x + ox, y + ox, vocab_w, btn, { shadow = down and 0 or ST.cshadow,
-                fill = down and BLACK or WHITE })
-            drawText(bb, vocab_label(), x + ox, y + ox, vocab_w, btn,
-                { size = 13, align = "center", color = down and WHITE or BLACK })
-        end,
-        tap = function(self)
-            if vb.callback then vb.callback() end
-            -- (removing asks first: repaint once that's answered too)
-            self:repaint()
-            UIManager:scheduleIn(0.5, function() self:repaint() end)
-            return true
-        end,
-    } or nil
-    word.max_width = w - 2 * ST.margin - btn - S(10) - (vocab and (vocab.width + S(8)) or 0)
-    pcall(function() word:setText(dql.displayword) end)
-    local edit = Painted:new{
-        width = btn + ST.cshadow, height = btn + ST.cshadow,
-        draw = function(self, bb, x, y)
-            box(bb, x, y, btn, btn, { shadow = self.pressed and 0 or ST.cshadow,
-                fill = self.pressed and BLACK or WHITE })
-            local g = TextWidget:new{ text = UI.GLYPH.pencil, face = UI.symbolFace(UI.ptForPx(S(16))),
-                fgcolor = self.pressed and WHITE or BLACK }
-            local sz = g:getSize()
-            g:paintTo(bb, x + math.floor((btn - sz.w) / 2), y + math.floor((btn - sz.h) / 2))
-            g:free()
-        end,
-        tap = function()
-            dql:onLookupInputWord(dql.word)
-            return true
-        end,
-        hold = function()
-            dql:onLookupInputWord(dql.lookupword)
-            return true
-        end,
-    }
-    dql._bos_vocab = vocab
-    local dim = Geom:new{ w = w, h = h }
-    local right = HorizontalGroup:new{ overlap_align = "right" }
-    if vocab then
-        table.insert(right, CenterContainer:new{ dimen = Geom:new{ w = vocab.width, h = h }, vocab })
-        table.insert(right, HorizontalSpan:new{ width = S(8) })
-    end
-    table.insert(right, CenterContainer:new{ dimen = Geom:new{ w = btn + ST.cshadow, h = h }, edit })
-    table.insert(right, HorizontalSpan:new{ width = ST.margin })
-    return OverlapGroup:new{
-        dimen = dim,
-        LeftContainer:new{ dimen = dim:copy(), HorizontalGroup:new{ HorizontalSpan:new{ width = ST.margin }, word } },
-        right,
     }
 end
 
@@ -605,95 +536,119 @@ function M.toggleHighlight(dql)
     UIManager:setDirty(ui.dialog or ui, "ui")
 end
 
---- The chips: DICT · WIKI · HIGHLIGHT.
+--- X-Ray for the book that's open, on the looked-up word when it's one of
+--- its names (and asking to download it when there's none yet).
+local function openXray(dql)
+    local ui = dql.ui
+    if not (ui and ui.document) then return end
+    local word = dql.word or dql.lookupword
+    UIManager:scheduleIn(0.15, function()
+        require("bos_xray").open(ui, word, function()
+            -- (a passage was chosen: the window goes too)
+            pcall(dql.onClose, dql)
+        end)
+    end)
+end
+
+--- The chips: Dict | Wiki · X-Ray · Highlight.
 local function chipCells(dql)
-    local hl = dql.button_table and dql.button_table:getButtonById("highlight")
+    local docless = dql:isDocless() or not (dql.ui and dql.ui.document)
     return {
-        {
-            text = _("Dict"),
-            selected = function() return not dql.is_wiki end,
-            callback = function()
-                if dql.is_wiki then switchDomain(dql) end
-            end,
-        },
-        {
-            text = _("Wiki"),
-            selected = function() return dql.is_wiki end,
-            callback = function()
-                if not dql.is_wiki then switchDomain(dql) end
-            end,
-        },
-        {
-            text = _("Highlight"),
-            label = function() return dql._bos_hl_item and _("\u{2713} Highlighted") or _("Highlight") end,
-            selected = function() return dql._bos_hl_item ~= nil end,
-            enabled = dql.highlight ~= nil and not dql.is_wiki and not dql:isDocless(),
-            -- right away, not when the window closes (KOReader's way): the
-            -- highlight appears on the page, and tapping again takes it off
-            callback = function() M.toggleHighlight(dql) end,
-        },
+        { text = _("Dict"), selected = function() return not dql.is_wiki end,
+          callback = function() if dql.is_wiki then switchDomain(dql) end end },
+        { text = _("Wiki"), selected = function() return dql.is_wiki end,
+          callback = function() if not dql.is_wiki then switchDomain(dql) end end },
+        { text = _("X-Ray"), enabled = not docless, selected = function() return false end,
+          callback = function() openXray(dql) end },
+        { text = _("Highlight"),
+          label = function() return dql._bos_hl_item and _("\u{2713} Highlighted") or _("Highlight") end,
+          selected = function() return dql._bos_hl_item ~= nil end,
+          enabled = dql.highlight ~= nil and not dql.is_wiki and not docless,
+          -- right away, not when the window closes (KOReader's way): the
+          -- highlight appears on the page, and tapping again takes it off
+          callback = function() M.toggleHighlight(dql) end },
     }
 end
 
+local function hair() return math.max(1, S(1.5)) end
+
+--- A rounded key: outlined, or filled when on.
+local function pill(bb, x, y, w, h, on, enabled)
+    local r = math.floor(h / 2)
+    if on then
+        bb:paintRoundedRect(x, y, w, h, BLACK, r)
+    else
+        bb:paintRoundedRect(x, y, w, h, WHITE, r)
+        bb:paintBorder(x, y, w, h, hair(), enabled == false and Blitbuffer.COLOR_LIGHT_GRAY or BLACK, r, true)
+    end
+end
+
+--- The keys along the bottom: the dictionaries (▾: every one, and what else
+--- the window can do), Dict | Wiki, X-Ray, Highlight.
 local function bottomBar(dql, w)
     local h = ST.bar_h
-    local ch = S(34)
-    local start_label = dql.is_wiki and _("Wiki") or _("Dicts")
-    local start_w = textWidth(require("bos_look").case(start_label) .. " \u{25B4}", 14) + S(46)
-    local start = Painted:new{
-        width = start_w + ST.cshadow, height = ch + ST.cshadow,
-        draw = function(self, bb, x, y)
-            local down = self.open
-            local ox = down and ST.cshadow or 0
-            box(bb, x + ox, y + ox, start_w, ch, { shadow = down and 0 or ST.cshadow,
-                fill = down and BLACK or WHITE })
-            local ink = down and WHITE or BLACK
-            local g = TextWidget:new{ text = UI.GLYPH.dictionary, face = UI.symbolFace(UI.ptForPx(S(15))),
-                fgcolor = ink }
-            local sz = g:getSize()
-            g:paintTo(bb, x + ox + S(10), y + ox + math.floor((ch - sz.h) / 2))
-            g:free()
-            drawText(bb, require("bos_look").case(start_label) .. " \u{25B4}", x + ox + S(10) + sz.w + S(8), y + ox,
-                start_w - sz.w - S(26), ch, { size = 14, color = ink })
-        end,
-        tap = function(self)
-            M.openStartMenu(dql, self.dimen)
-            return true
-        end,
-    }
-    dql._bos_start = start
-    -- the chips share the rest of the bar
+    local ch = S(38)
     local cells = chipCells(dql)
     local gap = S(8)
-    local chips_w = w - 2 * ST.margin - start.width - S(14)
-    local cw = math.floor((chips_w - gap * (#cells - 1) - ST.cshadow) / #cells)
-    local size = 14
-    for _i, c in ipairs(cells) do
-        local longest = c.label and _("\u{2713} Highlighted") or c.text
-        while size > 10 and textWidth(require("bos_look").case(longest), size) > cw - S(10) do size = size - 1 end
-    end
-    local chips = Painted:new{
-        width = chips_w, height = ch + ST.cshadow,
+    local m = ST.margin
+    local size = 13
+    local start_label = (dql.is_wiki and _("Wiki") or _("Dicts")) .. " \u{25BE}"
+    local start_w = uiText(nil, start_label, 0, 0, w, ch, { size = size }) + S(28)
+    -- Dict | Wiki share one key; X-Ray and Highlight have their own
+    local rest = w - 2 * m - start_w - 3 * gap
+    local seg_w = math.floor(rest * 0.40)
+    local xr_w = math.floor(rest * 0.25)
+    local hl_w = rest - seg_w - xr_w
+    local bar = Painted:new{
+        width = w, height = h,
         draw = function(self, bb, x, y)
+            bb:paintRect(x, y, w, h, WHITE)
+            local cy = y + math.floor((h - ch) / 2)
             self.rects = {}
-            for i, c in ipairs(cells) do
-                local cx = x + (i - 1) * (cw + gap)
-                local sel = c.selected()
+            local cx = x + m
+            -- the dictionaries
+            local down = self.open
+            pill(bb, cx, cy, start_w, ch, down)
+            uiText(bb, start_label, cx, cy, start_w, ch, { size = size, align = "center", color = down and WHITE or BLACK })
+            self.start_rect = Geom:new{ x = cx, y = cy, w = start_w, h = ch }
+            cx = cx + start_w + gap
+            -- Dict | Wiki
+            local r = math.floor(ch / 2)
+            bb:paintRoundedRect(cx, cy, seg_w, ch, WHITE, r)
+            local half = math.floor(seg_w / 2)
+            for i = 1, 2 do
+                local c = cells[i]
+                local sx = cx + (i - 1) * half
+                local sw = i == 1 and half or (seg_w - half)
+                local on = c.selected() or self.pressed == i
+                if on then
+                    bb:paintRoundedRect(sx, cy, sw, ch, BLACK, r)
+                    -- (square where the halves meet)
+                    if i == 1 then bb:paintRect(sx + sw - r, cy, r, ch, BLACK) else bb:paintRect(sx, cy, r, ch, BLACK) end
+                end
+                uiText(bb, c.text, sx, cy, sw, ch, { size = size, align = "center", color = on and WHITE or BLACK })
+                self.rects[i] = Geom:new{ x = sx, y = cy, w = sw, h = ch }
+            end
+            bb:paintBorder(cx, cy, seg_w, ch, hair(), BLACK, r, true)
+            cx = cx + seg_w + gap
+            -- X-Ray, Highlight
+            for j, cw in ipairs({ xr_w, hl_w }) do
+                local k = j + 2
+                local c = cells[k]
+                local on = c.selected() or self.pressed == k
                 local en = c.enabled ~= false
-                local pressed = self.pressed == i
-                local ox = (sel or pressed) and ST.cshadow or 0
-                box(bb, cx + ox, y + ox, cw, ch, {
-                    shadow = (sel or pressed) and 0 or ST.cshadow,
-                    fill = (sel or pressed) and BLACK or WHITE,
-                    color = en and BLACK or GRAY,
-                })
-                local label = require("bos_look").case((c.label and c.label() or c.text))
-                drawText(bb, label, cx + ox + S(4), y + ox, cw - S(8), ch,
-                    { size = size, align = "center", color = (sel or pressed) and WHITE or (en and BLACK or GRAY) })
-                self.rects[i] = Geom:new{ x = cx, y = y, w = cw + ST.cshadow, h = ch + ST.cshadow }
+                pill(bb, cx, cy, cw, ch, on, en)
+                uiText(bb, c.label and c.label() or c.text, cx + S(4), cy, cw - S(8), ch, { size = size, align = "center",
+                    color = on and WHITE or (en and BLACK or GRAY) })
+                self.rects[k] = Geom:new{ x = cx, y = cy, w = cw, h = ch }
+                cx = cx + cw + gap
             end
         end,
         tap = function(self, pos)
+            if inside(pos, self.start_rect) then
+                M.openStartMenu(dql, self.start_rect)
+                return true
+            end
             for i, r in ipairs(self.rects or {}) do
                 if inside(pos, r) then
                     local c = cells[i]
@@ -710,16 +665,15 @@ local function bottomBar(dql, w)
             return true
         end,
     }
-    local dim = Geom:new{ w = w, h = h }
-    return OverlapGroup:new{
-        dimen = dim,
-        LeftContainer:new{ dimen = dim:copy(), HorizontalGroup:new{
-            HorizontalSpan:new{ width = ST.margin },
-            start,
-            HorizontalSpan:new{ width = S(14) },
-            chips,
-        } },
-    }
+    dql._bos_start = bar
+    return bar
+end
+
+--- A hairline across the window.
+local function rule(w)
+    return Painted:new{ width = w, height = S(5), draw = function(_self, bb, x, y)
+        bb:paintRect(x + ST.margin, y + S(2), w - 2 * ST.margin, math.max(1, S(1)), Blitbuffer.COLOR_GRAY_9)
+    end }
 end
 
 -- ----- the re-layout ---------------------------------------------------------
@@ -746,14 +700,13 @@ function M.restyle(dql)
     local W = dql.width
     local b = ST.border
     local inner = W - 2 * b
-    local field_w = inner - 2 * ST.margin
-    -- the definition: narrower (it sits in a field), and only as tall as fits
-    -- in half the screen
-    local content_w = field_w - 2 * Size1() - 2 * ST.field_pad
+    local pad = ST.margin + S(4)
+    -- the definition: only as tall as fits in half the screen
+    local content_w = inner - 2 * pad
     local half = math.floor(Screen:getHeight() / 2)
-    local others = 2 * b + ST.title_h + ST.word_h + S(4) + 2 * Size1() + 2 * S(6) + ST.bar_h + ST.shadow
+    local others = 2 * b + ST.head_h + 2 * S(5) + 2 * S(6) + ST.bar_h + ST.shadow
     local line_h = dql.definition_line_height or S(24)
-    local def_h = math.floor((half - others - 2 * S(4)) / line_h) * line_h
+    local def_h = math.floor((half - others) / line_h) * line_h
     def_h = math.max(def_h, 3 * line_h)
 
     if dql.text_widget and dql.text_widget.free then pcall(dql.text_widget.free, dql.text_widget) end
@@ -764,23 +717,19 @@ function M.restyle(dql)
 
     dql.definition_widget = FrameContainer:new{
         bordersize = 0, margin = 0,
-        padding = 0, padding_left = ST.field_pad, padding_right = ST.field_pad,
-        padding_top = S(4), padding_bottom = S(4),
+        padding = 0, padding_left = pad, padding_right = pad,
+        padding_top = S(6), padding_bottom = S(6),
         dql.text_widget,
-    }
-    local field = FrameContainer:new{
-        bordersize = Size1(), color = BLACK, margin = 0, padding = 0, background = WHITE,
-        dql.definition_widget,
     }
 
     local window = FrameContainer:new{
-        bordersize = b, color = BLACK, radius = require("bos_look").RADIUS, margin = 0, padding = 0, background = WHITE,
+        bordersize = b, color = BLACK, radius = ST.radius, margin = 0, padding = 0, background = WHITE,
         VerticalGroup:new{
-            align = "center",
-            titleBar(dql, inner),
-            wordRow(dql, inner),
-            CenterContainer:new{ dimen = Geom:new{ w = inner, h = field:getSize().h + S(4) }, field },
-            VerticalSpan:new{ width = S(6) },
+            align = "left",
+            header(dql, inner),
+            rule(inner),
+            dql.definition_widget,
+            rule(inner),
             bottomBar(dql, inner),
         },
     }

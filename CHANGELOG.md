@@ -2,6 +2,12 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.22.0
+
+- X-Ray, as on a Kindle, from the dictionary: look a word up and tap X-Ray for the book's people and places, the most mentioned first, each with a strip showing where in the book it appears. An entry has Wikidata's line on it, the start of its Wikipedia article and, when the book has a fan wiki, what that says (folded away: fan wikis spoil), then every passage it's in; tap one to go there (Back returns). Looking up a name opens its entry straight away. Spoiler-free is on: only passages up to where you are (⋯ to change it, download again or remove).
+- The first time for a book, X-Ray asks to download: the names come from Open Library and Wikidata, the rest from Wikipedia and the fan wiki, once (a few seconds with Wi-Fi); then the book itself is searched for them on the Kindle. It's kept beside the book and works offline after that. Books without characters on Open Library or Wikidata get none.
+- The dictionary window is more modern: rounded, the word big at the top with the dictionary and count under it (tap for the other dictionaries), ✎ and × at the right, the definition without a box, and rounded keys at the bottom: Dicts ▾ · Dict | Wiki · X-Ray · Highlight. The vocabulary builder is in the Dicts ▾ menu.
+
 ## 1.21.0
 
 - A compact selection menu, as on a phone: when you select text, a small bar hovers just under the selection (or over it, when there's no room under) with Highlight · Note · Copy · Look up · ⋯. The ⋯ key turns it into the rest of the actions (Select, Wikipedia, Translate, Search, Share, and what plugins add: Pin page, Hardcover, QR code…). It keeps clear of the handles at the ends of the selection, and stays on top of them, so its keys always answer, also after dragging a handle. A tap outside closes it and the selection. Settings → Reading → Compact selection menu (off: KOReader's menu).
