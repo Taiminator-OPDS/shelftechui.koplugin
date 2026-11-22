@@ -30,7 +30,7 @@ local S = UI.S
 
 local Page = {}
 
-Page.VERSION = "1.20.1"
+Page.VERSION = "1.21.0"
 
 -- Dispatcher's sub-menus edit tables in place and flag `caller.updated`.
 local saver = setmetatable({}, { __newindex = function() Store.save() end })
@@ -950,7 +950,7 @@ function Page.sections(plugin)
     fold(home, "filemanager")
 
     local reading = { id = "stui_reading", name = _("Reading"), icon = "book.opened", items = { { heading = _("In a book") } } }
-    pick(reading.items, { _("Reading toolbar"), _("Quick Settings"), _("Swipe down in a book"), _("Handles on a selection"), _("Progress sync in the background"),
+    pick(reading.items, { _("Reading toolbar"), _("Quick Settings"), _("Swipe down in a book"), _("Handles on a selection"), _("Compact selection menu"), _("Progress sync in the background"),
         _("ShelfTechUI text sheet"), _("Glimpse") })
     fold(reading, "navi", _("Navigation"))
     fold(reading, "typeset", _("Typesetting"))
@@ -1284,6 +1284,8 @@ function Page.items()
             description = _("The bar you get by tapping the page: where to tap, and what it shows."),
             sub_item_table_func = toolbarItems,
         },
+        toggle("highlight_popup", _("Compact selection menu"),
+            _("When you've selected text, a small bar just under it (Highlight · Note · Copy · Look up · ⋯), clear of the handles; ⋯ shows the rest of the actions. Off: KOReader's highlight menu.")),
         toggle("highlight_handles", _("Handles on a selection"),
             _("When you've selected text, a handle at each end: drag one to take in more words, or fewer, before you highlight.")),
         toggle("kosync_background", _("Progress sync in the background"),

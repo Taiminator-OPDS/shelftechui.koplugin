@@ -2,6 +2,10 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.21.0
+
+- A compact selection menu, as on a phone: when you select text, a small bar hovers just under the selection (or over it, when there's no room under) with Highlight · Note · Copy · Look up · ⋯. The ⋯ key turns it into the rest of the actions (Select, Wikipedia, Translate, Search, Share, and what plugins add: Pin page, Hardcover, QR code…). It keeps clear of the handles at the ends of the selection, and stays on top of them, so its keys always answer, also after dragging a handle. A tap outside closes it and the selection. Settings → Reading → Compact selection menu (off: KOReader's menu).
+
 ## 1.20.1
 
 - Fixed a freeze in a book after selecting text. The handles at the ends of a selection treated a quick flick or a tap on a knob as a knob still held, and kept the whole screen for it, so nothing else answered (easily hit after a selection across pages). Now any way a touch ends lets go, and a knob that's somehow left "held" is let go after 3 seconds.

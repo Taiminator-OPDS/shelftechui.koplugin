@@ -298,6 +298,17 @@ function M.close()
     end
 end
 
+--- Is `pos` on (or within reach of) one of the handles shown?
+function M.knobAt(pos)
+    if not (live and live.knobs and pos) then return false end
+    local g = S(22)
+    for _i, which in ipairs{ "start", "end" } do
+        local k = live.knobs[which]
+        if k and pos.x >= k.x - g and pos.x < k.x + k.w + g and pos.y >= k.y - g and pos.y < k.y + k.h + g then return true end
+    end
+    return false
+end
+
 --- Shows the handles under KOReader's highlight menu (`dialog`).
 function M.show(ui, dialog)
     M.close()

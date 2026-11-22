@@ -130,6 +130,8 @@ local function installReaderHooks()
     for _i, step in ipairs{
         { "PAGES not hooked to the skim bar", function() require("bos_nav").installSkim() end },
         { "pins badge not installed", function() require("bos_pins").install() end },
+        -- (the compact selection menu first: the handles wrap what it shows)
+        { "selection menu not installed", function() require("bos_hlmenu").install() end },
         { "highlight handles not installed", function() require("bos_handles").install() end },
         { "retro book search not installed", function() require("bos_search").install() end },
     } do
