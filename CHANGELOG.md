@@ -2,6 +2,10 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.22.1
+
+- Fixed the selection menu not answering (and a tap outside not closing it) while the handles kept working. With a plugin that keeps an invisible layer at the top of the screen (Bookends does), the handles were put over the menu instead of under it, and took every tap. They now always go just under the menu.
+
 ## 1.22.0
 
 - X-Ray, as on a Kindle, from the dictionary: look a word up and tap X-Ray for the book's people and places, the most mentioned first, each with a strip showing where in the book it appears. An entry has Wikidata's line on it, the start of its Wikipedia article and, when the book has a fan wiki, what that says (folded away: fan wikis spoil), then every passage it's in; tap one to go there (Back returns). Looking up a name opens its entry straight away. Spoiler-free is on: only passages up to where you are (⋯ to change it, download again or remove).

@@ -174,21 +174,26 @@ function Handles:extendTo(which, pos)
     if r then UIManager:setDirty(self, "fast", r) end
 end
 
---- On top of the menu while a knob is held; back under it after.
-function Handles:raise(up)
+--- Just under the menu (`up`: just over it, while a knob is held). Toasts
+--- that stay at the top of the stack (Bookends keeps one there) are left
+--- above: placing by the menu, not by the top.
+local function moveNear(self, up)
     local stack = UIManager._window_stack
     local mine
     for i, w in ipairs(stack) do if w.widget == self then mine = i break end end
     if not mine then return end
     local entry = table.remove(stack, mine)
-    if up then
-        table.insert(stack, entry)
-    else
-        local at = #stack + 1
-        for i, w in ipairs(stack) do if w.widget == self.dialog then at = i break end end
-        table.insert(stack, at, entry)
+    local at
+    for i, w in ipairs(stack) do if w.widget == self.dialog then at = up and (i + 1) or i break end end
+    if not at then
+        -- (no menu: under the toasts)
+        at = #stack + 1
+        while at > 1 and stack[at - 1].widget.toast do at = at - 1 end
     end
+    table.insert(stack, at, entry)
 end
+
+function Handles:raise(up) moveNear(self, up) end
 
 function Handles:onHandleGesture(which, ges)
     local ok, err = pcall(self.handleGesture, self, which, ges)
@@ -318,11 +323,8 @@ function M.show(ui, dialog)
     if not h.knobs then return end
     live = h
     -- under the menu: the menu keeps its taps; the knobs get the rest
-    local stack = UIManager._window_stack
     UIManager:show(h)
-    if dialog and stack and #stack >= 2 and stack[#stack].widget == h and stack[#stack - 1].widget == dialog then
-        stack[#stack], stack[#stack - 1] = stack[#stack - 1], stack[#stack]
-    end
+    moveNear(h, false)
     UIManager:setDirty(h, "ui", h:region())
 end
 
