@@ -2,6 +2,11 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.27.0
+
+- Hold the shelf's chip: a Series card switches the whole shelf between series grouped (a stack per series; box sets on spines) and one book at a time. The shelf behind changes as you tap.
+- Series one at a time: hold a series stack → This series → Grouped on this shelf, on or off (off opens it out into its books). Hold a book of a series → Edit → Group this series / Ungroup this series. With the shelf's grouping off, a series grouped this way is the only stack; with it on, a series ungrouped this way stays book by book. Each shelf keeps its own.
+
 ## 1.26.0
 
 - The store takes an author in the search: "dracula bram stoker", "Dracula by Bram Stoker" or "stoker dracula". When a library's own search finds few books for all of it, the title and the author are asked for on their own too, and only the books matching every word you typed are kept.

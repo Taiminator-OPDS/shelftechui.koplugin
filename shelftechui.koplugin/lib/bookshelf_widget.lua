@@ -3848,7 +3848,7 @@ function BookshelfWidget:_fetchChipItems(n, want_all)
             { kind = "opds", id = pay.server_key, feed_url = pay.feed_url },
             nil, nil, offset, LIMIT, fetch_opts)
     end
-    if tab and tab.series_boxes and not tip and not Repo.spine_light then
+    if tab and self:_groupsSeries(tab) and not tip and not Repo.spine_light then
         return self:_seriesGroupedPage(tab, offset, LIMIT)
     end
     if tab then
@@ -3862,6 +3862,55 @@ end
 -- total. The whole list is read once without covers (kept 20 s, so turning
 -- pages doesn't read it again), grouped in the chip's order (a series stands
 -- where its first book would), and only the page shown gets its covers.
+-- (ShelfTechUI) Series grouping on a shelf: the shelf's switch
+-- (tab.series_boxes), and single series set apart by hand: with grouping on,
+-- tab.series_apart[name] keeps that one book by book; with it off,
+-- tab.series_together[name] groups just that one.
+function BookshelfWidget:_groupsSeries(tab)
+    return tab and (tab.series_boxes or (type(tab.series_together) == "table" and next(tab.series_together) ~= nil)) and true or false
+end
+
+function BookshelfWidget:_seriesWant(tab)
+    if not tab then return nil end
+    if tab.series_boxes then
+        local apart = type(tab.series_apart) == "table" and tab.series_apart or {}
+        if next(apart) == nil then return nil end
+        return function(name) return not apart[name] end
+    end
+    local together = type(tab.series_together) == "table" and tab.series_together or {}
+    return function(name) return together[name] == true end
+end
+
+--- Is `name` shown as one stack on the shelf on screen?
+function BookshelfWidget:_seriesGrouped(name)
+    local tab = require("lib/bookshelf_tab_model").getById(self.chip)
+    if not (tab and name) then return false end
+    local want = self:_seriesWant(tab)
+    if tab.series_boxes then return not want or want(name) end
+    return want ~= nil and want(name) or false
+end
+
+--- Group (on) or ungroup one series on the shelf on screen.
+function BookshelfWidget:_setSeriesGrouped(name, on)
+    local TabModel = require("lib/bookshelf_tab_model")
+    local tabs = TabModel.load()
+    for _i, t in ipairs(tabs) do
+        if t.id == self.chip then
+            local key = t.series_boxes and "series_apart" or "series_together"
+            local value = (t.series_boxes and not on) or (not t.series_boxes and on)
+            t[key] = type(t[key]) == "table" and t[key] or {}
+            t[key][name] = value or nil
+            if next(t[key]) == nil then t[key] = nil end
+        end
+    end
+    TabModel.save(tabs)
+    self._series_group_cache = nil
+    self._spine_fetch_cache = nil
+    if Repo.invalidateBookCache then Repo.invalidateBookCache("group-one-series") end
+    self:_rebuild()
+    UIManager:setDirty(self, "ui")
+end
+
 function BookshelfWidget:_seriesGroupedPage(tab, offset, limit)
     local Boxes = require("lib/bookshelf_series_boxes")
     local key = tostring(self.chip)
@@ -3882,7 +3931,7 @@ function BookshelfWidget:_seriesGroupedPage(tab, offset, limit)
             if m and (m.series_name or m.series or m.authors or m.author) then return m end
             return Repo.buildBookMeta(fp, { want_cover = false }) or m
         end
-        items = Boxes.prepare(type(all) == "table" and all or {}, meta)
+        items = Boxes.prepare(type(all) == "table" and all or {}, meta, self:_seriesWant(tab))
         self._series_group_cache = { key = key, at = os.time(), items = items }
     end
     local ScaledCoverCache = require("lib/bookshelf_scaled_cover_cache")
@@ -7871,7 +7920,7 @@ function BookshelfWidget:_seriesBoxesEnabled()
     local tip = path[#path]
     -- Any stored value is on: true, or the "slipcase" / "covers" a test
     -- build stored while it had two styles.
-    return tab and tab.series_boxes and self:_isSpineMode()
+    return tab and self:_groupsSeries(tab) and self:_isSpineMode()
         and not (tab.source and tab.source.kind == "single_series")
         and not (tip and (tip.kind == "series" or tip.kind == "search" or tip.kind == "opds_nav"))
         and not self:_opdsEffectiveTab()
@@ -7879,7 +7928,8 @@ end
 
 function BookshelfWidget:_prepareSpineItems(items, total)
     if not self:_seriesBoxesEnabled() or (total and total > #items) then return items end
-    return require("lib/bookshelf_series_boxes").prepare(items, Repo.lightMetaFor)
+    local tab = require("lib/bookshelf_tab_model").getById(self.chip)
+    return require("lib/bookshelf_series_boxes").prepare(items, Repo.lightMetaFor, self:_seriesWant(tab))
 end
 
 -- _spineCachedFetch(n) — spine mode's page-turn fetch. The grid refetches
@@ -22933,6 +22983,25 @@ function BookshelfWidget:_buildBookEditTab(book, modal, avail_w, avail_h)
         { id = "select",  text = select_btn.text,  icon = "\xEE\xA0\xB8", callback = select_btn.callback },  -- checkbox-multiple-marked-outline
         { id = "refresh", text = refresh_btn.text, icon = "\xEE\xAD\x8F", callback = refresh_btn.callback }, -- refresh
     }
+    -- (ShelfTechUI) This book's series, as one stack on the shelf on screen
+    -- or book by book.
+    do
+        local sname = book.series_name or book.series
+        local tab = require("lib/bookshelf_tab_model").getById(bw.chip)
+        local plain_shelf = tab and not (tab.source and (tab.source.kind == "series" or tab.source.kind == "single_series"
+            or tab.source.kind == "opds")) and not require("lib/bookshelf_tab_model").isShelves(tab)
+        if type(sname) == "string" and sname:match("%S") and plain_shelf and not book.is_remote then
+            local grouped = bw:_seriesGrouped(sname)
+            tile_specs[#tile_specs + 1] = { id = "group_series",
+                text = grouped and _("Ungroup this series") or _("Group this series"),
+                icon = "\u{E97A}", -- format-list-numbers
+                callback = function()
+                    closeModal()
+                    bw:_setSeriesGrouped(sname, not grouped)
+                end }
+        end
+    end
+
     -- (ShelfTechUI) The book's details from Hardcover, signed in there.
     do
         local okH, HC = pcall(require, "bos_hardcover")
@@ -26081,6 +26150,18 @@ function BookshelfWidget:_openGroupMenu(group, kind)
         local tab = TabModel.getById(self.chip)
         local first = #blocks + 1
         local grouped_shelf = tab and not (tab.source and (tab.source.kind == "series" or tab.source.kind == "single_series"))
+        local series_name = group.series_name or source_id
+        if grouped_shelf and type(series_name) == "string" then
+            blocks[#blocks + 1] = { type = "heading", text = _("This series") }
+            blocks[#blocks + 1] = { type = "segmented", label = _("Grouped on this shelf"),
+                items = { { key = "on", label = _("On") }, { key = "off", label = _("Off") } },
+                active_func = function() return bw_ref:_seriesGrouped(series_name) and "on" or "off" end,
+                on_pick = function(key)
+                    bw_ref:_setSeriesGrouped(series_name, key == "on")
+                    -- (off: the stack opens out into its books on the shelf)
+                    if key == "off" then UIManager:close(dialog) elseif dialog then dialog:refresh() end
+                end }
+        end
         blocks[#blocks + 1] = { type = "heading", text = _("This shelf") }
         if grouped_shelf then
             blocks[#blocks + 1] = { type = "segmented", label = _("Group books in series"),

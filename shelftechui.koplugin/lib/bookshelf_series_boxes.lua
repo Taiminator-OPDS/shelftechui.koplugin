@@ -67,7 +67,9 @@ function M.onlyBook(books)
     return first
 end
 
-function M.prepare(items, light_meta)
+-- want(name) -> false keeps that series' books one by one (ShelfTechUI: a
+-- series grouped or not by hand); nil groups every series.
+function M.prepare(items, light_meta, want)
     local out, groups = {}, {}
     for _, item in ipairs(items or {}) do
         -- Native author/tag groups can contain only file identifiers. Resolve
@@ -85,10 +87,10 @@ function M.prepare(items, light_meta)
                 out[#out+1] = only or M.box(item.books, name(item), item, light_meta)
             else
                 local group = copy(item)
-                group._series_display_books = M.prepare(item.books, light_meta)
+                group._series_display_books = M.prepare(item.books, light_meta, want)
                 out[#out+1] = group
             end
-        elseif item.filepath and name(item) and not item.is_remote then
+        elseif item.filepath and name(item) and not item.is_remote and (not want or want(name(item))) then
             -- Distinct physical sections may contain different editions of
             -- a series: do not silently merge those collections together.
             local key = (item.shelf_section_path or "") .. "\0" .. name(item)

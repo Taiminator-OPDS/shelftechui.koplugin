@@ -1599,6 +1599,30 @@ function Editor:editTab(tab_id, opts)
             }
         end
 
+        -- (ShelfTechUI) A series' books as one stack (a box set on spines), or
+        -- one by one: a tap switches, the shelf behind follows. Single series
+        -- can be set apart by holding a stack or a book of it.
+        if not (is_opds_src or is_paged_src) and not TabModel.isShelves(draft)
+                and not (draft.source and (draft.source.kind == "series" or draft.source.kind == "single_series")) then
+            look_row[#look_row + 1] = {
+                text_func = function()
+                    return draft.series_boxes and _("Series: grouped") or _("Series: one book at a time")
+                end,
+                icon = "\u{E97A}",   -- format-list-numbers (the Series source's)
+                callback = function()
+                    draft.series_boxes = (not draft.series_boxes) or nil
+                    -- (a series set apart by hand stays as it was set)
+                    commit()
+                    if opts.bw then
+                        opts.bw._series_group_cache = nil
+                        opts.bw._spine_fetch_cache = nil
+                    end
+                    settlePreview()
+                    rebuild()
+                end,
+            }
+        end
+
         -- Short values side by side (maintainer): View mode beside Source,
         -- then Filters (or what stands in their place) beside Sort, for a
         -- shorter page. View mode is always shelf_row's last card. A source
