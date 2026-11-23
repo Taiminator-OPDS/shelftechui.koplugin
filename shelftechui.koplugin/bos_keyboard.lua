@@ -141,11 +141,61 @@ local function patchKey(VirtualKey)
             UIManager:setDirty(nil, "ui", f.dimen)
         end
     end
+    -- Pressed at once: when the finger lands (a tap only comes once it's
+    -- lifted, and later still while double-taps are on), the key's pixels
+    -- turned over and shown in the screen's quickest mode, nothing redrawn.
+    VirtualKey.onTouchSelect = function(self)
+        if not M.enabled() or self._stui_down or not (self.flash_keyboard and not self.skiptap) then return false end
+        local f = self[1]
+        local d = f and f.dimen
+        if not (d and d.x and d.w and d.w > 0) then return false end
+        local ok = pcall(function()
+            local Screen = Device.screen
+            Screen.bb:invertRect(d.x, d.y, d.w, d.h)
+            UIManager:setDirty(nil, "fast", d)
+            UIManager:forceRePaint()
+        end)
+        if ok then
+            self._stui_down = true
+            -- (a touch that turns into no tap at all: a slide, a hold)
+            local key = self
+            UIManager:scheduleIn(1.5, function() key:stuiRelease() end)
+        end
+        return false
+    end
+    --- Back to the key as it is: drawn again (not turned over again: it may
+    --- have been redrawn meanwhile), quickly; the grey keys exactly once
+    --- typing pauses.
+    VirtualKey.stuiRelease = function(self)
+        if not self._stui_down then return end
+        self._stui_down = nil
+        local kb = self.keyboard
+        local f = self[1]
+        if not (kb and onScreen(kb) and f and f.dimen and f.dimen.x) then return end
+        UIManager:widgetRepaint(f, f.dimen.x, f.dimen.y)
+        UIManager:setDirty(nil, "fast", f.dimen)
+        if kb._stui_clean then UIManager:unschedule(kb._stui_clean) end
+        kb._stui_clean = function()
+            if onScreen(kb) and kb.dimen then UIManager:setDirty(kb, "ui", kb.dimen) end
+        end
+        UIManager:scheduleIn(0.9, kb._stui_clean)
+    end
+    local orig_hold = VirtualKey.onHoldSelect
+    VirtualKey.onHoldSelect = function(self, ...)
+        if self._stui_down then self:stuiRelease() end
+        return orig_hold(self, ...)
+    end
     local orig_tap = VirtualKey.onTapSelect
     VirtualKey.onTapSelect = function(self, skip_flash)
         if not M.enabled() then return orig_tap(self, skip_flash) end
         Device:performHapticFeedback("KEYBOARD_TAP")
         self.keyboard.ignore_first_hold_release = false
+        -- shown pressed since the finger landed: the letter, then the key back
+        if self._stui_down then
+            if self.callback then self.callback() end
+            self:stuiRelease()
+            return true
+        end
         local show = self.flash_keyboard and not skip_flash and not self.skiptap
         -- pressed: drawn, its refresh queued with the letter's (no waiting)
         if show then pcall(self.invert, self, true) end
@@ -210,6 +260,19 @@ function M.install()
                 local cls = key and getmetatable(key)
                 if cls and cls.onTapSelect then patchKey(cls) end
             end)
+            -- every key: told when a finger lands on it
+            if M.enabled() then
+                pcall(function()
+                    local GestureRange = require("ui/gesturerange")
+                    for _r, row in ipairs(self.layout or {}) do
+                        for _c, k in ipairs(row) do
+                            if type(k) == "table" and k.ges_events and not k.ges_events.TouchSelect then
+                                k.ges_events.TouchSelect = { GestureRange:new{ ges = "touch", range = function() return k.dimen end } }
+                            end
+                        end
+                    end
+                end)
+            end
             if kindle then
                 local ok, err = pcall(function()
                     for _r, row in ipairs(self.layout or {}) do

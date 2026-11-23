@@ -2,6 +2,12 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.28.0
+
+- The top panel's stars (Rating, interactive) are your Hardcover rating too: a tap there is sent to Hardcover for a book linked to it (now, or when next connected). A book not linked yet is linked first when Hardcover certainly has it. Beside your stars, Hardcover's readers' rating of the book, like "(4.4★)" (asked once a day).
+- The keyboard shows a key pressed the moment your finger lands on it, in the screen's quickest mode, instead of after the tap (which comes once the finger lifts, and later still with double-tap on). The letter is typed on the tap as before; the key goes back quickly, and the keyboard is drawn properly once you pause.
+- For finding stutters on waking: ShelfTechUI's slow-step recorder can be turned on with a file (koreader/settings/stui_perf); it writes to crash.log what took long and whose it was.
+
 ## 1.27.0
 
 - Hold the shelf's chip: a Series card switches the whole shelf between series grouped (a stack per series; box sets on spines) and one book at a time. The shelf behind changes as you tap.

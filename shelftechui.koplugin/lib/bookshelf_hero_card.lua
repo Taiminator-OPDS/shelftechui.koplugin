@@ -925,6 +925,30 @@ function HeroCard:_buildRightColumn(book, regions, state, dimen)
                     row[#row + 1] = HorizontalSpan:new{ width = gap }
                 end
             end
+            -- (ShelfTechUI) Beside your own stars: Hardcover's readers'
+            -- rating of the book, "(4.4★)", when it's linked there.
+            if not hardcover_mode and book.filepath then
+                local ok_r, hc_r = pcall(function()
+                    local fp = book.filepath
+                    return require("bos_hardcover").communityRating(fp, function()
+                        -- (it came, or changed: the top panel again)
+                        local UIM = require("ui/uimanager")
+                        UIM:nextTick(function()
+                            local bw = require("bos_shelf").shelfWidget()
+                            if bw and bw._rebuild then bw:_rebuild() UIM:setDirty(bw, "ui") end
+                        end)
+                    end)
+                end)
+                if ok_r and hc_r and hc_r > 0 then
+                    row[#row + 1] = HorizontalSpan:new{ width = gap * 2 }
+                    row[#row + 1] = TextWidget:new{
+                        text = string.format("(%.1f\u{2605})", hc_r),
+                        face = fontFace(nil, math.max(10, math.floor(star_size * 0.8 + 0.5))),
+                        bold = false,
+                        fgcolor = _ink(),
+                    }
+                end
+            end
             if hardcover_mode then
                 local reviews_count = tonumber(book.hardcover_reviews_count)
                 if reviews_count and reviews_count > 0 then

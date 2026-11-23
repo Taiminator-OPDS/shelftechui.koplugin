@@ -22376,6 +22376,13 @@ function BookshelfWidget:_setBookRating(book, new_rating, opts)
     -- Update the in-memory book record so the immediate rebuild reflects
     -- the new value without waiting for a fresh BIM read.
     book.rating = new_rating
+    -- (ShelfTechUI) And as your rating on Hardcover, for a book it has.
+    pcall(function()
+        local a = book.authors or book.author
+        if type(a) == "table" then a = a[1] end
+        if type(a) == "string" then a = a:gsub("\n.*", "") end
+        require("bos_hardcover").rating(book.filepath, new_rating, book.title, a)
+    end)
     -- Refresh the per-file progress cache (it caches rating alongside
     -- pct/status). Otherwise the next read would return the stale value.
     if Repo.invalidateProgressCache then

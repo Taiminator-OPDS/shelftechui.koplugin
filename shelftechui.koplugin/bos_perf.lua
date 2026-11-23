@@ -25,7 +25,7 @@ local logger = require("logger")
 
 local M = {}
 
-local THRESHOLD_MS = 80
+local THRESHOLD_MS = tonumber(os.getenv("STUI_PERF_MS") or "") or 80
 
 local function now()
     local ok, t = pcall(function() local TM = require("ui/time") return TM.to_ms(TM.now()) end)

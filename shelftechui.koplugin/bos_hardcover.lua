@@ -1310,6 +1310,27 @@ function M.flush()
         end)
     elseif job.kind == "progress" then
         M.sendProgress(job.file, job.value, function(ok) done(ok) end)
+    elseif job.kind == "rating" then
+        -- (a rating needs the book on one of your shelves: Reading, if it
+        -- isn't on one yet)
+        local function rate(entry_id)
+            M.rate(entry_id, job.value, link.id, function(entry)
+                if entry then
+                    local now = M.linkFor(job.file) or link
+                    now.rating = entry.rating
+                    M.setLink(job.file, now)
+                end
+                done(entry ~= nil)
+            end)
+        end
+        if link.entry then return rate(link.entry) end
+        M.setStatus(link.id, link.status or 2, function(entry)
+            if not entry then return done(false) end
+            local now = M.linkFor(job.file) or link
+            now.entry, now.status = entry.id, entry.status
+            M.setLink(job.file, now)
+            rate(entry.id)
+        end)
     else
         done(true)
     end
@@ -1323,6 +1344,52 @@ function M.status(file, status)
     if not link or link.status == status or link.removed then return end
     queue("status", file, status)
     M.flush()
+end
+
+--- Your rating of a book (1..5, or nil: none), as your rating on
+--- Hardcover, now or when next connected. A book not linked yet is linked
+--- first when Hardcover certainly has it (the same title and author).
+function M.rating(file, stars, title, author)
+    if not M.signedIn() then return end
+    local link = M.linkFor(file)
+    if link and link.removed then return end
+    if link then
+        queue("rating", file, tonumber(stars) or 0)
+        return M.flush()
+    end
+    if not (title and connected()) then return end
+    M.match(title, author or "", function(hb, sure)
+        if not (hb and sure) or M.linkFor(file) then return end
+        M.setLink(file, { id = hb.id, title = hb.title, author = hb.author, pages = hb.pages })
+        queue("rating", file, tonumber(stars) or 0)
+        M.flush()
+    end)
+end
+
+--- Hardcover's readers' rating of a linked book (kept a day), or nil; asks
+--- for it again in the background when it's older, done(rating) if it
+--- changed.
+local rating_asked = {}
+function M.communityRating(file, done)
+    local link = file and M.linkFor(file)
+    if not link then return nil end
+    local fresh = link.hc_rating_at and os.time() - link.hc_rating_at < 86400
+    if not fresh and not rating_asked[link.id] and M.signedIn() and connected() then
+        rating_asked[link.id] = true
+        call([[query ($id: Int!) { books_by_pk(id: $id) { rating ratings_count } }]], { id = link.id }, function(data)
+            rating_asked[link.id] = nil
+            local b = data and data.books_by_pk
+            if type(b) ~= "table" then return end
+            local now = M.linkFor(file)
+            if not now then return end
+            local r = tonumber(b.rating)
+            local changed = now.hc_rating ~= r
+            now.hc_rating, now.hc_rating_at = r, os.time()
+            M.setLink(file, now)
+            if changed and done then done(r) end
+        end)
+    end
+    return tonumber(link.hc_rating)
 end
 
 --- Where you are in a linked book (0..1), now or when next connected.
