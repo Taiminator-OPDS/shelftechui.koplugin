@@ -26047,6 +26047,60 @@ function BookshelfWidget:_openGroupMenu(group, kind)
     if #books == 2 then books[1].half, books[2].half = true, true end
     section(_("Books"), books)
 
+    -- (ShelfTechUI) On a series stack: this shelf's grouping, and how its
+    -- stacks look, right here.
+    if kind == "series" then
+        local TabModel = require("lib/bookshelf_tab_model")
+        local StackDisplay = require("lib/bookshelf_stack_display")
+        local function withTab(fn)
+            local tabs = TabModel.load()
+            for _i, t in ipairs(tabs) do
+                if t.id == bw_ref.chip then fn(t) end
+            end
+            TabModel.save(tabs)
+            bw_ref._series_group_cache = nil
+            bw_ref._spine_fetch_cache = nil
+            if Repo.invalidateBookCache then Repo.invalidateBookCache("group-series") end
+            bw_ref:_rebuild()
+            UIManager:setDirty(bw_ref, "ui")
+        end
+        local tab = TabModel.getById(self.chip)
+        local first = #blocks + 1
+        local grouped_shelf = tab and not (tab.source and (tab.source.kind == "series" or tab.source.kind == "single_series"))
+        blocks[#blocks + 1] = { type = "heading", text = _("This shelf") }
+        if grouped_shelf then
+            blocks[#blocks + 1] = { type = "segmented", label = _("Group books in series"),
+                items = { { key = "on", label = _("On") }, { key = "off", label = _("Off") } },
+                active_func = function()
+                    local t = TabModel.getById(bw_ref.chip)
+                    return (t and t.series_boxes) and "on" or "off"
+                end,
+                on_pick = function(key)
+                    withTab(function(t) t.series_boxes = (key == "on") or nil end)
+                    -- (off: this stack is gone from the shelf)
+                    if key == "off" then UIManager:close(dialog) elseif dialog then dialog:refresh() end
+                end }
+        end
+        local cur = StackDisplay.pinned and StackDisplay.pinned(tab and tab.group_display)
+            or (tab and tab.group_display) or StackDisplay.FOLLOW_DEFAULT
+        local looks = {}
+        for _i, o in ipairs(StackDisplay.CHIP_OPTIONS) do
+            local value = o.value
+            looks[#looks + 1] = { text = o.label_func(), on = value == cur, callback = function()
+                withTab(function(t) t.group_display = value end)
+                if dialog then UIManager:close(dialog) end
+                UIManager:nextTick(function() bw_ref:_openGroupMenu(group, kind) end)
+            end }
+        end
+        blocks[#blocks + 1] = { type = "hint", text = _("How the series stacks on this shelf look.") }
+        blocks[#blocks + 1] = { type = "chips", items = looks }
+        -- (first on the page: what a hold on a series stack is mostly for)
+        local mine = {}
+        for i = first, #blocks do mine[#mine + 1] = blocks[i] end
+        for i = #blocks, first, -1 do table.remove(blocks, i) end
+        for i = #mine, 1, -1 do table.insert(blocks, 1, mine[i]) end
+    end
+
     if kind == "series" and self:_isSpineMode() then
         local Binding = require("lib/bookshelf_book_binding")
         blocks[#blocks + 1] = { type = "heading", text = _("Spines") }

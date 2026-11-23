@@ -281,6 +281,18 @@ function Settings:showHome()
         UIManager:show(InfoMessage:new{ text = _("Settings aren't available here.") })
         return
     end
+    -- the app from the last time (closed less than 10 minutes ago): shown
+    -- again at once, on its front page, rather than built again
+    local kept = self._kept
+    self._kept = nil
+    if kept and kept.screen and os.time() - kept.at < 600 and not require("bos_settings_store").get("settings_open_at") then
+        local ok = pcall(function() kept.screen:reset() end)
+        if ok then
+            self.screen = kept.screen
+            UIManager:show(self.screen)
+            return
+        end
+    end
     local Screen = require("bos_settings_ui")
     self.screen = Screen:new{ plugin = self }
     UIManager:show(self.screen)

@@ -396,6 +396,17 @@ function HubScreen:back(no_close)
     end
 end
 
+--- Opened again (the app kept from the last time): the front page, the
+--- field empty.
+function HubScreen:reset()
+    pcall(function() self:hideKeyboard(true) end)
+    pcall(function() self:clearField() end)
+    self.stack = { self:rootLevel() }
+    self.plugin.screen = self
+    self.closed = nil
+    self:render()
+end
+
 --- Back to level `depth` (1: the front page).
 function HubScreen:popTo(depth)
     while #self.stack > depth do table.remove(self.stack) end
@@ -520,8 +531,9 @@ function HubScreen:activate(item)
     if not itemEnabled(item) then return end
 
     if item.tap_input or item.tap_input_func then
-        if not item.keep_menu_open then self:closeAll() end
+        local before = self:windows()
         self:onInput(item.tap_input or item.tap_input_func())
+        if not item.keep_menu_open then self:awayWhile(before) end
         return
     end
 
@@ -538,27 +550,103 @@ function HubScreen:activate(item)
 
     local callback = item.callback_func and item.callback_func() or item.callback
     if callback then
-        callback(self.ctx)
+        local before = self:windows()
+        self.in_row = true
+        local ok, err = pcall(callback, self.ctx)
+        self.in_row = nil
+        if not ok then logger.warn("ShelfTechUI: settings row:", err) end
         if item.checked or item.checked_func then
             if not (item.check_callback_updates_menu or item.check_callback_closes_menu) then
-                self:render()
+                if not self.closed then self:render() end
             end
         elseif not item.keep_menu_open then
-            self:closeAll()
+            self:awayWhile(before)
         end
     end
 end
 
+--- The windows on screen now (to tell which ones a row opens).
+function HubScreen:windows()
+    local set = {}
+    local st = UIManager._window_stack
+    for i, e in ipairs(st) do
+        set[e.widget] = true
+        -- (and what the app is open over: the book, home)
+        if e.widget == self then
+            for j = i - 1, 1, -1 do
+                if not st[j].widget.toast then set.__under = st[j].widget break end
+            end
+        end
+    end
+    return set
+end
+
+--- A row opened something (a plugin's settings, a dialog over the book):
+--- the app steps aside so the book or home shows under it, and comes back,
+--- where it was, once what the row opened has closed. Not when the row
+--- closed or replaced the book or home under the app (a book opened, Exit).
+function HubScreen:awayWhile(before)
+    -- (nothing opened, and the app's still up: it was a plain action)
+    if not self.closed then
+        local opened = false
+        for _i, e in ipairs(UIManager._window_stack) do
+            local w = e.widget
+            if not before[w] and w ~= self and not w.toast and not w.invisible then opened = true end
+        end
+        if not opened then
+            self:render()
+            return
+        end
+    end
+    local under = before.__under
+    self.stepping_aside = true
+    if not self.closed then self:closeAll() end
+    self.stepping_aside = nil
+    local plugin = self.plugin
+    local seen, quiet, looks = false, 0, 0
+    local function look()
+        looks = looks + 1
+        -- opened again some other way, or the book / home under it is gone
+        if plugin.screen and plugin.screen ~= self then return end
+        local alive = false
+        for _i, e in ipairs(UIManager._window_stack) do if e.widget == under then alive = true end end
+        if under and not alive then return end
+        local open = false
+        for _i, e in ipairs(UIManager._window_stack) do
+            local w = e.widget
+            if not before[w] and w ~= self and not w.toast and not w.invisible then
+                -- (a book opened, or home: the row went somewhere else for good)
+                if w.name == "ReaderUI" or w.file_chooser ~= nil or w.name == "bookshelf" then return end
+                open = true
+            end
+        end
+        if open then
+            seen, quiet = true, 0
+        else
+            quiet = quiet + 1
+        end
+        -- (a dialog can close and open the next one a moment later)
+        if quiet >= 2 then
+            UIManager:show(self)
+            return
+        end
+        UIManager:scheduleIn(seen and 0.4 or 0.25, look)
+    end
+    UIManager:scheduleIn(0.25, look)
+end
+
 function HubScreen:hold(item)
     if item.hold_input or item.hold_input_func then
-        if item.hold_keep_menu_open == false then self:closeAll() end
+        local before = self:windows()
         self:onInput(item.hold_input or item.hold_input_func())
+        if item.hold_keep_menu_open == false then self:awayWhile(before) end
         return
     end
     local hold_callback = item.hold_callback_func and item.hold_callback_func() or item.hold_callback
     if hold_callback then
-        if item.hold_keep_menu_open == false then self:closeAll() end
+        local before = self:windows()
         hold_callback(self.ctx, item)
+        if item.hold_keep_menu_open == false then self:awayWhile(before) end
         return
     end
     local help = item.help_text_func and item.help_text_func(self.ctx) or item.help_text
@@ -1323,7 +1411,13 @@ function HubScreen:onCloseWidget()
     if self._typed then UIManager:unschedule(self._typed) end
     pcall(function() self:hideKeyboard(true) end)
     if self.plugin and self.plugin.screen == self then self.plugin.screen = nil end
-    UIManager:setDirty(nil, "flashui")
+    -- (stepping aside for a row's window: no flash, it comes back)
+    if self.stepping_aside or self.in_row then
+        UIManager:setDirty(nil, "ui")
+    else
+        UIManager:setDirty(nil, "flashui")
+        if self.plugin then self.plugin._kept = { screen = self, at = os.time() } end
+    end
 end
 
 function HubScreen:onShow()

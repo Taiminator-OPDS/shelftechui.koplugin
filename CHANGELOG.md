@@ -2,6 +2,12 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.25.0
+
+- Settings comes back: a row that opens something of its own (a plugin's settings, a dialog, a page over the book) steps Settings aside so the book or home shows under it, and when that's closed, Settings is back where you were, on the same page. Actions with nothing to show leave Settings up. Opening a book or going home from a row still leaves Settings.
+- Settings opens faster the second time: closed less than 10 minutes ago, the same app is shown again on its front page instead of being built anew, and its search is ready at once. No flash when it steps aside.
+- Hold a series stack: "This shelf" comes first, with Group books in series (on or off, for the shelf you're on) and the look of the shelf's series stacks (Divider card, Ribbon, Book stack, Collage, Text, None, or the default).
+
 ## 1.24.0
 
 - X-Ray from the dictionary is a pop-up now: look up a name and tap X-Ray, and a card takes the dictionary's place with who it is, how often they're mentioned so far, where in the book (the strip), and the start of their Wikipedia article (or the passage they first appear in). Its keys: Passages (every passage, tap one to go there) and Everyone in X-Ray. A word that isn't a name says so. A tap outside closes it.
