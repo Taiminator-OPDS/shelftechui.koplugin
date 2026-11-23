@@ -15,7 +15,7 @@ marked, the year on one page (save it as a picture, or as your sleep
 screen), and sharing: a QR code for your phone, either the picture (served
 from this device on the Wi-Fi, bos_wrapped_share) or the year as text.
 Tap the right of the screen for the next card, the left to go back; swipe
-down or ✕ to close. Each card is one full refresh, so nothing of the
+down or ‹ (top left) to close; ⌂ goes home. Each card is one full refresh, so nothing of the
 last one stays behind.
 
 Numbers: bos_wrapped_data (on the device only; nothing is sent anywhere).
@@ -586,18 +586,24 @@ function Story:paintCard(bb, id, for_picture)
         end
     end
     y = y + S(16)
-    Look.label(bb, T(_("Wrapped · %1"), self.r.year), x, y, w, S(36), 11, { color = ink })
+    -- top left: ‹ back (out of Wrapped); top right: ⌂ home
+    Look.label(bb, (for_picture and "" or "\u{2039}  ") .. T(_("Wrapped · %1"), self.r.year), x, y, w, S(36), 11, { color = ink, keep_case = false })
     if not for_picture then
+        self:hit(Geom:new{ x = 0, y = 0, w = math.floor(W / 2), h = y + S(46) }, function() self:onClose() end)
         local kw = S(44)
-        local rect
+        local gs = S(20)
+        local G = require("bos_glyphs")
         if dark then
-            Look.label(bb, "✕", x + w - kw, y, kw, S(36), 16, { align = "center", color = WHITE })
-            rect = Geom:new{ x = x + w - kw - S(10), y = 0, w = kw + S(30), h = y + S(46) }
+            G.home(bb, x + w - kw + math.floor((kw - gs) / 2), y + math.floor((S(36) - gs) / 2), gs, WHITE)
         else
-            rect = Look.button(bb, x + w - kw, y, kw, S(36), "✕", { size = 14 })
-            rect = Geom:new{ x = rect.x - S(10), y = 0, w = rect.w + S(30), h = rect.y + rect.h + S(10) }
+            Look.button(bb, x + w - kw, y, kw, S(36), nil, { paint = function(b2, bx, by, bw, bh, ik)
+                G.home(b2, bx + math.floor((bw - gs) / 2), by + math.floor((bh - gs) / 2), gs, ik)
+            end })
         end
-        self:hit(rect, function() self:onClose() end)
+        self:hit(Geom:new{ x = x + w - kw - S(10), y = 0, w = kw + S(30), h = y + S(46) }, function()
+            self:onClose()
+            require("bos_shelf").home()
+        end)
     end
     y = y + S(46)
     local foot = for_picture and S(10) or S(34)

@@ -946,6 +946,42 @@ function M.book(id, cb)
 end
 
 --- This year's reading goal: { goal, progress, what } | false.
+--- A book's details, to put on a file: cb({ id, title, subtitle, authors =
+--- {…}, description, series, series_index, genres = {…}, year, pages, image }
+--- | nil, why). Series where Hardcover has one (asked apart: the book's
+--- details come even if that part is refused).
+function M.details(id, cb)
+    call("query { me { id } }", nil, cb, function(_data, token)
+        local d = graphql(token, [[query ($id: Int!) {
+          books_by_pk(id: $id) { id title subtitle description release_year pages cached_image cached_contributors cached_tags }
+        }]], { id = id })
+        local b = d and d.books_by_pk
+        if type(b) ~= "table" then return nil, "server" end
+        local out = { id = b.id, title = b.title, subtitle = b.subtitle, description = b.description,
+            year = b.release_year, pages = b.pages, image = imageUrl(b.cached_image), authors = {} }
+        for _i, c in ipairs(type(b.cached_contributors) == "table" and b.cached_contributors or {}) do
+            local n = type(c) == "table" and type(c.author) == "table" and c.author.name
+            if n and (c.contribution == nil or c.contribution == "" or c.contribution == "Author") then
+                out.authors[#out.authors + 1] = n
+            end
+        end
+        if #out.authors == 0 then
+            local a = authorOf(b.cached_contributors)
+            if a then out.authors = { a } end
+        end
+        out.genres = tagsOf(b.cached_tags, "Genre")
+        local sr = graphql(token, [[query ($id: Int!) {
+          book_series(where: {book_id: {_eq: $id}}, order_by: {position: asc_nulls_last}, limit: 1) { position series { name } }
+        }]], { id = id })
+        local s1 = sr and first(sr.book_series)
+        if s1 and type(s1.series) == "table" and s1.series.name then
+            out.series = s1.series.name
+            out.series_index = tonumber(s1.position)
+        end
+        return out
+    end)
+end
+
 function M.goal(cb)
     local hit = cached("goal", 1800)
     if hit ~= nil then return cb(hit) end

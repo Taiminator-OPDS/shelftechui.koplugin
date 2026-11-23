@@ -211,10 +211,39 @@ local function merge(session)
     session.books = ok and sorted or books
 end
 
+--- Other ways to ask for a title with its author in it ("dracula bram
+--- stoker", "stoker dracula", "Dracula by Bram Stoker"): the title alone and
+--- the author alone, the author at the end or at the start. What they
+--- bring back is still kept only if it matches every word typed (title and
+--- author together), so this only finds more, never less exact.
+function M.subQueries(query)
+    local q = tostring(query or ""):gsub("[,;]", " ")
+    local out, seen = {}, { [q:lower():gsub("%s+", " "):gsub("^ ", ""):gsub(" $", "")] = true }
+    local function add(t)
+        t = t:gsub("%s+", " "):gsub("^ ", ""):gsub(" $", "")
+        local k = t:lower()
+        if t ~= "" and not seen[k] then seen[k] = true out[#out + 1] = t end
+    end
+    local before, after = q:match("^(.-)%s+[Bb][Yy]%s+(.+)$")
+    if before then add(before) add(after) end
+    local w = {}
+    for x in q:gmatch("%S+") do if x:lower() ~= "by" then w[#w + 1] = x end end
+    local n = #w
+    if n >= 3 then
+        add(table.concat(w, " ", 1, n - 2))   -- the title, an author after it
+        add(table.concat(w, " ", n - 1, n))   -- that author
+        add(table.concat(w, " ", 3, n))       -- the title, an author before it
+    elseif n == 2 then
+        add(w[1]) add(w[2])
+    end
+    while #out > 3 do table.remove(out) end
+    return out
+end
+
 --- Ask every chosen library for `query` (page `page`); on_update(session)
 --- each time one answers. session: books (merged, best first), answered,
 --- total (libraries), errors, finished, has_next.
-function Search.start(query, page, filters, on_update)
+function Search.start(query, page, filters, on_update, exact)
     local P = Provider()
     local session = { query = query, page = page or 1, filters = filters, parts = {}, books = {}, errors = {},
         answered = 0, total = 0, jobs = {}, has_next = false }
@@ -239,7 +268,34 @@ function Search.start(query, page, filters, on_update)
     end
     for _i, id in ipairs(sources) do
         local job = Async.run(function()
-            return P:searchSource(id, query, page, filters)
+            local result, err = P:searchSource(id, query, page, filters)
+            -- none that match every word (a title and its author, typed
+            -- together, which a library's own search may not take): ask
+            -- for the title and the author on their own too
+            local long = 0
+            for w in tostring(query or ""):gmatch("[^%s,;]+") do if #w >= 3 and w:lower() ~= "the" then long = long + 1 end end
+            if not exact and (page or 1) == 1 and P.matchesQuery and long >= 2 then
+                local books = type(result) == "table" and result.books or {}
+                local good = 0
+                for _j, b in ipairs(books) do if P.matchesQuery(b, query) then good = good + 1 end end
+                if good == 0 then
+                    local have = {}
+                    for _j, b in ipairs(books) do have[(b.title or "") .. "\0" .. (b.author or "")] = true end
+                    for _k, sub in ipairs(M.subQueries(query)) do
+                        local ok2, r2 = pcall(P.searchSource, P, id, sub, 1, filters)
+                        for _j, b in ipairs(ok2 and type(r2) == "table" and r2.books or {}) do
+                            local k = (b.title or "") .. "\0" .. (b.author or "")
+                            if not have[k] and P.matchesQuery(b, query) then
+                                have[k] = true
+                                books[#books + 1] = b
+                            end
+                        end
+                    end
+                    if type(result) ~= "table" then result = { books = books } else result.books = books end
+                    err = (#books > 0) and nil or err
+                end
+            end
+            return result, err
         end, function(ok, result, err)
             if session.cancelled then return end
             session.answered = session.answered + 1
@@ -260,7 +316,7 @@ function Search.start(query, page, filters, on_update)
                 end
             end
             on_update(session)
-        end, 25)
+        end, 45)
         table.insert(session.jobs, job)
     end
     return session
@@ -443,10 +499,9 @@ function Store:init()
     local key_w = self.bar_h
     self.field_x = self.pad + key_w + S(10)
     self.field_w = W - self.pad - self.field_x - key_w - S(10) - Look.SHADOW_SMALL
-    -- opened by home's search field (from_search): it's a search screen
-    -- first, so Back from it is home, and the storefront has a key of its
-    -- own beside the field
-    if self.from_search then self.field_w = self.field_w - key_w - S(10) - Look.SHADOW_SMALL end
+    -- two keys beside the field: ☰ (the storefront, the store's settings)
+    -- and ⌂ home, at the top right as on every screen
+    self.field_w = self.field_w - key_w - S(10) - Look.SHADOW_SMALL
     self.input = InputText:new{
         text = "", hint = _("Search your books and the store"),
         -- (room on the right for the × that clears it)
@@ -878,6 +933,38 @@ function Store:askHardcover(v)
     end)
 end
 
+--- The same book on Hardcover: its page there (found when the book was
+--- opened, else looked up now by its title and author).
+function Store:openOnHardcover(v)
+    if v.hc then return require("bos_hardcover_ui").openBook(v.hc) end
+    local okH, HC = pcall(require, "bos_hardcover")
+    if not okH then return end
+    local b = v.book or {}
+    if not HC.connected() then
+        UIManager:show(InfoMessage:new{ text = _("Hardcover needs Wi-Fi."), timeout = 3 })
+        return
+    end
+    local author = tostring(b.author or ""):gsub("%s*[,;&].*$", "")
+    local msg = InfoMessage:new{ text = _("Looking for it on Hardcover…") }
+    UIManager:show(msg)
+    HC.match(b.title or "", author, function(hb)
+        UIManager:close(msg)
+        if self.closed then return end
+        if not hb then
+            UIManager:show(InfoMessage:new{ text = T(_("“%1” isn't on Hardcover."), b.title or ""), timeout = 4 })
+            return
+        end
+        HC.book(hb.id, function(full)
+            if full then
+                v.hc = v.hc or full
+                require("bos_hardcover_ui").openBook(full)
+            else
+                require("bos_hardcover_ui").openBook(hb)
+            end
+        end)
+    end)
+end
+
 --- The book's details and files, from its library.
 function Store:hydrate(v, book)
     v.state = "details"
@@ -974,6 +1061,7 @@ function Store:lookFor(v)
     end
     local all = {}   -- every match from every query so far, by key
     local function run(qi)
+        -- (exact: these queries are its own ways of asking already)
         v.session = Search.start(queries[qi], 1, self:filters{ sort = "" }, function(session)
             if self.closed or v.session ~= session then return end
             -- (the books that match, kept as they come: the title, and
@@ -1002,7 +1090,7 @@ function Store:lookFor(v)
                 end
             end
             if self:view() == v then self:redraw("ui") end
-        end)
+        end, true)
     end
     run(1)
 end
@@ -1194,20 +1282,17 @@ function Store:paintBar(bb)
         Look.label(bb, "\u{00D7}", cx, cy - S(1), d, d, 16, { align = "center", color = WHITE })
         self.clear_rect = Geom:new{ x = fx + fw - S(48), y = y - S(6), w = S(48) + S(6), h = h + S(12) }
     end
-    -- the key on the right: the store's settings
+    -- the keys on the right: ☰ (the storefront, settings), ⌂ home
     local kx = fx + fw + Look.SHADOW_SMALL + S(10)
-    if self.from_search then
-        -- the storefront's key (filled while it's the storefront you're on)
-        local at_home = self:view().kind == "home"
-        local rs = glyphKey(bb, kx, y, h, h, UI.GLYPH.cart, at_home)
-        if not at_home then
-            self:hit(Geom:new{ x = rs.x - S(4), y = 0, w = h + S(8), h = y + h + S(10) }, function() self:toStorefront() end)
-        end
-        kx = kx + h + Look.SHADOW_SMALL + S(10)
-    end
-    local rc = glyphKey(bb, kx, y, h, h, UI.GLYPH.cog)
-    self.cog_rect = Geom:new{ x = rc.x, y = rc.y, w = h, h = h }
-    self:hit(Geom:new{ x = rc.x - S(4), y = 0, w = W - rc.x + S(4), h = y + h + S(10) }, function() self:settings() end)
+    local rm = glyphKey(bb, kx, y, h, h, UI.GLYPH.bars)
+    self.cog_rect = Geom:new{ x = rm.x, y = rm.y, w = h, h = h }
+    self:hit(Geom:new{ x = rm.x - S(4), y = 0, w = h + S(8), h = y + h + S(10) }, function() self:settings() end)
+    kx = kx + h + Look.SHADOW_SMALL + S(10)
+    local rh = glyphKey(bb, kx, y, h, h, UI.GLYPH.home)
+    self:hit(Geom:new{ x = rh.x - S(4), y = 0, w = W - rh.x + S(4), h = y + h + S(10) }, function()
+        self:hideKeyboard()
+        require("bos_shelf").home()
+    end)
 end
 
 function Store:clear()
@@ -1225,14 +1310,19 @@ end
 
 function Store:settings()
     self:hideKeyboard()
-    local items = {
+    local items = {}
+    -- (the storefront: the store's first page, from a search)
+    if self:view().kind ~= "home" then
+        table.insert(items, { text = _("Storefront"), callback = function() self:toStorefront() end })
+    end
+    for _i, it in ipairs{
         { text = _("Libraries, formats and language"), callback = function()
             pcall(function()
                 require("bos_settings_store").set("settings_open_at", "stui_connect")
                 require("bos_settings").open()
             end)
         end },
-    }
+    } do table.insert(items, it) end
     table.insert(items, { text = _("Add a library by address…"), callback = function()
         M.addLibrary(function() if not self.closed then self:homeData() self:redraw("ui") end end)
     end })
@@ -1762,16 +1852,26 @@ function Store:paintBook(bb, v, bottom)
     local Online = require("bos_online")
     local want_item = v.pick or { key = "store:" .. tostring(b.id or b.title), title = b.title, author = b.author, online = true }
     local wl = Online.isWanted(want_item) and _("\u{2713} Want") or _("+ Want")
+    -- (signed in to Hardcover: a key for the same book there; the row is
+    -- in three then)
+    local okH, HC = pcall(require, "bos_hardcover")
+    local with_hc = okH and HC.signedIn and HC.signedIn() and b.title
+    if with_hc then half = math.floor((bw2 - 2 * sgap) / 3) end
     local rw = Look.button(bb, tx, sy, half - Look.SHADOW_SMALL, sh, wl, { size = 11 })
     self:hit(rw, function()
         Online.toggleWant(want_item)
         self:redraw("ui", rw)
     end)
+    if with_hc then
+        local hx = tx + 2 * (half + sgap)
+        local r = Look.button(bb, hx, sy, half - Look.SHADOW_SMALL, sh, _("Hardcover"), { size = 11, on = hc ~= nil })
+        self:hit(r, function() self:openOnHardcover(v) end)
+    end
     if v.state == "ready" and b.acquisitions and #b.acquisitions > 1 then
-        local r = Look.button(bb, tx + half + sgap, sy, half, sh, _("Formats") .. " \u{25BE}", { size = 11 })
+        local r = Look.button(bb, tx + half + sgap, sy, half - (with_hc and Look.SHADOW_SMALL or 0), sh, _("Formats") .. " \u{25BE}", { size = 11 })
         self:hit(r, function() self:otherFormats(v, r) end)
     elseif v.state == "missing" or v.state == "error" or v.state == "offline" then
-        local r = Look.button(bb, tx + half + sgap, sy, half, sh, v.state == "offline" and _("Try again") or _("Search"), { size = 11 })
+        local r = Look.button(bb, tx + half + sgap, sy, half - (with_hc and Look.SHADOW_SMALL or 0), sh, v.state == "offline" and _("Try again") or _("Search"), { size = 11 })
         self:hit(r, function()
             if v.state == "offline" or v.state == "error" then
                 if v.pick then v.state = "looking" self:lookFor(v) else self:hydrate(v, v.book) end

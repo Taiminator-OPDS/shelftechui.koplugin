@@ -23,6 +23,7 @@ local UIManager = require("ui/uimanager")
 local logger = require("logger")
 
 local Look = require("bos_look")
+local Glyphs = require("bos_glyphs")
 local Screen = Device.screen
 local BLACK, WHITE = Blitbuffer.COLOR_BLACK, Blitbuffer.COLOR_WHITE
 local S = Look.S
@@ -32,7 +33,8 @@ local Page = InputContainer:extend{
     covers_fullscreen = true,
     caption = "",
     draw = nil,       -- function(self, bb, y0, w)
-    on_more = nil,    -- function(self, rect): the ⋯ key (none without)
+    on_more = nil,    -- function(self, rect): the ☰ key (none without)
+    home = true,      -- the ⌂ key at the top right (false: pages of the book, X-Ray)
     on_swipe = nil,   -- function(self, "west"|"east")
     on_close = nil,
 }
@@ -65,15 +67,32 @@ function Page:paintTo(bb, x, y)
     local W, H = Screen:getWidth(), Screen:getHeight()
     self.hits = {}
     bb:paintRect(0, 0, W, H, WHITE)
-    -- ‹  ═══ [CAPTION] ═══  ⋯
+    -- ‹  ═══ [CAPTION] ═══  ☰ ⌂   (back at the left, home at the right; the
+    -- page's own menu beside home)
     local hh = Page.HEADER_H
     local kw = S(40)
     Look.label(bb, "\u{2039}", S(6), 0, kw, hh, 22, { align = "center" })
     self:hit(Geom:new{ x = 0, y = 0, w = kw + S(14), h = hh }, function(p) p:onClose() end)
     local rx = W - S(6) - kw
+    local left_of = rx
+    if self.home then
+        local gs = S(20)
+        Glyphs.home(bb, rx + math.floor((kw - gs) / 2), math.floor((hh - gs) / 2), gs, BLACK)
+        self:hit(Geom:new{ x = rx - S(2), y = 0, w = W - rx + S(2), h = hh }, function() require("bos_shelf").home() end)
+        if self.on_more then left_of = rx - kw - S(4) end
+    end
     if self.on_more then
-        Look.label(bb, "\u{22EF}", rx, 0, kw, hh, 18, { align = "center" })
-        self:hit(Geom:new{ x = rx - S(8), y = 0, w = kw + S(14), h = hh }, function(p) p.on_more(p, Geom:new{ x = rx, y = 0, w = kw, h = hh }) end)
+        local mx = left_of
+        if self.home then
+            -- ☰: three bars
+            local bw, bt = S(18), math.max(2, S(2))
+            local bx, by = mx + math.floor((kw - bw) / 2), math.floor(hh / 2) - S(6)
+            for k = 0, 2 do bb:paintRect(bx, by + k * S(6), bw, bt, BLACK) end
+        else
+            Look.label(bb, "\u{22EF}", mx, 0, kw, hh, 18, { align = "center" })
+        end
+        self:hit(Geom:new{ x = mx - S(6), y = 0, w = kw + S(8), h = hh }, function(p) p.on_more(p, Geom:new{ x = mx, y = 0, w = kw, h = hh }) end)
+        rx = mx
     end
     local sx0, sx1 = S(6) + kw + S(8), rx - S(8)
     Look.stripes(bb, sx0, math.floor((hh - S(20)) / 2), sx1 - sx0, S(20))

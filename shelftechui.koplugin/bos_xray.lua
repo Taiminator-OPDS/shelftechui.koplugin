@@ -630,7 +630,7 @@ function M.choose(ui, query, note, finish)
             UIManager:show(dlg)
             dlg:onShowKeyboard()
         end
-        page = Page:new{ caption = _("X-Ray"),
+        page = Page:new{ caption = _("X-Ray"), home = false,
             draw = function(self, bb, y, w)
                 local x = self.pad
                 local H = Screen:getHeight()
@@ -732,7 +732,7 @@ end
 function M.openEntry(ui, e, kind)
     local o = { pg = 1, fan_shown = false }
     local page
-    page = Page:new{ caption = _("X-Ray"),
+    page = Page:new{ caption = _("X-Ray"), home = false,
         draw = function(self, bb, y, w)
             local x = self.pad
             local H = Screen:getHeight()
@@ -847,7 +847,7 @@ end
 function M.openList(ui, data)
     local o = { tab = #data.people > 0 and "people" or "places", pg = {} }
     local list
-    list = Page:new{ caption = _("X-Ray"),
+    list = Page:new{ caption = _("X-Ray"), home = false,
         draw = function(self, bb, y, w)
             local x = self.pad
             local H = Screen:getHeight()

@@ -22933,6 +22933,20 @@ function BookshelfWidget:_buildBookEditTab(book, modal, avail_w, avail_h)
         { id = "select",  text = select_btn.text,  icon = "\xEE\xA0\xB8", callback = select_btn.callback },  -- checkbox-multiple-marked-outline
         { id = "refresh", text = refresh_btn.text, icon = "\xEE\xAD\x8F", callback = refresh_btn.callback }, -- refresh
     }
+    -- (ShelfTechUI) The book's details from Hardcover, signed in there.
+    do
+        local okH, HC = pcall(require, "bos_hardcover")
+        if okH and HC.signedIn() and book.filepath and not book.is_remote then
+            tile_specs[#tile_specs + 1] = { id = "hardcover_details", text = _("Details from Hardcover"),
+                icon = "\xEE\xB4\xBE", -- cloud-sync
+                callback = function()
+                    closeModal()
+                    local a = book.authors or book.author
+                    if type(a) == "table" then a = a[1] end
+                    require("bos_hardcover_meta").run(book.filepath, { title = book.title, author = a })
+                end }
+        end
+    end
     -- A record from a device library (Kindle #355, Kobo) is not a file the user
     -- put on the device: its path is the reader's own library entry, or a
     -- generated conversion of one. Delete would really remove the book from the

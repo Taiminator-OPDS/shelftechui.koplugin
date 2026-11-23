@@ -2,6 +2,13 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.26.0
+
+- The store takes an author in the search: "dracula bram stoker", "Dracula by Bram Stoker" or "stoker dracula". When a library's own search finds few books for all of it, the title and the author are asked for on their own too, and only the books matching every word you typed are kept.
+- A Hardcover key on a store book's page (signed in to Hardcover): it opens the same book on Hardcover (filled when it's already been found there).
+- Hold a book → Edit → Details from Hardcover: the book's title, authors, series and number, description and genres from Hardcover (and its cover, if you like), kept as KOReader's own custom details of the book (Book information shows them; Reset there takes them off). The book it's linked to on Hardcover, else Hardcover's closest match, shown first to say yes to.
+- Every full-screen page ShelfTechUI has (Hardcover, the store, Settings, Transfer, Insights, the lists of home, Wrapped…) goes back at the top left and home at the top right. A page's own menu is the ☰ beside home (the store's settings and its storefront are in it). Pages of the book you're reading (Contents, Notebook, Pages, X-Ray) keep their own.
+
 ## 1.25.0
 
 - Settings comes back: a row that opens something of its own (a plugin's settings, a dialog, a page over the book) steps Settings aside so the book or home shows under it, and when that's closed, Settings is back where you were, on the same page. Actions with nothing to show leave Settings up. Opening a book or going home from a row still leaves Settings.

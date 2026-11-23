@@ -10,6 +10,8 @@ message in the middle of the screen.
   M.back(ui)       from a book to home: put the shelf on the stack first so
                    the book is parked, not closed; when it must close, it
                    closes without the message
+  M.home()         the home key on our screens: every window over home or
+                   the book closes, and from a book, home (the book parked)
   M.open(file)     open a book through Bookshelf when its shelf is up, so
                    going back parks it (and reopening the parked book is
                    instant)
@@ -113,6 +115,27 @@ function M.back(ui)
         if not ok then logger.warn("ShelfTechUI: couldn't lay the shelf under the book:", err) end
     end
     quietly(function() ui:handleEvent(Event:new("ToggleBookshelf")) end)
+end
+
+--- Home, from any of our screens: the windows over home (or over the book)
+--- close, then from a book, home.
+function M.home()
+    local stack = UIManager._window_stack or {}
+    local over = {}
+    local base
+    for i = #stack, 1, -1 do
+        local w = stack[i].widget
+        -- (home's shelf, the file browser, the book: where this stops)
+        if type(w) == "table" and (type(w._launchReader) == "function" or w.file_chooser ~= nil or w.name == "ReaderUI") then
+            base = w
+            break
+        end
+        if not w.toast then over[#over + 1] = w end
+    end
+    for _i, w in ipairs(over) do pcall(function() UIManager:close(w) end) end
+    if base and base.name == "ReaderUI" then
+        UIManager:nextTick(function() M.back(base) end)
+    end
 end
 
 function M.open(file)

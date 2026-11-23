@@ -54,6 +54,7 @@ local QUERY_STOP_WORDS = {
     a = true, al = true, de = true, del = true, el = true, en = true,
     la = true, las = true, los = true, un = true, una = true, y = true,
     the = true, of = true, ["and"] = true, le = true, les = true, des = true, et = true,
+    by = true, par = true, por = true, von = true,
 }
 
 local function queryWords(value)

@@ -1274,15 +1274,21 @@ end
 function HubScreen:pageHeader(w)
     local vg = VerticalGroup:new{ align = "left" }
     local lvl = self.stack[#self.stack]
-    local close = self:key("\u{00D7}", function() self:closeAll() end, { face = bface(22), bold = bflag(22) })
+    -- top right: home (the app closes, and a book under it too)
+    local close = self:key(UI.GLYPH.home, function()
+        self:closeAll()
+        require("bos_shelf").home()
+    end, { glyph = true })
     local function spread(left, right)
         local lw = left:getSize().w
         local rw = right:getSize().w
         return HorizontalGroup:new{ align = "center", left, HorizontalSpan:new{ width = math.max(0, w - lw - rw) }, right }
     end
     if lvl.kind == "root" then
-        local title = TextWidget:new{ text = _("Settings"), face = bface(30), bold = bflag(30), max_width = w - S(80) }
-        table.insert(vg, spread(title, close))
+        -- top left: back (out of the app, to where it was opened)
+        local back = self:key("\u{2039}", function() self:closeAll() end, { plain = true, face = bface(26), bold = bflag(26) })
+        local title = TextWidget:new{ text = _("Settings"), face = bface(30), bold = bflag(30), max_width = w - S(140) }
+        table.insert(vg, spread(HorizontalGroup:new{ align = "center", back, HorizontalSpan:new{ width = S(6) }, title }, close))
         table.insert(vg, VerticalSpan:new{ width = S(12) })
         table.insert(vg, self:searchField(w))
         table.insert(vg, VerticalSpan:new{ width = S(4) })
