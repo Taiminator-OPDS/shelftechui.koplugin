@@ -31,6 +31,10 @@ MAP FOR MAKING CHANGES
     * Internet Archive ....................... bookdrop/bookdrop_provider.lua
     * libraries you add from ☰ ............... bos_store_libs.lua (OPDS or website)
                                                bos_store_web.lua (websites)
+    * their order (Library priority) ......... CatalogProvider.order() / setOrder
+                                               (bookdrop_catalog_provider.lua, YOUR
+                                               ORDER); the Settings page is
+                                               M.priorityItems here
     * which are ticked ....................... Store:filters() here, which starts
                                                from Bookdrop's saved filters and adds
                                                yours (Libs.withLibraries)
@@ -295,7 +299,8 @@ end
 ---
 --- How it goes:
 ---   1. Cache hit (same searchKey, under 10 minutes old): answered at once.
----   2. The libraries asked: every id in CatalogProvider.source_order that
+---   2. The libraries asked: every id in CatalogProvider.order() (your
+---      library priority, else the default) that
 ---      is ticked in filters.libraries (bos_store_libs adds your own ids to
 ---      that list). None ticked: an error line, nothing asked.
 ---   3. Each library gets its own Async job (a forked process, so a slow
@@ -329,8 +334,9 @@ function Search.start(query, page, filters, on_update, exact)
         UIManager:nextTick(function() if not session.cancelled then on_update(session) end end)
         return session
     end
+    -- (in your library order: three are asked at once, the first ones first)
     local sources = {}
-    for _i, id in ipairs(P.source_order) do
+    for _i, id in ipairs(P.order and P.order() or P.source_order) do
         if type(filters.libraries) ~= "table" or filters.libraries[id] == true then sources[#sources + 1] = id end
     end
     session.total = #sources
@@ -521,6 +527,7 @@ M.SORTS = {
     { key = "large", text = _("Largest file first") },
     { key = "newest", text = _("Newest") },
     { key = "oldest", text = _("Oldest") },
+    { key = "library", text = _("By library") },
 }
 
 --- The sort kept from before, as it is now ("title" is Best match's).
@@ -586,6 +593,9 @@ end
 ---              count) have one; every other book goes after them, still in
 ---              Best match order. Because it's stable, equal counts keep
 ---              their Best match order too.
+---   "library"  by your library order (Settings → Connect → Store → Library
+---              priority), each library's books by best match: done in
+---              CatalogProvider:sortBooks.
 ---   "small" / "large"  by file size (sizeBytes: the library's size, or
 ---              read from text like "1.2 MB"); unknown sizes last.
 --- Note "popular" ignores relevance once counts exist: a hugely downloaded
@@ -2378,6 +2388,63 @@ function M.confirmRemove(id, name, done)
             if done then done() end
         end,
     })
+end
+
+--- Settings → Connect → Store → Library priority: every library, built-in
+--- and yours, in order. Tap one: move it to the top, up, down or to the
+--- bottom (and back to the list, in its new place). The order is saved by
+--- CatalogProvider.setOrder; what it changes is described at YOUR ORDER in
+--- bookdrop/bookdrop_catalog_provider.lua.
+function M.priorityItems()
+    local P = Provider()
+    pcall(function() require("bos_store_libs").register() end)
+    local order = P.order()
+    local ticked = {}
+    pcall(function() ticked = Store.filters(M.current or {}).libraries or {} end)
+    local function move(id, where)
+        local list = P.order()
+        local at
+        for i, x in ipairs(list) do if x == id then at = i end end
+        if not at then return end
+        table.remove(list, at)
+        local to = where == "top" and 1 or where == "bottom" and #list + 1
+            or where == "up" and math.max(1, at - 1) or math.min(#list + 1, at + 1)
+        table.insert(list, to, id)
+        P.setOrder(list)
+        -- (a cached search would come back in the old order)
+        Search.cache, Search.order = {}, {}
+    end
+    local items = {}
+    for i, id in ipairs(order) do
+        local name = P.sources[id] or id
+        local function go(where)
+            return function(tm)
+                move(id, where)
+                pcall(function() tm:backToUpperMenu() end)
+            end
+        end
+        table.insert(items, {
+            text = T("%1. %2", i, name),
+            mandatory = ticked[id] ~= true and _("Not asked") or nil,
+            sub_item_table = {
+                { text = _("Move to the top"), enabled = i > 1, callback = go("top") },
+                { text = _("Move up"), enabled = i > 1, callback = go("up") },
+                { text = _("Move down"), enabled = i < #order, callback = go("down") },
+                { text = _("Move to the bottom"), enabled = i < #order, callback = go("bottom") },
+            },
+        })
+    end
+    table.insert(items, {
+        text = _("Back to the default order"),
+        enabled = P.hasOwnOrder(),
+        keep_menu_open = true,
+        callback = function(tm)
+            P.setOrder(nil)
+            Search.cache, Search.order = {}, {}
+            UIManager:show(InfoMessage:new{ text = _("Default order."), timeout = 2 })
+        end,
+    })
+    return items
 end
 
 --- Settings → Connect → Store → Your libraries.

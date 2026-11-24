@@ -23,8 +23,8 @@ TO ADD A BUILT-IN LIBRARY
   1. Give it an id and add the id to `source_order` (that is also the order
      the libraries are listed in the store's Libraries... menu).
   2. Give it a display name in `sources`.
-  3. Give it a rank in `SOURCE_PRIORITY` (only a small tie-breaker, see
-     relevance()).
+  3. Give it a rank in `SOURCE_PRIORITY` (its place in the default
+     order; see YOUR ORDER below).
   4. If it has an OPDS feed, add its URLs to OPDS.sources in
      bookdrop_opds_provider.lua and you are done: searchSource sends any id
      it doesn't know to the OPDS provider. If it has no feed, write a
@@ -58,12 +58,10 @@ CatalogProvider.sources = {
     zlibrary = "Z-Library",
 }
 
--- Which library wins when two books are otherwise equally good matches: a
--- lower number is better. relevance() gives each book 60 - 8 * priority
--- points (Standard Ebooks 52, Gutenberg 44, ... Z-Library 12). That is tiny
--- next to the title/author points (hundreds), so it only orders books that
--- matched the query equally well, e.g. the same title found in two places.
--- A library missing from this table counts as 6.
+-- The DEFAULT library order, used until you choose your own in Settings →
+-- Connect → Store → Library priority: a lower number comes first; equal
+-- numbers keep their source_order order; a library missing here (your own
+-- added ones) counts as 6. See YOUR ORDER below for what the order does.
 local SOURCE_PRIORITY = {
     standardebooks = 3,
     gutenberg = 2,
@@ -72,6 +70,63 @@ local SOURCE_PRIORITY = {
     internet_archive = 2,
     zlibrary = 1,
 }
+
+-- YOUR ORDER (Settings → Connect → Store → Library priority).
+-- Saved in ShelfTechUI's settings as "store_library_order", a list of
+-- library ids, most wanted first. The order is used three ways:
+--   * the order libraries are asked in (Search.start in bos_store.lua): only
+--     three are asked at once, so the first ones answer first;
+--   * a tie-breaker in Best match (relevance(): books that match equally
+--     well are listed by library);
+--   * the "By library" sort: every book of the first library, then the
+--     next's... (each library's books by best match).
+-- Once you've chosen an order, Internet Archive goes where you put it (by
+-- default it is always listed last) and Z-Library's Best match bonus is
+-- dropped: your order decides.
+-- Libraries not in the saved list (one added since) go after it, in the
+-- default order.
+CatalogProvider.ORDER_KEY = "store_library_order"
+
+local function savedOrder()
+    local ok, list = pcall(function() return require("bos_settings_store").get(CatalogProvider.ORDER_KEY) end)
+    return ok and type(list) == "table" and #list > 0 and list or nil
+end
+
+--- True when you've chosen an order (else the defaults apply).
+function CatalogProvider.hasOwnOrder() return savedOrder() ~= nil end
+
+--- Every library id (built-in and yours, after bos_store_libs.register),
+--- in your order, else the default one.
+function CatalogProvider.order()
+    local known, out, placed = {}, {}, {}
+    for _, id in ipairs(CatalogProvider.source_order) do known[id] = true end
+    for _, id in ipairs(savedOrder() or {}) do
+        if known[id] and not placed[id] then placed[id] = true out[#out + 1] = id end
+    end
+    local rest = {}
+    for i, id in ipairs(CatalogProvider.source_order) do
+        if not placed[id] then rest[#rest + 1] = { id = id, i = i } end
+    end
+    table.sort(rest, function(a, b)
+        local pa, pb = SOURCE_PRIORITY[a.id] or 6, SOURCE_PRIORITY[b.id] or 6
+        if pa ~= pb then return pa < pb end
+        return a.i < b.i
+    end)
+    for _, r in ipairs(rest) do out[#out + 1] = r.id end
+    return out
+end
+
+--- Save `ids` as your order (nil: back to the default).
+function CatalogProvider.setOrder(ids)
+    pcall(function() require("bos_settings_store").set(CatalogProvider.ORDER_KEY, ids) end)
+end
+
+-- Each library's place in the order (1 = first), worked out once per sort.
+local function ranks()
+    local r = {}
+    for i, id in ipairs(CatalogProvider.order()) do r[id] = i end
+    return r
+end
 
 -- normalize("Les Misérables, Tome I") -> "les miserables tome i"
 -- Strips Spanish/French/Portuguese accents, lowercases, turns every run of
@@ -216,8 +271,10 @@ end
 
 -- THE "BEST MATCH" SCORE. Higher is better. Points add up:
 --
---   library rank (SOURCE_PRIORITY)          60 - 8 x priority   (12..52)
---   Z-Library ticked and this is from it    +48
+--   library's place in the order            60 - step x place (step 8, less
+--                                           with many libraries, so it stays
+--                                           under 100: a tie-breaker only)
+--   Z-Library ticked and this is from it    +48 (default order only)
 --   TITLE (only the first that applies):
 --     title is exactly the query            +1200
 --     title starts with the query           +1000   "Dracula's Guest"
@@ -234,13 +291,17 @@ end
 -- shelf), only the library rank counts and the library's own order is kept.
 -- To make authors weigh more than titles, raise the AUTHOR numbers above
 -- the TITLE ones; keep gaps of 100+ so the library rank stays a tie-breaker.
-local function relevance(book, query, filters)
+local function relevance(book, query, filters, rank, own)
     local phrase = normalize(query)
     local title, author = normalize(book.title), normalize(book.author)
     local combined = title .. " " .. author .. " " .. normalize(book.subjects)
     local tokens = queryWords(query)
-    local score = 60 - 8 * (SOURCE_PRIORITY[book.provider] or 6)
-    if filters and filters.libraries and filters.libraries.zlibrary
+    rank = rank or {}
+    local n = 0
+    for _ in pairs(rank) do n = n + 1 end
+    local step = n > 1 and math.min(8, 96 / (n - 1)) or 8
+    local score = 60 - step * ((rank[book.provider] or (n + 1)) - 1)
+    if not own and filters and filters.libraries and filters.libraries.zlibrary
         and book.provider == "zlibrary" then
         score = score + 48
     end
@@ -264,27 +325,37 @@ end
 
 -- Orders `books` in place (and returns them). `sort` is the store's sort id
 -- (see M.SORTS in bos_store.lua). The comparison, key by key:
---   1. Internet Archive books always go after everyone else's, whatever the
---      sort: its scans are often poor, so the cleaner editions come first.
---      Delete that block to mix them in.
---   2. "newest"/"oldest": by publication year; books with no year go last.
+--   1. With the default order, Internet Archive books always go after
+--      everyone else's, whatever the sort (its scans are often poor, so the
+--      cleaner editions come first). With your own order it goes where you
+--      put it.
+--   2. "library" (By library): by the library's place in the order.
+--      "newest"/"oldest": by publication year; books with no year go last.
 --   3. relevance() score, highest first (this is "Best match").
 --   4. title A-Z, then the order the libraries sent them (so equal books
 --      never jump around between redraws).
 -- The other sorts (Most popular, file size) are applied afterwards in
 -- bos_store.lua's M.sortBooks, on top of this order.
 function CatalogProvider:sortBooks(books, query, sort, filters)
+    local rank, own = ranks(), CatalogProvider.hasOwnOrder()
+    local last = 1e6
     for position, book in ipairs(books or {}) do
         book._catalog_position = position
-        book._catalog_relevance = relevance(book, query, filters)
+        book._catalog_rank = rank[book.provider] or last
+        book._catalog_relevance = relevance(book, query, filters, rank, own)
         book._catalog_title = normalize(book.title)
         book._catalog_year = publicationYear(book)
     end
     table.sort(books, function(left, right)
-        local left_is_archive = left.provider == "internet_archive"
-        local right_is_archive = right.provider == "internet_archive"
-        if left_is_archive ~= right_is_archive then
-            return not left_is_archive
+        if not own then
+            local left_is_archive = left.provider == "internet_archive"
+            local right_is_archive = right.provider == "internet_archive"
+            if left_is_archive ~= right_is_archive then
+                return not left_is_archive
+            end
+        end
+        if sort == "library" and left._catalog_rank ~= right._catalog_rank then
+            return left._catalog_rank < right._catalog_rank
         end
         if (sort == "newest" or sort == "oldest")
             and left._catalog_year ~= right._catalog_year then
@@ -303,6 +374,7 @@ function CatalogProvider:sortBooks(books, query, sort, filters)
     end)
     for _, book in ipairs(books or {}) do
         book._catalog_position = nil
+        book._catalog_rank = nil
         book._catalog_relevance = nil
         book._catalog_title = nil
         book._catalog_year = nil

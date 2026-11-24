@@ -1024,6 +1024,17 @@ function Page.sections(plugin)
                     end,
                     sub_item_table_func = function() return require("bos_store").libraryItems() end,
                 })
+                -- the order they're asked in and listed by
+                table.insert(connect.items, {
+                    text = _("Library priority"),
+                    description = _("Your libraries in order, built-in and added. The first ones are asked first, win ties in Best match, and come first in the By library sort. Tap a library to move it."),
+                    mandatory_func = function()
+                        local P = require("bookdrop_catalog_provider")
+                        local first = P.order()[1]
+                        return P.hasOwnOrder() and first and (P.sources[first] or first) or _("Default")
+                    end,
+                    sub_item_table_func = function() return require("bos_store").priorityItems() end,
+                })
             end
         end
         if bd and bd.openManga then
