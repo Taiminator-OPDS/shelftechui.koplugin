@@ -65,6 +65,10 @@ OPDS.sources = {
     },
 }
 
+-- The file types this provider understands, in the order a book's
+-- downloads are listed (the first is offered as the main Download button).
+-- Reorder to prefer another format; add a type here, in FORMAT_LABELS and
+-- in extensionFromLink() to support a new one.
 local FORMAT_ORDER = { "epub", "azw3", "mobi", "pdf", "djvu", "cbz", "txt" }
 local FORMAT_LABELS = {
     epub = "EPUB", azw3 = "AZW3", mobi = "MOBI", pdf = "PDF",
@@ -90,6 +94,9 @@ local function decodeEntities(value)
     end)
 end
 
+-- A small XML reader (KOReader's luxl): the feed as a tree of
+-- { name, attributes, children, text } nodes. children()/child()/nodeText()
+-- below walk it.
 local function parseXml(xml)
     xml = tostring(xml or "")
         :gsub("<%?xml.-%?>", "")
@@ -155,6 +162,9 @@ local function nodeText(node)
     return cleaned
 end
 
+-- One HTTP GET, returning the body or nil, why. Refuses answers over
+-- max_response_bytes (6 MB) so a huge page can't run the Kindle out of
+-- memory. Also used for Gutendex's JSON (M.gutenbergCounts in bos_store).
 local function requestPayload(request_url, accept)
     local chunks, received, too_large = {}, 0, false
     local sink = function(chunk)
@@ -199,6 +209,8 @@ local function requestXml(request_url)
     return document
 end
 
+-- A short id for a book from its feed id ("gutenberg-123456789"), used as
+-- its cover's file name and to spot the same book twice.
 local function stableId(source_id, raw_id)
     local hash = 5381
     for character_number = 1, #raw_id do
@@ -213,6 +225,8 @@ local function absolute(base_url, href)
     return resolved:gsub("^http://gallica%.bnf%.fr", "https://gallica.bnf.fr")
 end
 
+-- Which file type a download link is, from its MIME type, then the end of
+-- its address, then its title. nil = not a type we offer (skipped).
 local function extensionFromLink(link)
     local mime = tostring(link.attributes.type or ""):lower()
     local href = tostring(link.attributes.href or ""):lower():gsub("[?#].*$", "")
@@ -229,6 +243,9 @@ local function extensionFromLink(link)
     return nil
 end
 
+-- When a feed lists several files of one type (Gutenberg's "EPUB3",
+-- "EPUB (no images)", ...), the highest score wins: recommended, then
+-- EPUB3, then with images.
 local function acquisitionScore(link, extension)
     local title = tostring(link.attributes.title or ""):lower()
     local score = 1
@@ -246,6 +263,8 @@ local function acquisitionAllowed(extension, formats)
     return formats[extension] == true
 end
 
+-- A book's downloads: its rel="...acquisition" links, one per file type
+-- (the best by acquisitionScore), in FORMAT_ORDER.
 local function collectAcquisitions(entry, base_url, formats)
     local selected = {}
     for _, link in ipairs(children(entry, "link")) do
@@ -303,6 +322,8 @@ local function entryCategories(entry)
     return table.concat(categories, " · ")
 end
 
+-- Guesses Fiction / Non-fiction / Comic / Magazine from a book's subjects,
+-- for the storefront's category shelves (matchesContent drops the rest).
 local function contentType(subjects)
     local value = tostring(subjects or ""):lower()
     if value:find("comic", 1, true) then return "Comic" end
@@ -336,6 +357,13 @@ local function normalizedLanguage(language)
     return first and (LANGUAGE_ALIASES[first] or first) or nil
 end
 
+-- ONE FEED ENTRY -> ONE STORE BOOK. Reads the title, id, authors,
+-- description, cover (thumbnail, else full image), subjects, language, year
+-- and downloads. Returns nil (skipped) when it has no title/id, no download
+-- and no detail page, a language other than the one filtered for, no file
+-- of a ticked type, or the wrong content type for a category shelf.
+-- Gutenberg's search feed has no downloads: its detail_url is kept and
+-- hydrate() reads the files when the book is opened.
 local function entryToBook(entry, base_url, source_id, source, filters)
     local title = nodeText(child(entry, "title"))
     local raw_id = nodeText(child(entry, "id", "dc:identifier", "dcterms:identifier"))
@@ -424,6 +452,8 @@ local function entryToBook(entry, base_url, source_id, source, filters)
     return matchesContent(book, filters and filters.content) and book or nil
 end
 
+-- A whole feed -> books, total count, and the next page's address
+-- (rel="next"), if any.
 local function feedInfo(document, request_url, source_id, source, filters)
     local books = {}
     for _, entry in ipairs(children(document, "entry")) do
@@ -716,6 +746,9 @@ function OPDS:searchSource(source_id, query, page, filters)
     }
 end
 
+-- When a book is opened: if it has no downloads yet, its detail feed is
+-- read and the best file of each type is kept, along with anything the
+-- search result left out (description, cover...).
 function OPDS:hydrate(book)
     if not book then return nil, "Book is missing" end
     if book.acquisitions and #book.acquisitions > 0 then return book end

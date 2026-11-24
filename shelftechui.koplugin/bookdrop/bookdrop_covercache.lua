@@ -1,3 +1,24 @@
+--[[
+THE STORE'S COVER CACHE
+
+Covers of store books are saved in koreader/settings/bookdrop_covers/ as
+<book id>.jpg or .png, so a list you've seen before draws at once and
+without Wi-Fi. (Your own books' covers are KOReader's, not these.)
+
+  CoverCache:get(book)                 the saved cover's path, or nil
+  CoverCache:fetch(book)               download it (blocking: background only)
+  CoverCache:prefetchInBackground(books, limit)
+                                       download up to `limit` missing covers in
+                                       a separate process (only one at a time:
+                                       starting another stops the last)
+  CoverCache:isPrefetching()           is that process still running
+  CoverCache:clear()                   delete them all (Settings → Store →
+                                       Clear the store's covers)
+
+Limits: covers over max_bytes (1.5 MB) are refused; past max_entries files
+the oldest are deleted (prune). Raise max_entries to keep more covers.
+--]]
+
 local DataStorage = require("datastorage")
 local ffiutil = require("ffi/util")
 local http = require("socket.http")
@@ -17,6 +38,8 @@ local function ensure_directory()
     end
 end
 
+-- jpg/png from the file's first bytes (servers often say the wrong type);
+-- anything else isn't kept.
 local function image_extension(data)
     if data:sub(1, 3) == "\255\216\255" then return "jpg" end
     if data:sub(1, 8) == "\137PNG\r\n\26\n" then return "png" end
@@ -39,6 +62,7 @@ function CoverCache:get(book)
     end
 end
 
+-- Keeps the newest max_entries files, deleting the oldest (by date written).
 function CoverCache:prune()
     ensure_directory()
     local files = {}
@@ -60,6 +84,9 @@ function CoverCache:prune()
     end
 end
 
+-- Downloads book.cover_url (or book.cover_fallback_url if that fails),
+-- https only. Written as .part and renamed, so a broken download never
+-- shows as a cover. Internet Archive's generic "no cover" logo is skipped.
 function CoverCache:fetch(book)
     local cached = self:get(book)
     if cached then return cached end
@@ -120,18 +147,6 @@ function CoverCache:fetch(book)
         end
     end
     return nil
-end
-
-function CoverCache:prefetch(books, limit)
-    local fetched = 0
-    limit = limit or 4
-    for _, book in ipairs(books) do
-        if book.cover_url and self:fetch(book) then
-            fetched = fetched + 1
-            if fetched >= limit then break end
-        end
-    end
-    return fetched
 end
 
 function CoverCache:prefetchInBackground(books, limit)

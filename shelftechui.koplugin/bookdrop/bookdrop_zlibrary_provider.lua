@@ -12,7 +12,21 @@
 --
 -- Requires a Z-Library account: searching works signed out, but downloading
 -- (and therefore hydrate, which resolves the download link) needs a session.
--- Credentials and the base URL live in Bookdrop's own settings file.
+-- The base URL and the session (email, user id, user key) live in
+-- koreader/settings/bookdrop_zlibrary.lua. The password is sent once to
+-- sign in and never kept.
+--
+-- How a Z-Library search goes:
+--   search()  POST /eapi/book/search with the query, page, language, formats
+--             and sort (the maps below translate the store's filter values)
+--             -> bookFromApi() turns each result into a store book (id,
+--             hash, title, author, cover, size, year...)
+--   hydrate() when a book is opened: GET /eapi/book/<id>/<hash> for details
+--   resolveDownload() at download time: GET /eapi/book/<id>/<hash>/file for
+--             a fresh signed link (they expire), used by Bookdrop's
+--             startBookDownload with getDownloadHeaders()
+-- Every request tries the base URL you set, then the SEED_URLS in turn
+-- (requestWithSeedFallback), and remembers the first that answers.
 
 local DataStorage = require("datastorage")
 local LuaSettings = require("luasettings")
@@ -70,9 +84,9 @@ local FORMAT_MAP = {
 }
 
 -- Bookdrop sort -> Z-Library order key (bestmatch / date / titleA / year).
+-- (Any other store sort asks for "bestmatch"; the store re-sorts anyway.)
 local SORT_MAP = {
     [""] = "bestmatch",
-    title = "titleA",
     newest = "date",
     oldest = "year",
 }
@@ -136,7 +150,6 @@ end
 function ZlibraryProvider.getCredentials()
     return {
         email = settings():readSetting(SETTINGS_EMAIL_KEY),
-        password = settings():readSetting(SETTINGS_PASSWORD_KEY),
         user_id = settings():readSetting(SETTINGS_USER_ID_KEY),
         user_key = settings():readSetting(SETTINGS_USER_KEY_KEY),
     }
@@ -148,10 +161,12 @@ function ZlibraryProvider.isSignedIn()
         and credentials.user_key ~= nil and credentials.user_key ~= ""
 end
 
-function ZlibraryProvider.saveCredentials(email, password, user_id, user_key)
+-- The session after signing in. (A password kept by an older version is
+-- deleted here: nothing needs it once the session exists.)
+function ZlibraryProvider.saveCredentials(email, user_id, user_key)
     local storage = settings()
     storage:saveSetting(SETTINGS_EMAIL_KEY, email)
-    storage:saveSetting(SETTINGS_PASSWORD_KEY, password)
+    storage:delSetting(SETTINGS_PASSWORD_KEY)
     storage:saveSetting(SETTINGS_USER_ID_KEY, user_id)
     storage:saveSetting(SETTINGS_USER_KEY_KEY, user_key)
     storage:flush()
@@ -160,7 +175,7 @@ end
 function ZlibraryProvider.signOut()
     local storage = settings()
     storage:saveSetting(SETTINGS_EMAIL_KEY, nil)
-    storage:saveSetting(SETTINGS_PASSWORD_KEY, nil)
+    storage:delSetting(SETTINGS_PASSWORD_KEY)
     storage:saveSetting(SETTINGS_USER_ID_KEY, nil)
     storage:saveSetting(SETTINGS_USER_KEY_KEY, nil)
     storage:flush()
@@ -386,6 +401,8 @@ end
 -- ---------------------------------------------------------------- api
 
 -- Signs in and stores the session. Returns true, or nil, err.
+-- Signs in (POST /eapi/user/login) and saves the session it returns.
+-- Returns true, or nil and Z-Library's own error message.
 function ZlibraryProvider.login(email, password)
     local body_parts = {}
     for key, value in pairs({ email = email or "", password = password or "" }) do
@@ -413,7 +430,7 @@ function ZlibraryProvider.login(email, password)
     if user_id == "" or user_key == "" then
         return nil, "Credentials rejected or invalid response"
     end
-    ZlibraryProvider.saveCredentials(email, password, user_id, user_key)
+    ZlibraryProvider.saveCredentials(email, user_id, user_key)
     return true
 end
 
@@ -469,6 +486,8 @@ end
 
 -- Bookdrop provider interface: search(query, page, filters) ->
 -- { books, total, page, has_previous, has_next } or nil, err.
+-- One page of search results: { books, total, has_next } or nil, why.
+-- Works signed out; signed in, the session is sent too.
 function ZlibraryProvider:search(query, page, filters)
     filters = filters or {}
     local current_page = math.max(1, tonumber(page) or 1)
@@ -533,6 +552,8 @@ end
 -- Resolve the short-lived signed file URL immediately before transfer, as the
 -- upstream plugin does. Resolving it while opening the details screen leaves a
 -- link that may be stale by the time the user taps Download.
+-- A fresh download link for `book`, as an acquisition { url, extension,
+-- referer, ... }. Needs a session.
 function ZlibraryProvider.resolveDownload(book)
     if not book or not book.provider_id or not book.hash then
         return nil, "Book identifiers missing"
@@ -568,6 +589,8 @@ end
 
 -- Bookdrop provider interface: hydrate(book) -> enriched book (or nil, err).
 -- Resolves the download link, which requires a signed-in session.
+-- A book's details (description, formats, cover) when it's opened. Needs a
+-- session.
 function ZlibraryProvider:hydrate(book)
     if not book or not book.provider_id or not book.hash then
         return nil, "Book identifiers missing"

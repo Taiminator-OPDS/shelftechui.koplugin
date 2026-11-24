@@ -1,3 +1,46 @@
+--[[
+BOOKDROP: the engine under ShelfTechUI's store
+==============================================
+
+Bookdrop was a separate KOReader plugin (a book store). ShelfTechUI bundles it
+here and replaced its screens with its own (bos_store.lua); what's left in
+this folder is the machinery the store runs on:
+
+  bookdrop_catalog_provider.lua   the list of libraries, the match filter and
+                                  the Best match ranking; sends each search
+                                  to the right provider below
+  bookdrop_opds_provider.lua      Gutenberg, Standard Ebooks, textos.info,
+                                  Gallica (and any OPDS feed): reads their
+                                  catalogue feeds
+  bookdrop_provider.lua           Internet Archive (its JSON search API)
+  bookdrop_zlibrary_provider.lua  Z-Library (needs your own account)
+  bookdrop_covercache.lua         covers saved on the device
+  bookdrop_curated_home.lua       the storefront's built-in shelves
+                                  (the covers are in assets/covers)
+  manga_downloader.lua            fetches the manga reader's helper program
+  manga/                          the RakuYomi manga plugin, bundled
+  main.lua (this file)            the plugin itself: your filter choices,
+                                  downloading a book, covers on screen, the
+                                  store's rows in Settings, starting Manga
+
+How it's loaded: ShelfTechUI's main.lua starts this as a KOReader plugin
+(Bookdrop:init below runs once for the file browser and once for the reader).
+The store finds the running instance through bos_online.bookdrop()
+(FileManager.instance.bookdrop or ReaderUI.instance.bookdrop) and calls:
+  getFilters()                 which libraries/formats/language are chosen
+  loadCoversProgressively()    covers for a list of results
+  destinationFor()/startBookDownload()   saving a book
+  rememberBook()               "Recently viewed" on the storefront
+  openManga()                  ☰ → Manga
+  settingsItems()              Settings → Connect → Store
+
+Settings are kept in koreader/settings/bookdrop.lua (key "filters",
+"recent_books"). The store's sort is NOT kept here: it's ShelfTechUI's
+"store_sort" (bos_store.lua, M.SORTS).
+
+Licence: AGPL-3.0 (see NOTICE and LICENSE-AGPL-3.0 in this folder).
+--]]
+
 local CoverCache = require("bookdrop_covercache")
 local ConfirmBox = require("ui/widget/confirmbox")
 local DataStorage = require("datastorage")
@@ -5,11 +48,10 @@ local Dispatcher = require("dispatcher")
 local Device = require("device")
 local InfoMessage = require("ui/widget/infomessage")
 local InputDialog = require("ui/widget/inputdialog")
-local Language = require("ui/language")
 local LuaSettings = require("luasettings")
-local NetworkMgr = require("ui/network/manager")
 local Zlibrary = require("bookdrop_zlibrary_provider")
 local Trapper = require("ui/trapper")
+local logger = require("logger")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local _ = require("gettext")
@@ -21,18 +63,21 @@ local function showKeyboard(dialog)
     dialog.skip_first_show_keyboard = nil
     dialog:onShowKeyboard()
 end
-local CHECKED = "✓"
-local UNCHECKED = "□"
 
-local content_options = {
-    { "", "All content" }, { "book_fiction", "Fiction" },
-    { "book_nonfiction", "Non-fiction" },
-    { "book_comic", "Comics" }, { "magazine", "Magazines" },
-}
+-- THE CHOICES OFFERED IN SETTINGS → CONNECT → STORE.
+-- Each option is { value saved, label shown }. The order is the menu's.
+
+-- File types offered for download. A book with none of the ticked types is
+-- hidden. To offer another type, add it here AND to the providers' format
+-- tables (FORMAT_ORDER in bookdrop_opds_provider.lua / bookdrop_provider.lua).
 local format_options = {
     { "epub", "EPUB" }, { "pdf", "PDF" }, { "mobi", "MOBI" },
     { "djvu", "DJVU" }, { "cbz", "CBZ" }, { "txt", "TXT" },
 }
+-- The built-in libraries you can tick. Keep this in step with
+-- CatalogProvider.source_order (bookdrop_catalog_provider.lua): a library
+-- missing here can't be ticked in Settings. (The store's ☰ → Libraries...
+-- menu reads that list directly, plus your own added libraries.)
 local library_options = {
     { "gutenberg", "Project Gutenberg" },
     { "standardebooks", "Standard Ebooks" },
@@ -41,36 +86,25 @@ local library_options = {
     { "internet_archive", "Internet Archive" },
     { "zlibrary", "Z-Library" },
 }
+-- Book languages. "" = any. Libraries that know a book's language use it;
+-- the OPDS ones fall back to their default_language.
 local language_options = {
     { "", "All languages" }, { "en", "English" }, { "es", "Spanish" },
     { "fr", "French" }, { "de", "German" }, { "ru", "Russian" },
     { "pt", "Portuguese" }, { "it", "Italian" }, { "zh", "Chinese" },
     { "ja", "Japanese" },
 }
-local sort_options = {
-    { "", "Best match" }, { "title", "Title A–Z" },
-    { "newest", "Newest publication" }, { "oldest", "Oldest publication" },
-}
-local ui_language_options = {
-    { "C", "English" },
-    { "es", "Español" },
-    { "fr", "Français" },
-    { "de", "Deutsch" },
-    { "it_IT", "Italiano" },
-    { "pt_PT", "Português" },
-    { "pt_BR", "Português do Brasil" },
-    { "ru", "Русский" },
-    { "zh_CN", "简体中文" },
-    { "zh_TW", "中文（台灣）" },
-    { "ja", "日本語" },
-}
-local valid_sorts = { title = true, newest = true, oldest = true }
+-- Content types the storefront's category shelves ask for (Fiction,
+-- Comics...). Anything else found in old settings is dropped.
 local valid_contents = {
     book_fiction = true, book_nonfiction = true, book_comic = true, magazine = true,
 }
+-- A file this big gets a "may take several minutes" warning before download.
 local LARGE_DOWNLOAD_BYTES = 50 * 1024 * 1024
 local MACOS_DOWNLOAD_TOTAL_TIMEOUT = 15 * 60
 
+-- Runs when KOReader starts the file browser or opens a book. The two
+-- one-time blocks clean up settings left by older Bookdrop versions.
 function Bookdrop:init()
     self.settings = LuaSettings:open(DataStorage:getSettingsDir() .. "/bookdrop.lua")
     if not self.settings:readSetting("isolated_shelf_filters_v1", false) then
@@ -178,6 +212,10 @@ function Bookdrop:loadBundledManga()
     return instance
 end
 
+-- ☰ → Manga in the store. The manga reader needs a helper program
+-- (manga/server, built for each kind of device, ~25 MB) that isn't shipped
+-- in the zip: if it's missing or for another device, it's offered for
+-- download (manga_downloader.lua) and the manga library opens afterwards.
 function Bookdrop:openManga()
     local manga = self.manga_plugin
     if not (manga and manga.openLibraryView) then
@@ -282,12 +320,14 @@ function Bookdrop:_startMangaDownload(manga)
     end)
 end
 
+-- "Bookdrop" as a gesture/shortcut action (Settings → Gestures): opens the store.
 function Bookdrop:onDispatcherRegisterActions()
     Dispatcher:registerAction("bookdrop_show", {
         category = "none", event = "ShowBookdrop", title = _("Bookdrop"), filemanager = true,
     })
 end
 
+-- KOReader's own top menu in the file browser: "Bookdrop store".
 function Bookdrop:addToMainMenu(menu_items)
     if not self.ui.document then
         menu_items.bookdrop = {
@@ -300,6 +340,16 @@ end
 
 function Bookdrop:onShowBookdrop() self:showStoreHome() end
 
+-- YOUR FILTER CHOICES, as every store search starts from them:
+--   formats    { epub = true, pdf = true, ... }   ticked file types
+--   libraries  { gutenberg = true, ... }          ticked built-in libraries
+--   language   "en" / "fr" / ... or nil (any)
+--   content    set only by category shelves, for that shelf
+-- First use: every format and every library but Z-Library (which needs an
+-- account). Old settings are repaired on the way (a single "extension"
+-- becomes formats; ManyBooks, a library that was removed, is dropped; an old
+-- Bookdrop sort moves over to the store's sort). Returns the live table:
+-- copy it before changing it for one search (Store:filters does).
 function Bookdrop:getFilters()
     local filters = self.settings:readSetting("filters", {})
     local changed = false
@@ -333,7 +383,13 @@ function Bookdrop:getFilters()
         filters.libraries.manybooks = nil
         changed = true
     end
-    if filters.sort and not valid_sorts[filters.sort] then
+    if filters.sort ~= nil then
+        -- (Bookdrop's own sort, from before the store had one: kept as the
+        -- store's if that hasn't been chosen yet)
+        local Store = require("bos_settings_store")
+        if (filters.sort == "newest" or filters.sort == "oldest") and Store.get("store_sort") == nil then
+            Store.set("store_sort", filters.sort)
+        end
         filters.sort = nil
         changed = true
     end
@@ -348,6 +404,7 @@ function Bookdrop:getFilters()
     return filters
 end
 
+-- Set one filter ("language", ...); "" clears it.
 function Bookdrop:setFilter(key, value)
     local filters = self:getFilters()
     filters[key] = value ~= "" and value or nil
@@ -355,6 +412,8 @@ function Bookdrop:setFilter(key, value)
     self.settings:flush()
 end
 
+-- Settings → "Reset the store's choices": every format, every library but
+-- Z-Library, any language (the same as on first use).
 function Bookdrop:resetFilters()
     local formats = {}
     for option_number, option in ipairs(format_options) do
@@ -364,6 +423,7 @@ function Bookdrop:resetFilters()
     for option_number, option in ipairs(library_options) do
         libraries[option[1]] = true
     end
+    libraries.zlibrary = nil
     self.settings:saveSetting("filters", { formats = formats, libraries = libraries })
     self.settings:flush()
     self:refreshSettingsMenu()
@@ -375,6 +435,8 @@ local function selectedOptionLabel(options, value)
     end
 end
 
+-- Tick/untick a format or a library. The last one ticked can't be
+-- unticked (a search with none would find nothing).
 function Bookdrop:toggleFormat(format)
     local filters = self:getFilters()
     if filters.formats[format] then
@@ -415,6 +477,11 @@ function Bookdrop:toggleLibrary(library)
     self:refreshSettingsMenu()
 end
 
+-- Covers for a list of results. Covers already saved show at once; the
+-- first `limit` missing ones are downloaded by a background process
+-- (CoverCache:prefetchInBackground), and every 0.5 s the list is checked
+-- for new ones and widget:refreshCovers() redraws them. Stops when the
+-- screen closes (widget._bookdrop_closed) or all are in.
 function Bookdrop:loadCoversProgressively(books, widget, limit)
     -- what's already on disk shows at once; only the rest is fetched (in a
     -- background process), and the screen redraws just its page as covers land
@@ -455,7 +522,10 @@ local function safeFilename(value)
     return value ~= "" and value or "book"
 end
 
---- Where a book's file goes (and is, once downloaded).
+--- Where a book's file goes (and is, once downloaded):
+--- "<folder>/<Title> - <Author>.<ext>". The folder is the first that's set
+--- of: KOReader's download folder, home folder, last folder opened, the
+--- device's home. Characters a file name can't hold become "-".
 function Bookdrop:destinationFor(book, acquisition)
     local download_dir = G_reader_settings:readSetting("download_dir")
         or G_reader_settings:readSetting("home_dir")
@@ -467,6 +537,9 @@ function Bookdrop:destinationFor(book, acquisition)
         .. " - " .. safeFilename(book.author) .. "." .. extension
 end
 
+-- Asks "Download X?" (with a warning for big files) then downloads.
+-- Already there: says where instead. (The store mostly calls
+-- startBookDownload directly, having asked in its own way.)
 function Bookdrop:downloadBook(book, acquisition)
     if not acquisition or not acquisition.url then
         UIManager:show(InfoMessage:new{ text = _("No downloadable file is available.") })
@@ -500,6 +573,20 @@ function Bookdrop:downloadBook(book, acquisition)
     })
 end
 
+-- DOWNLOADING A BOOK. Steps:
+--   1. Written to "<destination>.part" first, renamed when complete, so a
+--      half-downloaded book never appears in your library.
+--   2. Runs in a separate process with a "Tap to pause or cancel" message
+--      (Trapper:dismissableRunInSubprocess), so the screen stays responsive.
+--      (On the macOS emulator it runs in-process; see below.)
+--   3. Z-Library: a fresh download link is fetched first (theirs expire).
+--   4. The answer is checked: HTTP 200, not an HTML page (a sign-in page
+--      instead of the book), not empty, MD5 matching when the library gave
+--      one.
+--   5. Done: the file browser refreshes and self.on_downloaded(path, book)
+--      is called (the store uses it to offer "Read now"); otherwise a
+--      "Downloaded to" message.
+-- Errors come back as one readable line ("the download timed out...").
 function Bookdrop:startBookDownload(book, acquisition, destination)
     local part_path = destination .. ".part"
     os.remove(part_path)
@@ -642,7 +729,10 @@ function Bookdrop:startBookDownload(book, acquisition, destination)
     end)
 end
 
-function Bookdrop:showZlibraryBaseUrlDialog(home)
+-- Z-LIBRARY ACCOUNT (Settings → Connect → Store → Z-Library). The address
+-- of your Z-Library domain, then email, then password; the sign-in itself
+-- is Zlibrary.login (bookdrop_zlibrary_provider.lua).
+function Bookdrop:showZlibraryBaseUrlDialog()
     local dialog
     dialog = InputDialog:new{
         title = _("Z-Library base URL"),
@@ -659,7 +749,6 @@ function Bookdrop:showZlibraryBaseUrlDialog(home)
                 UIManager:show(InfoMessage:new{
                     text = ok and _("Base URL saved.") or (err or _("Invalid base URL.")),
                 })
-                if home then home:showSettings(self:settingsDropdownEntries(home)) end
             end },
         }},
     }
@@ -667,7 +756,7 @@ function Bookdrop:showZlibraryBaseUrlDialog(home)
     showKeyboard(dialog)
 end
 
-function Bookdrop:showZlibrarySignInDialog(home)
+function Bookdrop:showZlibrarySignInDialog()
     local dialog
     dialog = InputDialog:new{
         title = _("Z-Library email"),
@@ -680,7 +769,7 @@ function Bookdrop:showZlibrarySignInDialog(home)
             { text = _("Next"), is_enter_default = true, callback = function()
                 local email = dialog:getInputText()
                 UIManager:close(dialog)
-                self:showZlibraryPasswordDialog(home, email)
+                self:showZlibraryPasswordDialog(email)
             end },
         }},
     }
@@ -688,7 +777,7 @@ function Bookdrop:showZlibrarySignInDialog(home)
     showKeyboard(dialog)
 end
 
-function Bookdrop:showZlibraryPasswordDialog(home, email)
+function Bookdrop:showZlibraryPasswordDialog(email)
     local dialog
     dialog = InputDialog:new{
         title = _("Z-Library password"),
@@ -701,7 +790,7 @@ function Bookdrop:showZlibraryPasswordDialog(home, email)
             { text = _("Sign in"), is_enter_default = true, callback = function()
                 local password = dialog:getInputText()
                 UIManager:close(dialog)
-                self:performZlibraryLogin(home, email, password)
+                self:performZlibraryLogin(email, password)
             end },
         }},
     }
@@ -709,7 +798,7 @@ function Bookdrop:showZlibraryPasswordDialog(home, email)
     showKeyboard(dialog)
 end
 
-function Bookdrop:performZlibraryLogin(home, email, password)
+function Bookdrop:performZlibraryLogin(email, password)
     local loading = InfoMessage:new{ text = _("Signing in…"), dismissable = false }
     UIManager:show(loading)
     local finished = false
@@ -722,7 +811,6 @@ function Bookdrop:performZlibraryLogin(home, email, password)
         else
             UIManager:show(InfoMessage:new{ text = err or _("Z-Library sign-in failed.") })
         end
-        if home then home:showSettings(self:settingsDropdownEntries(home)) end
     end
     Trapper:wrap(function()
         local ok, err = Zlibrary.login(email, password)
@@ -730,6 +818,8 @@ function Bookdrop:performZlibraryLogin(home, email, password)
     end)
 end
 
+-- "Recently viewed" on the storefront: the last 12 books opened, newest
+-- first, with their download links, so they open without a search.
 function Bookdrop:rememberBook(book)
     local recent, stored = self.settings:readSetting("recent_books", {}), {}
     for key, value in pairs(book) do
@@ -765,7 +855,10 @@ function Bookdrop:refreshSettingsMenu() end -- (the Settings app redraws its own
 function Bookdrop:showStoreHome() require("bos_store").open() end
 function Bookdrop:runSearch(query) require("bos_store").open{ query = query } end
 
---- The store's settings, as rows for the Settings app.
+--- The store's settings, as rows for the Settings app (Connect → Store).
+--- Each row: text, an optional description, mandatory_func (the value shown
+--- on the right) and sub_item_table_func (the choices). Add a row here to
+--- add a store setting.
 function Bookdrop:settingsItems()
     local function summary(values, options)
         local n = 0
@@ -815,9 +908,28 @@ function Bookdrop:settingsItems()
             sub_item_table_func = function() return radios(language_options, "language") end,
         },
         {
+            -- (the same setting as the Sort menu on the store's results)
             text = _("Order of results"),
-            mandatory_func = function() return _(selectedOptionLabel(sort_options, self:getFilters().sort or "") or "Best match") end,
-            sub_item_table_func = function() return radios(sort_options, "sort") end,
+            mandatory_func = function()
+                local cur = require("bos_store").storedSort() or ""
+                for _i, s in ipairs(require("bos_store").SORTS) do
+                    if s.key == cur then return s.text end
+                end
+                return _("Best match")
+            end,
+            sub_item_table_func = function()
+                local items = {}
+                for _i, s in ipairs(require("bos_store").SORTS) do
+                    items[#items + 1] = {
+                        text = s.text, radio = true, keep_menu_open = true,
+                        checked_func = function() return (require("bos_store").storedSort() or "") == s.key end,
+                        callback = function()
+                            require("bos_settings_store").set("store_sort", s.key ~= "" and s.key or nil)
+                        end,
+                    }
+                end
+                return items
+            end,
         },
         {
             text = _("Z-Library"),

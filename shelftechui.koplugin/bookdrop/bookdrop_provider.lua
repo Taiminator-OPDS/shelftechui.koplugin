@@ -28,6 +28,8 @@ local Provider = {
 }
 
 local API_BASE = "https://archive.org"
+-- File types offered from the Archive. `rank` orders a book's downloads
+-- (1 = listed first, the main Download button).
 local SUPPORTED_FORMATS = {
     epub = { mime = "application/epub+zip", rank = 1 },
     azw3 = { mime = "application/vnd.amazon.ebook", rank = 2 },
@@ -274,6 +276,11 @@ local function contentType(subjects)
     return "Book (non-fiction)"
 end
 
+-- One search result (a "doc" of the Archive's JSON) -> a store book: id,
+-- title, author (creator), year, language, subjects, downloads (its
+-- download count, used by "Most popular"), and a cover from
+-- archive.org/services/img/<identifier>. No files yet: those come from
+-- hydrate() when the book is opened.
 local function bookFromDoc(doc, filters)
     local identifier = scalar(doc.identifier)
     if not identifier then return nil end
@@ -316,6 +323,9 @@ local function fileExtension(filename)
     return extension and extension:lower() or nil
 end
 
+-- An item's files -> the book's downloads: one per type (the "original"
+-- upload preferred over derived copies), private files skipped, ordered by
+-- SUPPORTED_FORMATS rank, each with its size and MD5 for checking.
 local function acquisitions(identifier, files, allowed_formats)
     local selected = {}
     for _, file in ipairs(files or {}) do
@@ -349,6 +359,7 @@ local function acquisitions(identifier, files, allowed_formats)
     return result
 end
 
+-- One page (10) of results: { books, total, has_next } or nil, why.
 function Provider:search(query, page, filters)
     local current_page = math.max(1, tonumber(page) or 1)
     local payload, err = requestJson(searchUrl(query, current_page, filters))
@@ -373,6 +384,9 @@ function Provider:search(query, page, filters)
     }
 end
 
+-- When a book is opened: archive.org/metadata/<identifier> gives the full
+-- details and the file list (-> acquisitions). Lending-only ("access
+-- restricted") items are refused: they can't be downloaded.
 function Provider:hydrate(book)
     if not book or not book.provider_id then return nil, "Book identifier is missing" end
     local payload, err = requestJson(API_BASE .. "/metadata/" .. url.escape(book.provider_id))

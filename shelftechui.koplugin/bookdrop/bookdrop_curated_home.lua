@@ -1,5 +1,29 @@
--- A bundled, offline storefront catalog. Opening the home screen never runs a
--- search; selecting a record hydrates its real library metadata/downloads.
+--[[
+THE STOREFRONT'S BUILT-IN SHELVES
+
+Three rows on the store's front page come from here, not from a search, so
+the storefront appears instantly and works offline:
+  "Classics to start with"   shelves.fiction + shelves.nonfiction
+  "Comics and magazines"     shelves.comics + shelves.magazines
+  "In Spanish and French"    shelves.spanish + shelves.french
+(Store:homeData in bos_store.lua joins them and gives the row titles.)
+
+Each book here is a stub: title, author, and a cover image shipped in
+assets/covers/<name>.jpg. When you open one, the store asks its library
+for the rest (download links, description) through CatalogProvider:hydrate,
+using provider + provider_id.
+
+TO CHANGE A SHELF: edit the lists in CuratedHome.build. Use the helper for
+the book's library and put a cover JPEG in assets/covers/ named as the
+`cover` argument:
+  gutenberg(..., "<ebook number>", title, author, "<cover>", "<language>")
+      the number is the one in gutenberg.org/ebooks/<number>
+  archive(..., "<archive.org identifier>", title, author, "<cover>", "<year>")
+      the identifier is the one in archive.org/details/<identifier>
+  textos(..., "<author-slug>/<book-slug>", title, author, "<cover>")
+      the path after textos.info/
+To add a new row, add a list here and a table.insert in Store:homeData.
+--]]
 
 local CuratedHome = {}
 
@@ -111,7 +135,6 @@ function CuratedHome.build(plugin_path, formats)
     }
 
     return {
-        featured = { fiction[1], spanish[1], french[1] },
         shelves = {
             fiction = fiction,
             nonfiction = nonfiction,

@@ -2,6 +2,14 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.31.1
+
+- Settings → Connect → Store → Order of results is now the same setting as the Sort menu on the store's results (it was an older, separate one that still offered Title A–Z and took over whenever the store's Sort was on Best match). A sort chosen there before carries over.
+- "Reset the store's choices" leaves Z-Library off, as it says, instead of switching it on.
+- Z-Library no longer keeps your password on the device after signing in (only the session it returns); one kept by an older version is deleted at the next sign-in or sign-out.
+- Manga: the bundled sources are all copied on first use (a broken line stopped it after the first one).
+- The store's code (and Bookdrop's, the engine under it) has detailed comments on the libraries, how a search works and how each sort works; the manga folder has a map (bookdrop/manga/README.md). Unused code removed.
+
 ## 1.31.0
 
 - The store's results: a Most popular sort, the most downloaded books first from every library together. The Internet Archive counts its downloads; Project Gutenberg's counts are asked of Gutendex (its catalogue's open API: the last 30 days). Books from libraries that don't count downloads come after, best match first. A book's line shows its downloads when known.

@@ -5,9 +5,6 @@
 -- the Manga tab; cancellable via the Trapper dismissable-run pattern.
 
 local Device = require("device")
-local UIManager = require("ui/uimanager")
-local _ = require("gettext")
-local T = require("ffi/util").template
 
 local MangaDownloader = {}
 
@@ -102,8 +99,6 @@ end
 --- @return boolean ok
 --- @return string|nil msg   Error message on failure, or nil on success
 function MangaDownloader.downloadAndInstall(target_dir)
-  local Trapper = require("ui/trapper")
-
   -- 1. Detect platform and build the download URL
   local platform = MangaDownloader.detectPlatform()
   local zip_url = string.format("%s/rakuyomi-%s.zip", DOWNLOAD_URL, platform)

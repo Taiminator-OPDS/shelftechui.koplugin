@@ -1,3 +1,9 @@
+-- RakuYomi, the bundled manga reader. A map of this folder, how it works
+-- (a helper program, `server`, does the work; these files are the screens)
+-- and which local changes to keep when updating it: README.md, here.
+-- Started by Bookdrop:loadBundledManga and opened by Bookdrop:openManga
+-- (../main.lua).
+
 local DocumentRegistry = require("document/documentregistry")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local Dispatcher = require("dispatcher")
@@ -59,7 +65,7 @@ end
 
 -- Bookdrop bundles this plugin: the Bookdrop store's Manga tab is the single
 -- entry point, so the plugin's own main-menu entry is suppressed.
--- (Second modification to the vendored code; see README.md.)
+-- (A local change to RakuYomi; see README.md.)
 function Rakuyomi:addToMainMenu(menu_items)
 end
 
