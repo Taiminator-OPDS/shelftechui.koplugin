@@ -65,12 +65,12 @@ CatalogProvider.sources = {
 -- matched the query equally well, e.g. the same title found in two places.
 -- A library missing from this table counts as 6.
 local SOURCE_PRIORITY = {
-    standardebooks = 1,
+    standardebooks = 3,
     gutenberg = 2,
     textos = 3,
     gallica = 4,
-    internet_archive = 5,
-    zlibrary = 6,
+    internet_archive = 2,
+    zlibrary = 1,
 }
 
 -- normalize("Les Misérables, Tome I") -> "les miserables tome i"
