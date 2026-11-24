@@ -45,7 +45,7 @@ local CatalogProvider = { page_size = 10 }
 
 -- Every built-in library, in the order they are asked and listed.
 CatalogProvider.source_order = {
-    "gutenberg", "standardebooks", "textos", "gallica", "internet_archive", "zlibrary",
+    "zlibrary", "gutenberg", "standardebooks", "textos", "gallica", "internet_archive", 
 }
 
 -- The names shown for them (store menus, the line under each book, errors).
