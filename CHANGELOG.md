@@ -2,6 +2,12 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.32.0
+
+- Library priority: Settings → Connect → Store → Library priority lists every library, built-in and your own, in order. Tap one to move it to the top, up, down or to the bottom; "Back to the default order" undoes it.
+- What the order does: the first libraries are asked first (three at a time), they win ties in Best match, and a new sort, By library, lists every book of your first library, then the next's.
+- With your own order, Internet Archive goes where you put it (by default it's always listed last).
+
 ## 1.31.2
 
 - Fixed a crash in the store: with the store open while Wi-Fi was coming on (right after waking the Kindle, for instance), drawing the "Turning on…" message crashed KOReader.
