@@ -5345,7 +5345,16 @@ function BookshelfWidget:_buildHero(content_w, hero_cover_w, hero_cover_h, hero_
         end,
         on_rating_change   = function(b, r)
             if not Gestures.on("rate") then return end
-            self:_setBookRating(b, r)
+            -- (ShelfTechUI) Only the top panel's text column drawn again,
+            -- not the whole home: the stars show at once.
+            self:_setBookRating(b, r, { skip_rebuild = true })
+            local cur = self._preview_book or self:_currentHeroBook()
+            if cur and cur ~= b and cur.filepath == b.filepath then cur.rating = r end
+            local okS, done = pcall(self._swapHeroRightColumnInPlace, self, require("lib/bookshelf_hero_regions").read())
+            if not (okS and done) then
+                self:_rebuild()
+                UIManager:setDirty(self, "ui")
+            end
         end,
         -- Left tappable even when the Hardcover plugin is disabled: reviews
         -- are served cache-first (fetchReviews returns within-TTL cached

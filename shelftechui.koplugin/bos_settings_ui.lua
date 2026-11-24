@@ -273,15 +273,7 @@ function HubScreen:init()
 
     -- the search field: KOReader's own text input (keyboard layouts, a real
     -- keyboard, the cursor) inside our box
-    local InputText = require("ui/widget/inputtext")
-    self.input = InputText:new{
-        text = "", hint = _("Search settings"),
-        width = self:inputWidth(), face = face(17),
-        bordersize = 0, margin = 0, padding = S(4),
-        parent = self, focused = false,
-        edit_callback = function(edited) if edited then self:onTyped() end end,
-        enter_callback = function() self:hideKeyboard() end,
-    }
+    self:makeInput()
 
     self.sections = self.plugin:getSections()
     self.stack = { self:rootLevel() }
@@ -298,6 +290,20 @@ function HubScreen:init()
         end
     end
     self:render()
+end
+
+--- The search field's text input (made again when the app is shown again
+--- after being closed: closing frees an input and its keyboard).
+function HubScreen:makeInput()
+    local InputText = require("ui/widget/inputtext")
+    self.input = InputText:new{
+        text = "", hint = _("Search settings"),
+        width = self:inputWidth(), face = face(17),
+        bordersize = 0, margin = 0, padding = S(4),
+        parent = self, focused = false,
+        edit_callback = function(edited) if edited then self:onTyped() end end,
+        enter_callback = function() self:hideKeyboard() end,
+    }
 end
 
 --- The text's room in the field: the search page's (beside Cancel), less
@@ -399,8 +405,8 @@ end
 --- Opened again (the app kept from the last time): the front page, the
 --- field empty.
 function HubScreen:reset()
-    pcall(function() self:hideKeyboard(true) end)
-    pcall(function() self:clearField() end)
+    self.is_always_active = nil
+    self:makeInput()
     self.stack = { self:rootLevel() }
     self.plugin.screen = self
     self.closed = nil
@@ -1413,6 +1419,7 @@ end
 
 function HubScreen:onCloseWidget()
     self.closed = true
+    self.was_closed = true
     if self._index_tick then UIManager:unschedule(self._index_tick) end
     if self._typed then UIManager:unschedule(self._typed) end
     pcall(function() self:hideKeyboard(true) end)
@@ -1427,6 +1434,15 @@ function HubScreen:onCloseWidget()
 end
 
 function HubScreen:onShow()
+    -- (shown again after a close: everything it drew was freed with it, its
+    -- text input and keyboard too: made and drawn afresh)
+    if self.was_closed then
+        self.was_closed = nil
+        self.is_always_active = nil
+        if self.stack and self.stack[#self.stack] and self.stack[#self.stack].kind == "search" then table.remove(self.stack) end
+        self:makeInput()
+        self:render()
+    end
     self.closed = nil
     -- shown again after something closed it for a while (see closeAll): it's
     -- the plugin's screen again, and what it lists may have changed

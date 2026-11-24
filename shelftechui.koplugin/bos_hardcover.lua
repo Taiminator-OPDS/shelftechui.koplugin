@@ -1349,7 +1349,21 @@ end
 --- Your rating of a book (1..5, or nil: none), as your rating on
 --- Hardcover, now or when next connected. A book not linked yet is linked
 --- first when Hardcover certainly has it (the same title and author).
+--- (Sent a few minutes after the last tap: a rating changed a couple of
+--- times goes once, as it was left.)
+M.RATING_SETTLE = 180
+local rating_wait = {}
 function M.rating(file, stars, title, author)
+    if not M.signedIn() or not file then return end
+    if rating_wait[file] then UIManager:unschedule(rating_wait[file]) end
+    rating_wait[file] = function()
+        rating_wait[file] = nil
+        M.ratingNow(file, stars, title, author)
+    end
+    UIManager:scheduleIn(M.RATING_SETTLE, rating_wait[file])
+end
+
+function M.ratingNow(file, stars, title, author)
     if not M.signedIn() then return end
     local link = M.linkFor(file)
     if link and link.removed then return end

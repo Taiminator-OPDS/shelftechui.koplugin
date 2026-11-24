@@ -496,6 +496,32 @@ function Settings:_heroSubItems(keys)
                 self:_toggleRegionEnabled(key, touchmenu_instance)
             end,
         }
+        if key == "rating" then
+            -- (ShelfTechUI) On or off, and how big the stars are.
+            item.checked_func, item.callback, item.hold_callback = nil, nil, nil
+            item.sub_item_table_func = function()
+                local sizes = { { 16, _("Small") }, { 20, _("Medium") }, { 26, _("Large") }, { 32, _("Extra large") } }
+                local out = {
+                    { text = _("Show the stars"), keep_menu_open = true,
+                      checked_func = function() return not Regions.read().rating.disabled end,
+                      callback = function(tm) self:_toggleRegionEnabled("rating", tm) end },
+                }
+                for _i, sz in ipairs(sizes) do
+                    out[#out + 1] = { text = T(_("Stars: %1"), sz[2]), radio = true, keep_menu_open = true,
+                        checked_func = function() return (Regions.read().rating.font_size or 16) == sz[1] end,
+                        callback = function(tm)
+                            local snap = Regions.snapshot("rating") or {}
+                            snap.font_size = sz[1]
+                            Regions.write("rating", snap)
+                            if self._bw and self._bw._swapHeroRightColumnInPlace then
+                                self._bw:_swapHeroRightColumnInPlace(Regions.read())
+                            end
+                            if tm and tm.updateItems then tm:updateItems() end
+                        end }
+                end
+                return out
+            end
+        end
         if key == "tags" then
             -- Tags is interactive AND configurable (#99): the row opens a
             -- submenu (enable + per-category visibility + font size +

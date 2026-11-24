@@ -1326,6 +1326,22 @@ function Store:settings()
     table.insert(items, { text = _("Add a library by address…"), callback = function()
         M.addLibrary(function() if not self.closed then self:homeData() self:redraw("ui") end end)
     end })
+    -- your libraries: remove one
+    local Libs = require("bos_store_libs")
+    if #Libs.list() > 0 then
+        table.insert(items, { text = _("Remove a library…"), callback = function()
+            local rows = {}
+            for _i, lib in ipairs(Libs.list()) do
+                local id, name = lib.id, lib.name
+                table.insert(rows, { text = name .. "  ·  " .. Libs.host(lib.url), callback = function()
+                    M.confirmRemove(id, name, function()
+                        if not self.closed then self:homeData() self:redraw("ui") end
+                    end)
+                end })
+            end
+            UI.openList(rows, self.cog_rect, function() end)
+        end })
+    end
     local bd = bookdrop()
     if bd and bd.openManga then
         table.insert(items, { text = _("Manga"), callback = function() bd:openManga() end })
@@ -2027,6 +2043,21 @@ function M.addLibrary(done)
     dialog:onShowKeyboard()
 end
 
+--- Remove one of your libraries, asked first; done() after.
+function M.confirmRemove(id, name, done)
+    UIManager:show(require("ui/widget/confirmbox"):new{
+        text = T(_("Remove %1 from your libraries?\n\nIt's no longer asked when you search. Books downloaded from it stay."), name),
+        ok_text = _("Remove"),
+        ok_callback = function()
+            require("bos_store_libs").remove(id)
+            -- (searches cached with it in them: asked again)
+            Search.cache, Search.order = {}, {}
+            UIManager:show(InfoMessage:new{ text = T(_("%1 removed."), name), timeout = 2 })
+            if done then done() end
+        end,
+    })
+end
+
 --- Settings → Connect → Store → Your libraries.
 function M.libraryItems()
     local Libs = require("bos_store_libs")
@@ -2052,9 +2083,12 @@ function M.libraryItems()
                                 UIManager:show(InfoMessage:new{ text = ok and type(info) == "table" and _("Done.") or _("The library didn't answer."), timeout = 2 })
                             end, 40)
                         end },
-                    { text = _("Remove"), callback = function()
-                        Libs.remove(id)
-                        UIManager:show(InfoMessage:new{ text = _("Removed."), timeout = 2 })
+                    { text = _("Remove"), callback = function(tm)
+                        local l = Libs.find(id)
+                        M.confirmRemove(id, l and l.name or id, function()
+                            -- (back to the list, without it)
+                            pcall(function() tm:backToUpperMenu() end)
+                        end)
                     end },
                 }
             end,

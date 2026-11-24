@@ -2,6 +2,13 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.30.0
+
+- Fixed a crash in Settings: shown again after stepping aside (or reopened within ten minutes), it drew its search field, whose text and keyboard had been freed when it closed. It's now made afresh each time Settings shows again.
+- Removing a library: the store's ☰ → Remove a library…, or Settings → Connect → Your libraries → a library → Remove. Asked first; books downloaded from it stay.
+- The top panel's stars: a tap redraws only the panel's text column, not the whole home, so the stars change at once. Their size: Settings → Home → Top panel → Edit top panel content → Rating → Stars: Small, Medium, Large, Extra large.
+- A rating goes to Hardcover three minutes after your last tap on the stars, as you left it (changing it a few times sends it once).
+
 ## 1.29.0
 
 - Any website can be one of your libraries in the store, not only catalogues (OPDS): "Add a library by address…" with the site's address. Its search box is found on the page, and the store searches through it as you would, reading the page of results: a book's page is read when you open it for the files it offers (EPUB first), its cover and its description; a link straight to a file downloads as it is. Only results matching every word you typed are kept, so the site's menus drop out. If the search box isn't found, search the site for a word in a browser and add the address of the results with {q} where that word was.
