@@ -451,7 +451,7 @@ function M.seedLauncher()
                 if it.action[ACTION] or it.action.bookshelfos_settings then at = i + 1 end
             end
         end
-        if not has.transfer and require("bos_transfer").available() then
+        if not has.transfer then  -- (Transfer has its own server: always there)
             table.insert(items, at, { id = "sm_stui_transfer", type = "action", label = _("Transfer"),
                 icon = "\xEF\x82\x93", action = { stui_transfer = true } })
         end

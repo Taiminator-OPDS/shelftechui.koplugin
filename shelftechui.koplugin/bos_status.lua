@@ -166,6 +166,21 @@ function M.wifiBusy()
     return ph == "turning_on" or ph == "connecting" or ph == "turning_off"
 end
 
+--- The phase in words, for a line that follows Wi-Fi as it changes:
+--- "Turning on…", "Connecting…", the network's name, "Off"... Used by the
+--- Wi-Fi tile (wifiLine), the store's offline page and Wrapped's share card
+--- while Wi-Fi is on its way.
+function M.wifiText()
+    local _ = require("gettext")
+    local ph, ssid = M.wifiPhase()
+    if ph == "off" then return _("Off") end
+    if ph == "turning_on" then return _("Turning on…") end
+    if ph == "connecting" then return _("Connecting…") end
+    if ph == "turning_off" then return _("Turning off…") end
+    if ph == "connected" then return ssid or _("Connected") end
+    return _("Not connected")
+end
+
 --- Whether Wi-Fi is on, or on its way there (what a switch for it shows).
 function M.wifiWanted()
     local ph = M.wifiPhase()
