@@ -295,6 +295,10 @@ function Search.start(query, page, filters, on_update, exact)
                     err = (#books > 0) and nil or err
                 end
             end
+            -- (most popular: Project Gutenberg's books with their download counts)
+            if id == "gutenberg" and filters and filters.sort == "popular" and type(result) == "table" and result.books then
+                pcall(M.gutenbergCounts, result.books)
+            end
             return result, err
         end, function(ok, result, err)
             if session.cancelled then return end
@@ -425,19 +429,85 @@ M.sizeText = sizeText
 --- The store's sorts: how a list of results is ordered (Settings: store_sort).
 M.SORTS = {
     { key = "", text = _("Best match") },
+    { key = "popular", text = _("Most popular") },
     { key = "small", text = _("Smallest file first") },
     { key = "large", text = _("Largest file first") },
-    { key = "title", text = _("Title") },
     { key = "newest", text = _("Newest") },
     { key = "oldest", text = _("Oldest") },
 }
 
+--- The sort kept from before, as it is now ("title" is Best match's).
+local function storedSort()
+    local s = require("bos_settings_store").get("store_sort")
+    if s == "title" then return nil end
+    return s
+end
+M.storedSort = storedSort
+
+--- How many times a book was downloaded, where its library says: the
+--- Internet Archive's own count, Project Gutenberg's (asked of Gutendex,
+--- M.gutenbergCounts).
+local function downloads(b)
+    local n = tonumber(b and b.downloads)
+    return n and n >= 0 and n or nil
+end
+
+local function gutenbergNumber(b)
+    if not b or b.provider ~= "gutenberg" then return nil end
+    return tostring(b.detail_url or b.provider_id or b.id or ""):match("/ebooks/(%d+)")
+        or tostring(b.provider_id or ""):match("^(%d+)$")
+end
+
+--- Project Gutenberg's books' download counts, from Gutendex (the
+--- catalogue's open API), 32 at a time; sets b.downloads. Blocking: in the
+--- background.
+function M.gutenbergCounts(books)
+    local want, by = {}, {}
+    for _i, b in ipairs(books or {}) do
+        local n = not downloads(b) and gutenbergNumber(b)
+        if n and not by[n] then by[n] = {} want[#want + 1] = n end
+        if n then table.insert(by[n], b) end
+    end
+    local got = {}
+    for i = 1, #want, 32 do
+        local ids = {}
+        for j = i, math.min(i + 31, #want) do ids[#ids + 1] = want[j] end
+        local okR, payload = pcall(function()
+            return require("bookdrop_opds_provider")._requestPayload("https://gutendex.com/books/?ids=" .. table.concat(ids, ","), "application/json")
+        end)
+        local okJ, data = pcall(function() return require("rapidjson").decode(payload) end)
+        for _k, r in ipairs(okR and okJ and type(data) == "table" and data.results or {}) do
+            local n = tostring(r.id)
+            local c = tonumber(r.download_count)
+            if c and by[n] then
+                got[n] = c
+                for _m, b in ipairs(by[n]) do b.downloads = c end
+            end
+        end
+    end
+    return got
+end
+
 --- Order books by `sort` (the libraries' own sorts, and by file size).
 function M.sortBooks(books, query, sort, filters)
     local P = Provider()
+    if sort == "title" then sort = "" end
     local by_size = sort == "small" or sort == "large"
-    local ok, sorted = pcall(P.sortBooks, P, books, query, by_size and "" or sort, filters)
+    local ok, sorted = pcall(P.sortBooks, P, books, query, (by_size or sort == "popular") and "" or sort, filters)
     books = ok and sorted or books
+    if sort == "popular" then
+        -- (the most downloaded first, from every library together; books
+        -- whose library doesn't count downloads after, best match first)
+        local pos = {}
+        for i, b in ipairs(books) do pos[b] = i end
+        table.sort(books, function(a, b)
+            local da, db = downloads(a), downloads(b)
+            if da and db and da ~= db then return da > db end
+            if (da ~= nil) ~= (db ~= nil) then return da ~= nil end
+            return pos[a] < pos[b]
+        end)
+        return books
+    end
     if by_size then
         -- (by size, the best match first among equals; a book whose size no
         -- library gave goes last)
@@ -465,6 +535,11 @@ local function sourceLine(b)
     if year then parts[#parts + 1] = year end
     local size = sizeText(sizeBytes(b))
     if size then parts[#parts + 1] = size end
+    local d = downloads(b)
+    if d and d > 0 then
+        local n = d >= 1000000 and string.format("%.1fM", d / 1000000) or d >= 1000 and string.format("%.1fk", d / 1000) or tostring(d)
+        parts[#parts + 1] = T(_("%1 downloads"), (n:gsub("%.0([kM])$", "%1")))
+    end
     return table.concat(parts, " · ")
 end
 
@@ -609,7 +684,7 @@ function Store:filters(overrides)
         f.libraries = Libs.withLibraries(f.libraries)
     end
     -- the sort chosen in the store (results: Sort)
-    local sort = require("bos_settings_store").get("store_sort")
+    local sort = storedSort()
     if sort ~= nil then f.sort = sort end
     for k, v in pairs(overrides or {}) do f[k] = v end
     return f
@@ -1574,7 +1649,8 @@ function Store:paintResults(bb, v, bottom)
     -- the order: Best match, by file size, title, year (kept for next time)
     if #v.books > 1 and not typing then
         local cur = v.sort
-        if cur == nil then cur = require("bos_settings_store").get("store_sort") or "" end
+        if cur == nil then cur = storedSort() or "" end
+        if cur == "title" then cur = "" end
         local name = M.SORTS[1].text
         for _i, s2 in ipairs(M.SORTS) do if s2.key == cur then name = s2.text end end
         local label = T(_("Sort: %1"), name) .. " \u{25BE}"
@@ -1714,7 +1790,7 @@ end
 function Store:chooseSort(v, anchor)
     local items = {}
     local cur = v.sort
-    if cur == nil then cur = require("bos_settings_store").get("store_sort") or "" end
+    if cur == nil or cur == "title" then cur = storedSort() or "" end
     for _i, s2 in ipairs(M.SORTS) do
         items[#items + 1] = { text = (s2.key == cur and "\u{2713} " or "    ") .. s2.text, callback = function()
             require("bos_settings_store").set("store_sort", s2.key ~= "" and s2.key or nil)
@@ -1723,6 +1799,21 @@ function Store:chooseSort(v, anchor)
             v.books = M.sortBooks(v.books, q, s2.key, v.filters or self:filters())
             v.page = 1
             self:redraw("ui")
+            -- most popular: Project Gutenberg's counts, asked for, then in order again
+            if s2.key == "popular" then
+                local books = v.books
+                Async.run(function() return M.gutenbergCounts(books) end, function(okC, got)
+                    if not okC or type(got) ~= "table" or next(got) == nil or self.closed then return end
+                    for _i, b in ipairs(v.books) do
+                        local n = gutenbergNumber(b)
+                        if n and got[n] then b.downloads = got[n] end
+                    end
+                    if v.sort == "popular" then
+                        v.books = M.sortBooks(v.books, q, "popular", v.filters or self:filters())
+                        if self:view() == v then self:redraw("ui") end
+                    end
+                end, 30)
+            end
         end }
     end
     UI.openList(items, anchor, function() end)

@@ -2,6 +2,11 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.31.0
+
+- The store's results: a Most popular sort, the most downloaded books first from every library together. The Internet Archive counts its downloads; Project Gutenberg's counts are asked of Gutendex (its catalogue's open API: the last 30 days). Books from libraries that don't count downloads come after, best match first. A book's line shows its downloads when known.
+- The Title sort is gone (Best match does that job); a list kept on Title shows as Best match.
+
 ## 1.30.1
 
 - Settings no longer opens every menu (plugins' too) in the background as soon as it opens, only once you start a search; the search waits a moment more the first time. On a Paperwhite, Settings crashed right after opening, while that was going on.
