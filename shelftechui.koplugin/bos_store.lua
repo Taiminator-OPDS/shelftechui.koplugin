@@ -577,7 +577,7 @@ function M.gutenbergCounts(books)
         local ids = {}
         for j = i, math.min(i + 31, #want) do ids[#ids + 1] = want[j] end
         local okR, payload = pcall(function()
-            return require("bookdrop_opds_provider")._requestPayload("https://gutendex.com/books/?ids=" .. table.concat(ids, ","), "application/json")
+            local O = require("bookdrop_opds_provider") return O._requestPayload(O.gutendex .. "/books/?ids=" .. table.concat(ids, ","), "application/json")
         end)
         local okJ, data = pcall(function() return require("rapidjson").decode(payload) end)
         for _k, r in ipairs(okR and okJ and type(data) == "table" and data.results or {}) do

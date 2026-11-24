@@ -2,6 +2,10 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.32.2
+
+- Project Gutenberg: when its own search fails (it often answers "503 Service Unavailable" these days, overloaded by AI scrapers), the store asks Gutendex, an open copy of Gutenberg's catalogue, instead. The books, their files (still downloaded from gutenberg.org) and their download counts are the same. Only if both fail does Gutenberg show under "Couldn't reach".
+
 ## 1.32.1
 
 - The "Couldn't reach: …" line now shows for searches of two or more words. When a library failed on such a search, the store tried parts of the query too and, finding nothing, counted the library as answered with no books, so its failure was never shown (and when every library failed, it said "Nothing found" instead of "couldn't be reached").

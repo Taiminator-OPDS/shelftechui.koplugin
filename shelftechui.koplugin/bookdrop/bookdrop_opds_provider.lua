@@ -675,6 +675,87 @@ end
 --   4. Page 2+ on a library without `direct_page`: follow rel="next" links.
 -- What comes back is still filtered and sorted by the store afterwards
 -- (matchesQuery / sortBooks), so this only has to find candidates.
+-- GUTENBERG THROUGH GUTENDEX. Project Gutenberg's own search is often
+-- overloaded (it answers 503, or a notice instead of results: AI scrapers
+-- hammer it), so when it fails the same catalogue is asked through Gutendex
+-- (gutendex.com, an open JSON copy of it, also used for download counts).
+-- The books' files still come from gutenberg.org (its file servers are
+-- separate from its search). 32 books a page, most downloaded first.
+-- The address can be pointed elsewhere for tests with STUI_GUTENDEX.
+OPDS.gutendex = os.getenv("STUI_GUTENDEX") or "https://gutendex.com"
+
+local GUTENDEX_FORMATS = {
+    { mime = "application/epub+zip", extension = "epub" },
+    { mime = "application/x-mobipocket-ebook", extension = "mobi" },
+    { mime = "text/plain", extension = "txt" },
+}
+
+local function searchGutendex(source, query, page, filters)
+    local parts = { "page=" .. tostring(page) }
+    if query and query:match("%S") then parts[#parts + 1] = "search=" .. url.escape(query) end
+    if filters and filters.language and filters.language ~= "" then
+        parts[#parts + 1] = "languages=" .. url.escape(filters.language)
+    end
+    if filters and filters.sort == "newest" then parts[#parts + 1] = "sort=descending"
+    elseif filters and filters.sort == "oldest" then parts[#parts + 1] = "sort=ascending" end
+    local payload, err = requestPayload(OPDS.gutendex .. "/books/?" .. table.concat(parts, "&"), "application/json")
+    if not payload then return nil, "Gutendex: " .. tostring(err) end
+    local ok, data = pcall(function() return require("rapidjson").decode(payload) end)
+    if not ok or type(data) ~= "table" or type(data.results) ~= "table" then
+        return nil, "Gutendex: unreadable answer"
+    end
+    local books = {}
+    for _, r in ipairs(data.results) do
+        local n = tostring(r.id or "")
+        local formats = type(r.formats) == "table" and r.formats or {}
+        local acquisitions = {}
+        for _, f in ipairs(GUTENDEX_FORMATS) do
+            for mime, href in pairs(formats) do
+                if type(href) == "string" and tostring(mime):find(f.mime, 1, true) == 1
+                    and not href:match("%.zip$") and not acquisitions[f.extension] then
+                    acquisitions[f.extension] = { type = mime, format = FORMAT_LABELS[f.extension],
+                        extension = f.extension, url = href, source = "catalog" }
+                end
+            end
+        end
+        local list = {}
+        for _, ext in ipairs(FORMAT_ORDER) do if acquisitions[ext] then list[#list + 1] = acquisitions[ext] end end
+        local names = {}
+        for _, a in ipairs(type(r.authors) == "table" and r.authors or {}) do
+            if type(a) == "table" and a.name then names[#names + 1] = a.name end
+        end
+        local subjects = table.concat(type(r.subjects) == "table" and r.subjects or {}, " · ")
+        if n ~= "" and r.title and #list > 0 then
+            books[#books + 1] = {
+                id = "gutenberg-gd-" .. n,
+                provider = "gutenberg",
+                provider_id = n,
+                detail_url = "https://www.gutenberg.org/ebooks/" .. n,
+                title = r.title,
+                author = table.concat(names, ", "),
+                language = type(r.languages) == "table" and r.languages[1] or "",
+                subjects = subjects,
+                content_type = contentType(subjects),
+                downloads = tonumber(r.download_count),
+                source = source.name,
+                format = list[1].format,
+                available_formats = availableFormats(list),
+                allowed_formats = filters and filters.formats,
+                cover_url = type(formats["image/jpeg"]) == "string" and formats["image/jpeg"]
+                    or ("https://www.gutenberg.org/cache/epub/" .. n .. "/pg" .. n .. ".cover.medium.jpg"),
+                acquisitions = list,
+            }
+        end
+    end
+    return {
+        books = books,
+        total = tonumber(data.count) or #books,
+        page = page,
+        has_previous = page > 1,
+        has_next = data.next ~= nil and data.next ~= require("rapidjson").null,
+    }
+end
+
 function OPDS:searchSource(source_id, query, page, filters)
     local source = self.sources[source_id]
     if not source then return nil, "Unknown OPDS source" end
@@ -684,6 +765,13 @@ function OPDS:searchSource(source_id, query, page, filters)
     end
     local request_url = sourceUrl(source_id, source, query, page, filters)
     local document, err = requestXml(request_url)
+    if not document and source_id == "gutenberg" then
+        -- (its search failed: the same catalogue through Gutendex)
+        local result, err2 = searchGutendex(source, query, page, filters)
+        if result then return result end
+        require("logger").warn("ShelfTechUI: store, Gutenberg:", err, "/", err2)
+        return nil, source.name .. ": " .. tostring(err) .. ", Gutendex too"
+    end
     if not document then return nil, source.name .. ": " .. tostring(err) end
 
     local books, total, next_url = feedInfo(document, request_url, source_id, source, filters)
