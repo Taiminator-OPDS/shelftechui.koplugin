@@ -21,6 +21,25 @@ this device.
 
 A website without a catalogue can be added too (kind = "web",
 bos_store_web): it's searched with its own search, and its results page read.
+
+HOW YOUR LIBRARIES JOIN A SEARCH
+  * Saved in the setting "store_libraries" as a list of
+    { id = "user_N", name, url, search, browse, on, kind }.
+      search  the OpenSearch template ({searchTerms}, {startPage}...) for an
+              OPDS catalogue, or the results-page address with {q} for a
+              website (kind = "web"). Missing: the library can't be searched,
+              only browsed.
+      browse  an OPDS feed of books for its storefront shelf.
+      on      false = switched off in Libraries... (not asked).
+  * M.register() (called by Store:filters before every search) appends each
+    id to CatalogProvider.source_order, so Search.start asks it like any
+    built-in library, and wraps CatalogProvider.searchSource / hydrate so a
+    "user_N" id comes here (M.search) instead of the built-in providers.
+  * M.withLibraries() ticks them in the search's filters.libraries.
+  * Their books then go through the same filter and sort as everyone's
+    (bookdrop_catalog_provider.lua). They have no SOURCE_PRIORITY, so they
+    rank as 6, after the built-in libraries, when matches are equal; give
+    them a number there (by id) to move them up.
 --]]
 
 local logger = require("logger")
@@ -223,6 +242,11 @@ function M.withLibraries(libraries)
     return out
 end
 
+-- Fills an OpenSearch template: {searchTerms} = the escaped query,
+-- {startPage}/{startIndex} = the page (20 per page), {count} = 20; any
+-- other optional {name?} parameter is dropped. Returns the URL and whether
+-- the template pages itself (otherwise rel="next" links are followed).
+-- Websites' {q} is turned into {searchTerms} when they're added.
 local function fill(template, query, page)
     local url = require("socket.url")
     local terms = url.escape(query or "")

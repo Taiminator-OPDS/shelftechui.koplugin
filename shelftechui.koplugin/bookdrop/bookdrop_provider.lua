@@ -1,3 +1,20 @@
+--[[
+INTERNET ARCHIVE (archive.org), one of the store's built-in libraries.
+
+Unlike the OPDS libraries it is asked through its JSON search API,
+advancedsearch.php (see searchUrl). Everything typed and every store filter
+is turned into one Lucene-style query string by searchExpression():
+texts only, not lending-restricted, in a readable format, plus the query
+words, content type, language and formats.
+
+Results come back already sorted by the Archive (SORTS below; "downloads
+desc", the most downloaded first, when the store's sort has no entry),
+and each book carries its `downloads` count, which the store's
+"Most popular" sort uses. The store then filters and re-sorts them with
+everyone else's (bookdrop_catalog_provider.lua), always after the other
+libraries.
+]]
+
 local JSON = require("rapidjson")
 local http = require("socket.http")
 local ltn12 = require("ltn12")
@@ -34,10 +51,13 @@ local FORMAT_SEARCH = {
 }
 local FORMAT_ORDER = { "epub", "pdf", "mobi", "djvu", "cbz", "txt" }
 
+-- The store's sort id (M.SORTS in bos_store.lua) -> the Archive's sort
+-- parameter. This only decides WHICH books the Archive sends back (its top
+-- 10 by that order); the store re-sorts what arrives. Any other sort
+-- ("best", "popular", file size) asks for "downloads desc".
 local SORTS = {
     newest = "date desc",
     oldest = "date asc",
-    title = "titleSorter asc",
 }
 
 local SUBJECTS = {
@@ -124,6 +144,10 @@ local function quoted(value)
     return '"' .. value .. '"'
 end
 
+-- Builds the Archive query: every clause must hold (joined by AND).
+-- What you typed matches when it is a phrase of the title, creator
+-- (author) or subject, OR (for 2+ words) when each word is in one of those
+-- fields, so "dracula stoker" finds Dracula by Bram Stoker. Up to 6 words.
 local function searchExpression(query, filters)
     local clauses = {
         "mediatype:texts",

@@ -21,6 +21,35 @@ What's on it (as on a Kindle's or a Kobo's store):
 Bookdrop (bundled, bookdrop/) still does the work: its libraries
 (bookdrop_catalog_provider), cover cache, filters (which libraries, formats,
 language) and downloads. Only the screens are new.
+
+MAP FOR MAKING CHANGES
+  Libraries
+    * the built-in list, names and rank ...... bookdrop/bookdrop_catalog_provider.lua
+                                               (source_order, sources, SOURCE_PRIORITY)
+    * their URLs (OPDS feeds) ................ bookdrop/bookdrop_opds_provider.lua
+                                               (OPDS.sources)
+    * Internet Archive ....................... bookdrop/bookdrop_provider.lua
+    * libraries you add from ☰ ............... bos_store_libs.lua (OPDS or website)
+                                               bos_store_web.lua (websites)
+    * which are ticked ....................... Store:filters() here, which starts
+                                               from Bookdrop's saved filters and adds
+                                               yours (Libs.withLibraries)
+  Search (in the order it happens)
+    1. Store:onTyped ......... waits 0.7 s after the last key, 3+ letters
+    2. Store:runSearch ....... checks Wi-Fi, starts Search.start, redraws
+                               the list each time a library answers
+    3. Search.start .......... one background process per library (Async,
+                               3 at a time, 45 s each), sub-queries when
+                               nothing matches every word, 10-minute cache
+    4. merge ................. joins the answers, drops non-matches
+                               (matchesQuery), sorts (M.sortBooks)
+  Sort
+    * the menu entries ....................... M.SORTS
+    * the ordering itself .................... M.sortBooks here, which calls
+                                               CatalogProvider:sortBooks for
+                                               Best match / Newest / Oldest
+    * choosing one, re-sorting in place ...... Store:chooseSort
+    * remembered between searches ............ setting "store_sort" (storedSort)
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
@@ -181,8 +210,14 @@ M.Async = Async
 
 -- ---------------------------------------------------------------- a search
 
+-- Search.cache: finished searches, by searchKey(), for 10 minutes; the
+-- newest 16 are kept (Search.order is their age order). Only searches where
+-- every library answered are cached, so a timeout is retried next time.
+-- Change 600 (seconds) in Search.start or 16 in its callback to tune.
 local Search = { cache = {}, order = {} }
 
+-- What makes two searches "the same" for the cache: query, page, content
+-- type, language, sort, the ticked libraries and formats.
 local function searchKey(query, page, filters)
     local parts = { tostring(query or ""), tostring(page or 1), tostring(filters.content or ""),
         tostring(filters.language or ""), tostring(filters.sort or "") }
@@ -195,6 +230,13 @@ local function searchKey(query, page, filters)
     return table.concat(parts, "\1") .. "\1" .. table.concat(libs, ",") .. "\1" .. table.concat(fm, ",")
 end
 
+-- Runs every time a library answers: joins all answers so far into
+-- session.books, keeps only the books that are an answer to the query
+-- (CatalogProvider.matchesQuery: the rules are documented there) and
+-- orders them with M.sortBooks by the chosen sort. Re-run from scratch each
+-- time, so the list on screen is always the whole, sorted set so far.
+-- (No duplicate removal across libraries: the same book from Gutenberg and
+-- Standard Ebooks shows twice, one line each, "from" telling them apart.)
 local function merge(session)
     local P = Provider()
     local books = {}
@@ -243,6 +285,31 @@ end
 --- Ask every chosen library for `query` (page `page`); on_update(session)
 --- each time one answers. session: books (merged, best first), answered,
 --- total (libraries), errors, finished, has_next.
+---
+--- How it goes:
+---   1. Cache hit (same searchKey, under 10 minutes old): answered at once.
+---   2. The libraries asked: every id in CatalogProvider.source_order that
+---      is ticked in filters.libraries (bos_store_libs adds your own ids to
+---      that list). None ticked: an error line, nothing asked.
+---   3. Each library gets its own Async job (a forked process, so a slow
+---      site never freezes the screen; at most Async.MAX = 3 at once, the
+---      rest queue). In the job:
+---        a. P:searchSource(id, query, page, filters): the library's search.
+---        b. SUB-QUERIES: if none of what came back matches every word
+---           typed, the query has 2+ words of 3+ letters, it's page 1 and
+---           not `exact`, the library is asked again with M.subQueries
+---           (title alone, author alone...), keeping only books that match
+---           the whole query. Catches "dracula bram stoker" on sites that
+---           only search titles. Costs up to 3 extra requests per library.
+---        c. Sort is "Most popular": Gutenberg's books get their download
+---           counts from Gutendex (M.gutenbergCounts).
+---      A job not finished in 45 s is killed and reported as "timed out"
+---      (the last argument of Async.run below).
+---   4. Each answer: added to session.parts, merge() re-filters and re-sorts
+---      everything, on_update redraws. Errors are collected per library and
+---      shown under the list; the other libraries' books still show.
+--- `exact` (lookFor, a recommendation being found): skip sub-queries, the
+--- caller already asks its own variations.
 function Search.start(query, page, filters, on_update, exact)
     local P = Provider()
     local session = { query = query, page = page or 1, filters = filters, parts = {}, books = {}, errors = {},
@@ -427,6 +494,19 @@ end
 M.sizeText = sizeText
 
 --- The store's sorts: how a list of results is ordered (Settings: store_sort).
+--- The order here is the order in the Sort menu. `key` is what is saved and
+--- passed around as filters.sort; "" is the default.
+---
+--- TO ADD A SORT:
+---   1. add { key = "mykey", text = _("My sort") } here;
+---   2. give it a branch in M.sortBooks below (or in
+---      CatalogProvider:sortBooks if it only needs a book's own fields);
+---   3. optionally let libraries pre-sort for it: an entry in SORTS of
+---      bookdrop/bookdrop_provider.lua (Internet Archive) or a URL with key
+---      "mykey" in an OPDS.sources entry (used when nothing is typed).
+--- TO REMOVE ONE: delete its line here. A saved choice of it then falls
+--- back to Best match only if its branch in M.sortBooks is gone too (see
+--- how storedSort maps the old "title" sort to Best match).
 M.SORTS = {
     { key = "", text = _("Best match") },
     { key = "popular", text = _("Most popular") },
@@ -437,6 +517,7 @@ M.SORTS = {
 }
 
 --- The sort kept from before, as it is now ("title" is Best match's).
+--- nil means Best match. Read by Store:filters for every search.
 local function storedSort()
     local s = require("bos_settings_store").get("store_sort")
     if s == "title" then return nil end
@@ -452,6 +533,8 @@ local function downloads(b)
     return n and n >= 0 and n or nil
 end
 
+-- A Gutenberg book's ebook number ("1342" for Pride and Prejudice), from
+-- its page link or id; nil for other libraries.
 local function gutenbergNumber(b)
     if not b or b.provider ~= "gutenberg" then return nil end
     return tostring(b.detail_url or b.provider_id or b.id or ""):match("/ebooks/(%d+)")
@@ -489,6 +572,18 @@ function M.gutenbergCounts(books)
 end
 
 --- Order books by `sort` (the libraries' own sorts, and by file size).
+--- Every sort starts from Best match (CatalogProvider:sortBooks: relevance
+--- score, Internet Archive last; or by year for "newest"/"oldest"), then:
+---   "popular"  stable re-sort by downloads, most first. Only Internet
+---              Archive (its own count) and Gutenberg (Gutendex, 30-day
+---              count) have one; every other book goes after them, still in
+---              Best match order. Because it's stable, equal counts keep
+---              their Best match order too.
+---   "small" / "large"  by file size (sizeBytes: the library's size, or
+---              read from text like "1.2 MB"); unknown sizes last.
+--- Note "popular" ignores relevance once counts exist: a hugely downloaded
+--- book that only loosely matched comes first. To weigh both, compare
+--- relevance buckets before downloads in its comparator.
 function M.sortBooks(books, query, sort, filters)
     local P = Provider()
     if sort == "title" then sort = "" end
@@ -673,6 +768,11 @@ end
 
 -- ---------------------------------------------------------------- data
 
+-- The filters every search is made with: Bookdrop's saved ones (which
+-- built-in libraries are ticked, formats, language, content type: the
+-- Libraries... menu changes these), plus your own added libraries
+-- (Libs.withLibraries ticks the ones switched on), plus the saved sort, plus
+-- `overrides` for this one search (lookFor forces sort = "").
 function Store:filters(overrides)
     local bd = bookdrop()
     local f = {}
@@ -844,6 +944,10 @@ end
 -- ---------------------------------------------------------------- searching
 
 --- A key was typed: the list follows, once the typing pauses.
+-- Every key typed in the search field. Your own books are looked up after
+-- 0.25 s; the libraries after 0.7 s of no typing and only for 3+ letters
+-- (change both numbers below to make it eagerer or calmer; lower means
+-- more half-typed searches sent).
 function Store:onTyped()
     if self.setting_text then return end
     local text = self.input:getText() or ""
@@ -879,6 +983,10 @@ function Store:onTyped()
     UIManager:scheduleIn(0.25, self.mine_timer)
 end
 
+-- Starts (or restarts) the search for view `v`. Called by onTyped after the
+-- pause, by "more results" with page 2+, and with q = "" by shelves. Each
+-- update replaces v.books (page 1) or appends new books not already shown
+-- (later pages, keyed by library + id), then redraws and loads covers.
 function Store:runSearch(v, q, page)
     Search.cancel(v.session)
     local ok_net = true
@@ -1068,6 +1176,11 @@ end
 
 --- A recommendation: its description and cover (Open Library), and whether
 --- a library has it.
+-- A recommendation (not from a library) opened: find it in the libraries.
+-- Asks "Title, Full Author", then "Title Surname", then "Title", each with
+-- Search.start(..., exact = true) and sort = "", keeps books that are the
+-- same title (and author), and picks the smallest file of the exact-title
+-- matches.
 function Store:lookFor(v)
     local Online = require("bos_online")
     local pick = v.pick
@@ -1787,6 +1900,11 @@ end
 
 --- The order of a list of results: chosen, kept for the next searches, and
 --- the list ordered again here and now (no asking the libraries again).
+--- Built from M.SORTS (a tick by the current one). Choosing "Most popular"
+--- also fetches Gutenberg counts for books already on screen, in the
+--- background, and re-sorts when they arrive. Libraries are not re-asked,
+--- so Internet Archive's top results stay those of the old sort until the
+--- next search.
 function Store:chooseSort(v, anchor)
     local items = {}
     local cur = v.sort

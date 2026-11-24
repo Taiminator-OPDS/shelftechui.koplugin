@@ -9,12 +9,38 @@ local OPDS = {
     max_response_bytes = 6 * 1024 * 1024,
 }
 
+-- THE BUILT-IN OPDS LIBRARIES (Gutenberg, Standard Ebooks, textos.info,
+-- Gallica). OPDS is the Atom-based catalogue format most free ebook sites
+-- publish; this file downloads a feed, reads each <entry> as a book
+-- (entryToBook) and its acquisition links as the download files.
+--
+-- Each library is a table of URL templates:
+--   name              shown in the store
+--   search            the URL asked when you type; %s is replaced by what
+--                     you typed (URL-escaped). If `direct_page` is set it
+--                     also takes the page number as a second %d.
+--   home              the URL used for a shelf with no query (storefront,
+--                     "Most popular" with nothing typed). %d = page number
+--                     when `direct_page` is set.
+--   newest            optional: used instead of `home` when nothing is
+--                     typed and the sort is "Newest". Any sort id from
+--                     bos_store.lua's M.SORTS can be given its own URL the
+--                     same way (key = the sort id); see sourceUrl().
+--   direct_page       the site takes ?page=N in the URL. Without it, page
+--                     2+ is reached by following each feed's rel="next"
+--                     link from page 1 (slower: one request per page).
+--   default_language  language given to books whose entry doesn't say, so
+--                     the store's language filter can still sort them.
+--
+-- To add another OPDS library permanently: add an entry here with a new
+-- id, then list that id in bookdrop_catalog_provider.lua (source_order,
+-- sources, SOURCE_PRIORITY). Libraries you add from the store's ☰ menu
+-- don't go here; they live in bos_store_libs.lua.
 OPDS.sources = {
     gutenberg = {
         name = "Project Gutenberg",
         home = "https://www.gutenberg.org/ebooks/search.opds/?sort_order=downloads",
         newest = "https://www.gutenberg.org/ebooks/search.opds/?sort_order=release_date",
-        title = "https://www.gutenberg.org/ebooks/search.opds/?sort_order=title",
         search = "https://www.gutenberg.org/ebooks/search.opds/?query=%s",
     },
     standardebooks = {
@@ -415,6 +441,14 @@ local function feedInfo(document, request_url, source_id, source, filters)
     return books, total, next_url
 end
 
+-- Which URL to ask for, given what was typed, the page and the sort:
+--   * Gallica with a query: its own SRU expression, every word required
+--     (gallica all "word" and ...) and EPUBs only. (A plain query to Gallica
+--     actually goes through searchGallica below; this covers its home.)
+--   * any query: the `search` template;
+--   * no query and the library has a URL named after the sort ("newest"):
+--     that URL;
+--   * otherwise `home`.
 local function sourceUrl(source_id, source, query, page, filters)
     local escaped_query = url.escape(query or "")
     if source_id == "gallica" and query and query:match("%S") then
@@ -600,6 +634,17 @@ local function searchGallica(source, query, page, filters)
     }
 end
 
+-- Search one OPDS library. Steps:
+--   1. Gallica with a query -> searchGallica (title and author searched
+--      separately, results combined).
+--   2. Otherwise fetch sourceUrl() and turn the feed into books.
+--   3. textos.info only: its multi-word search misses obvious titles, so if
+--      no title holds every word, each word is searched on its own and the
+--      results merged; books by an author of that name are added too
+--      (textosAuthorBooks). Both are re-ranked by rankTextosBooks.
+--   4. Page 2+ on a library without `direct_page`: follow rel="next" links.
+-- What comes back is still filtered and sorted by the store afterwards
+-- (matchesQuery / sortBooks), so this only has to find candidates.
 function OPDS:searchSource(source_id, query, page, filters)
     local source = self.sources[source_id]
     if not source then return nil, "Unknown OPDS source" end

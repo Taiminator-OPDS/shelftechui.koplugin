@@ -156,6 +156,9 @@ local SKIP = { ["home"] = 1, ["next"] = 1, ["previous"] = 1, ["prev"] = 1, ["log
     ["sign up"] = 1, ["register"] = 1, ["search"] = 1, ["about"] = 1, ["contact"] = 1, ["help"] = 1, ["more"] = 1 }
 
 --- "Dracula by Bram Stoker" → "Dracula", "Bram Stoker".
+-- Splits a link's text into title and author: "Dracula by Bram Stoker",
+-- "Dracula - Bram Stoker". An "author" over 60 letters, or (for the dash
+-- form) with a 4-digit year in it, is taken as part of the title.
 local function titleAuthor(s)
     local t, a = s:match("^(.-)%s+[Bb]y%s+(.+)$")
     if t and #t > 0 and #a < 60 then return t, a end
@@ -165,6 +168,18 @@ local function titleAuthor(s)
 end
 
 --- The books on a page of results (or any page of the site).
+--- Every <a> link on the page, in order, is one of:
+---   * a link to a book file (extension in M.EXT) whose text is only a
+---     format or "Download": another file of the book listed just before it;
+---   * any other link to a book file: a new book, downloadable at once;
+---   * a link to another page of the same site, 3-160 letters long, not a
+---     menu word (SKIP) and not the home page: a book's page, read for its
+---     files when opened (M.hydrate).
+--- The ~160 letters after each link go into `subjects` (and "by X" there
+--- becomes the author), so the store's filter (matchesQuery) can drop the
+--- menus, footers and other links that don't contain what you searched for.
+--- At most 60 candidates per page. To make a site's results cleaner, add
+--- words to SKIP or tighten the "same site" branch.
 function M.parse(page_url, html, id, source_name)
     local books, seen = {}, {}
     local site = siteOf(host(page_url))
@@ -224,6 +239,8 @@ function M.parse(page_url, html, id, source_name)
     return books
 end
 
+-- One search of a website: its results-page address with the query filled
+-- in, fetched, parsed. A single page only (has_next = false).
 function M.search(lib, query, page)
     local fill = require("bos_store_libs")._fill
     local url = fill(lib.search, query, page or 1)
