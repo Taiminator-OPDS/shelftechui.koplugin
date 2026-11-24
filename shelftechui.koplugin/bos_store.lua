@@ -243,6 +243,13 @@ local function merge(session)
     for _i, part in ipairs(session.parts) do
         for _j, b in ipairs(part) do books[#books + 1] = b end
     end
+    -- only the formats you've ticked (M.applyFormats)
+    local fm = session.filters and session.filters.formats
+    if type(fm) == "table" then
+        local keep = {}
+        for _i, b in ipairs(books) do if M.applyFormats(b, fm) then keep[#keep + 1] = b end end
+        books = keep
+    end
     local q = session.query
     if q and q:match("%S") and P.matchesQuery then
         local keep = {}
@@ -621,6 +628,64 @@ function M.sortBooks(books, query, sort, filters)
     return books
 end
 
+--- YOUR FORMAT CHOICES (Settings → Connect → Store → Formats), applied to a
+--- book from any library. The libraries only use them to decide which books
+--- to send (a book needs one ticked format), so a book with an EPUB and a PDF
+--- arrived with both; this keeps only the ticked ones:
+---   * b.acquisitions (its files): the others removed, so the Download key,
+---     Formats menu and file size are only for formats you want;
+---   * b.available_formats / b.format (the "EPUB · PDF" on its line): the
+---     others left out.
+--- Types the setting doesn't list (FB2, CBR, RTF... from websites) are
+--- kept: they can't be switched off. AZW3 counts as MOBI, KEPUB as EPUB.
+--- Returns false when the book is only in switched-off formats (drop it);
+--- true otherwise, including books whose files aren't known yet (Gutenberg
+--- and website results: checked again when opened, in Store:hydrate).
+local FILTERABLE = { epub = true, pdf = true, mobi = true, djvu = true, cbz = true, txt = true }
+local FORMAT_ALIAS = { azw3 = "mobi", azw = "mobi", kepub = "epub" }
+local function formatOn(name, formats)
+    name = tostring(name or ""):lower()
+    name = FORMAT_ALIAS[name] or name
+    if not FILTERABLE[name] then return true end
+    return formats[name] == true
+end
+function M.applyFormats(b, formats)
+    if type(b) ~= "table" or type(formats) ~= "table" or next(formats) == nil then return true end
+    local known = false
+    if type(b.acquisitions) == "table" and #b.acquisitions > 0 then
+        known = true
+        local keep = {}
+        for _i, a in ipairs(b.acquisitions) do
+            if formatOn(a.extension or a.format, formats) then keep[#keep + 1] = a end
+        end
+        -- (a book dropped is left as it was: merge() asks again each time
+        -- another library answers)
+        if #keep == 0 then return false end
+        b.acquisitions = keep
+        local names = {}
+        for _i, a in ipairs(keep) do
+            local n = a.format or (a.extension or ""):upper()
+            if n ~= "" then names[#names + 1] = n end
+        end
+        b.available_formats = table.concat(names, " · ")
+        b.format = names[1] or b.format
+        return true
+    end
+    if type(b.available_formats) == "string" and b.available_formats:match("%S") then
+        local names = {}
+        for n in b.available_formats:gmatch("[^·,%s]+") do
+            known = true
+            if formatOn(n, formats) then names[#names + 1] = n end
+        end
+        if known and #names == 0 then return false end
+        b.available_formats = table.concat(names, " · ")
+        if b.format and b.format ~= "EBOOK" and not formatOn(b.format, formats) then b.format = names[1] end
+    elseif b.format and b.format ~= "EBOOK" and b.format ~= "" and not formatOn(b.format, formats) then
+        return false
+    end
+    return true
+end
+
 --- The libraries that failed in a search, on one line for under the
 --- results: "Couldn't reach: Gallica (403 Forbidden) · textos.info (timed
 --- out)". Each entry of `errors` is "<library>: <reason>" as Search.start
@@ -861,7 +926,14 @@ function Store:homeData()
     end)
     if okC and cat and cat.shelves then
         local sh = cat.shelves
-        local function join(a, b) local o = {} for _i, x in ipairs(a or {}) do o[#o + 1] = x end for _i, x in ipairs(b or {}) do o[#o + 1] = x end return o end
+        local fm = self:filters().formats
+        local function join(a, b)
+            local o = {}
+            for _i, list in ipairs{ a or {}, b or {} } do
+                for _j, x in ipairs(list) do if M.applyFormats(x, fm) then o[#o + 1] = x end end
+            end
+            return o
+        end
         table.insert(rows, { id = "classics", title = _("Classics to start with"), books = join(sh.fiction, sh.nonfiction),
             more = { title = _("Fiction"), filters = { content = "book_fiction", sort = "" } } })
         table.insert(rows, { id = "comics", title = _("Comics and magazines"), books = join(sh.comics, sh.magazines),
@@ -1190,6 +1262,10 @@ function Store:hydrate(v, book)
             end
             v.book = hydrated
             v.state = "ready"
+            -- its files now known: only the formats you've ticked
+            -- (none left: the Download key says why, instead of downloading)
+            v.noformat = not M.applyFormats(hydrated, self:filters().formats)
+            if v.noformat then hydrated.acquisitions = {} end
         else
             v.state = "error"
             v.error = tostring((ok and err) or hydrated or err or "")
@@ -2101,6 +2177,7 @@ function Store:paintBook(bb, v, bottom)
             or (v.state == "details" and _("Getting the book…"))
             or (v.state == "missing" and _("Not in your libraries"))
             or (v.state == "offline" and _("Wi-Fi is off"))
+            or (v.state == "ready" and v.noformat and _("Only in formats you've switched off"))
             or (v.state == "ready" and _("No file to download"))
             or _("Couldn't get the book")
         Look.button(bb, tx, ky, bw2, kh, label, { size = 12, enabled = false })
