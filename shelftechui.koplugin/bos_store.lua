@@ -621,6 +621,31 @@ function M.sortBooks(books, query, sort, filters)
     return books
 end
 
+--- The libraries that failed in a search, on one line for under the
+--- results: "Couldn't reach: Gallica (403 Forbidden) · textos.info (timed
+--- out)". Each entry of `errors` is "<library>: <reason>" as Search.start
+--- writes it; the reason is the site's own answer (its HTTP status line),
+--- "timed out" (45 s), or the network's error. A library's name said twice
+--- ("Gallica: Gallica: ...") and the "HTTP/1.1" prefix are dropped, and a
+--- long reason is cut. nil when nothing failed.
+function M.errorLine(errors)
+    if type(errors) ~= "table" or #errors == 0 then return nil end
+    local parts = {}
+    for _i, e in ipairs(errors) do
+        e = tostring(e)
+        local name, why = e:match("^(.-):%s*(.*)$")
+        if name and name ~= "" then
+            while why:sub(1, #name + 1) == name .. ":" do why = why:sub(#name + 2):gsub("^%s+", "") end
+            why = why:gsub("^HTTP/%d[%d%.]*%s+", ""):gsub("%s+", " ")
+            if #why > 40 then why = why:sub(1, 38):gsub("[\128-\191]+$", ""):gsub("%s+%S*$", "") .. "…" end
+            parts[#parts + 1] = why ~= "" and T("%1 (%2)", name, why) or name
+        else
+            parts[#parts + 1] = e
+        end
+    end
+    return T(_("Couldn't reach: %1"), table.concat(parts, " · "))
+end
+
 local function sourceLine(b)
     local parts = {}
     if b.source and b.source ~= "" then parts[#parts + 1] = b.source end
@@ -1772,6 +1797,13 @@ function Store:paintResults(bb, v, bottom)
         self:hit(r, function() self:chooseSort(v, r) end)
         y = y + S(40)
     end
+    -- a library that failed while others answered: named, with the reason,
+    -- so its missing books aren't a mystery (when every library failed,
+    -- the message in place of the list says so instead)
+    local failed = #v.books > 0 and not v.waiting and M.errorLine(v.errors)
+    if failed then
+        y = y + Page.wrap(bb, failed, Look.serif(12, false, true), x, y - S(4), w, typing and 1 or 2, S(18), Look.GRAY) + S(6)
+    end
     local rh = S(108)
     local foot = typing and 0 or S(60)
     -- on this device: your own books that match, above the store's (the
@@ -1828,6 +1860,10 @@ function Store:paintResults(bb, v, bottom)
             msg = _("The libraries couldn't be reached:") .. "\n" .. table.concat(v.errors, "\n")
         elseif v.empty then msg = v.empty
         else msg = _("Nothing found. Try fewer words, or another spelling.") end
+        -- some libraries failed, the others found nothing: say which failed
+        local failed = not v.waiting and not v.offline and not (v.typed and #q < 3)
+            and v.errors and #v.errors > 0 and #v.errors < (v.libraries or 1) and M.errorLine(v.errors)
+        if failed then msg = msg .. "\n\n" .. failed end
         -- nothing typed yet: recommendations fill the room (a tap opens
         -- one); typing takes over as before
         if v.typed and #q < 3 and #mine == 0 and self:paintSuggestions(bb, x, y, w, bottom) then return end
