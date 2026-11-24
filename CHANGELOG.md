@@ -2,6 +2,13 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.31.2
+
+- Fixed a crash in the store: with the store open while Wi-Fi was coming on (right after waking the Kindle, for instance), drawing the "Turning on…" message crashed KOReader.
+- The store only offers the formats you've ticked (Settings → Connect → Store → Formats). A book with an EPUB and a PDF used to list its PDF too, and could offer it as the download; now the PDF is left out, and a book only in switched-off formats isn't shown. Formats that setting doesn't list (FB2, CBR…) are always kept.
+- When a library can't be reached but others answer, a line under the results now says which and why (for example "Couldn't reach: Gallica (HTTP 503)"). Before, its books were simply missing.
+- On a new install, Store and Transfer are added to the start menu as intended (a leftover check stopped it).
+
 ## 1.31.1
 
 - Settings → Connect → Store → Order of results is now the same setting as the Sort menu on the store's results (it was an older, separate one that still offered Title A–Z and took over whenever the store's Sort was on Best match). A sort chosen there before carries over.
