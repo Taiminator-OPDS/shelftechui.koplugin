@@ -115,11 +115,13 @@ function CoverCache:fetch(book)
                 url = cover_url,
                 method = "GET",
                 redirect = true,
-                headers = {
-                    ["Accept"] = "image/jpeg, image/png",
-                    ["Accept-Encoding"] = "identity",
-                    ["User-Agent"] = "KOReader Bookdrop/0.5",
-                },
+                headers = (function()
+                    local okO, O = pcall(require, "bookdrop_opds_provider")
+                    local h = okO and O.headersFor and O.headersFor(cover_url, "image/jpeg, image/png") or {
+                        ["Accept-Encoding"] = "identity", ["User-Agent"] = "KOReader Bookdrop/0.5" }
+                    h["Accept"] = "image/jpeg, image/png"
+                    return h
+                end)(),
                 sink = sink,
             }
             socketutil:reset_timeout()

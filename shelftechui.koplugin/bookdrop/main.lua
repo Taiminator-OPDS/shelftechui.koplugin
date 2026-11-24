@@ -612,10 +612,10 @@ function Bookdrop:startBookDownload(book, acquisition, destination)
                     active_acquisition = resolved
                     headers = zlibrary.getDownloadHeaders(active_acquisition.referer)
                 else
-                    headers = {
-                        ["Accept-Encoding"] = "identity",
-                        ["User-Agent"] = "KOReader Bookdrop/0.7",
-                    }
+                    -- (as the store asked the site: KOReader to a built-in
+                    -- library, a browser's headers to a site someone added;
+                    -- see "HOW THE STORE ASKS A SITE" in bookdrop_opds_provider)
+                    headers = require("bookdrop_opds_provider").headersFor(active_acquisition.url, "*/*")
                     if active_acquisition.referer then headers.Referer = active_acquisition.referer end
                 end
 

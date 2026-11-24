@@ -2,6 +2,11 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.32.3
+
+- Libraries you add (catalogues and websites) are now asked the way a web browser asks: a browser's identification and language, cookies kept while following the site's redirects, and the page a book came from sent along with its download. Sites that simply refused unfamiliar apps (a bare "403 Forbidden") now answer. The built-in libraries are still asked as KOReader.
+- A site behind bot protection is named as such: "Couldn't reach: Example Books (blocks apps: Cloudflare check)", or DDoS-Guard, or a captcha, or "too many requests: try again later", instead of a bare 403. Those checks look for a real browser running the page, which the store doesn't pretend to be.
+
 ## 1.32.2
 
 - Project Gutenberg: when its own search fails (it often answers "503 Service Unavailable" these days, overloaded by AI scrapers), the store asks Gutendex, an open copy of Gutenberg's catalogue, instead. The books, their files (still downloaded from gutenberg.org) and their download counts are the same. Only if both fail does Gutenberg show under "Couldn't reach".

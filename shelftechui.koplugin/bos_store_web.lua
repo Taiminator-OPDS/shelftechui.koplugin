@@ -211,7 +211,7 @@ function M.parse(page_url, html, id, source_name)
                 seen[url] = true
                 local last = books[#books]
                 last.acquisitions = last.acquisitions or {}
-                table.insert(last.acquisitions, { url = url, extension = ext == "kepub" and "epub" or ext, format = M.EXT[ext] })
+                table.insert(last.acquisitions, { url = url, referer = page_url, extension = ext == "kepub" and "epub" or ext, format = M.EXT[ext] })
                 last.format = last.acquisitions[1].format
             elseif ext then
                 seen[url] = true
@@ -221,7 +221,7 @@ function M.parse(page_url, html, id, source_name)
                 if a then a = a:gsub("%s+$", "") end
                 books[#books + 1] = { id = id .. ":" .. url, provider = id, provider_id = url, title = t, author = a or "",
                     subjects = name .. " " .. near, source = source_name, format = M.EXT[ext], web = true,
-                    acquisitions = { { url = url, extension = ext == "kepub" and "epub" or ext, format = M.EXT[ext] } } }
+                    acquisitions = { { url = url, referer = page_url, extension = ext == "kepub" and "epub" or ext, format = M.EXT[ext] } } }
             elseif same and #label >= 3 and #label <= 160 and not SKIP[label:lower()] and url ~= page_url
                     and not url:gsub("[?#].*$", ""):match("^https?://[^/]+/?$") then
                 seen[url] = true
@@ -268,10 +268,10 @@ function M.hydrate(book)
                 for e in pairs(M.EXT) do
                     if label:find("%f[%w]" .. e .. "%f[%W]") then ext = e break end
                 end
-                if ext then maybe[#maybe + 1] = { url = url, extension = ext == "kepub" and "epub" or ext, format = M.EXT[ext] } end
+                if ext then maybe[#maybe + 1] = { url = url, referer = book.web_page, extension = ext == "kepub" and "epub" or ext, format = M.EXT[ext] } end
             else
                 seen[url] = true
-                acqs[#acqs + 1] = { url = url, extension = ext == "kepub" and "epub" or ext, format = M.EXT[ext] }
+                acqs[#acqs + 1] = { url = url, referer = book.web_page, extension = ext == "kepub" and "epub" or ext, format = M.EXT[ext] }
             end
         end
     end

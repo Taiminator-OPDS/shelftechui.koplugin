@@ -162,45 +162,179 @@ local function nodeText(node)
     return cleaned
 end
 
--- One HTTP GET, returning the body or nil, why. Refuses answers over
--- max_response_bytes (6 MB) so a huge page can't run the Kindle out of
--- memory. Also used for Gutendex's JSON (M.gutenbergCounts in bos_store).
-local function requestPayload(request_url, accept)
-    local chunks, received, too_large = {}, 0, false
-    local sink = function(chunk)
-        if chunk then
-            received = received + #chunk
-            if received > OPDS.max_response_bytes then
-                too_large = true
-                return nil, "response is too large"
-            end
-            chunks[#chunks + 1] = chunk
-        end
-        return 1
-    end
+-- HOW THE STORE ASKS A SITE
+-- Built-in libraries (OPDS.sources, Gutendex, archive.org) are asked as
+-- "KOReader Bookdrop": they serve apps and some ask apps to say who they are.
+-- Every other site (catalogues and websites people add themselves) is asked
+-- the way a web browser asks: a browser's User-Agent, Accept and
+-- Accept-Language headers, cookies kept while following its redirects (many
+-- sites set one on the first answer and refuse the next request without it),
+-- and the page it came from as Referer. That gets past sites that simply
+-- refuse unfamiliar clients.
+-- It does not get past bot protection (Cloudflare's or DDoS-Guard's
+-- "checking your browser" pages, captchas): those check for a real browser
+-- running the page, and the store doesn't pretend to be one. blockReason()
+-- recognises them so the store can say "blocks apps: Cloudflare check"
+-- instead of a bare 403.
+OPDS.BROWSER_UA = "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
 
-    socketutil:set_timeout(socketutil.LARGE_BLOCK_TIMEOUT, socketutil.LARGE_TOTAL_TIMEOUT)
-    local ok, code, _, status = http.request{
-        url = request_url,
-        method = "GET",
-        redirect = true,
-        headers = {
+local function hostOf(u)
+    return (tostring(u or ""):match("^%a+://([^/?#]+)") or ""):gsub("^[^@]*@", ""):gsub(":%d+$", ""):lower()
+end
+
+--- Is `u` one of the built-in libraries (asked as KOReader), or a site
+--- someone added (asked as a browser)?
+function OPDS.isBuiltin(u)
+    local h = hostOf(u)
+    if h == "" then return false end
+    if h == hostOf(OPDS.gutendex) or h:find("archive%.org$") then return true end
+    for id, src in pairs(OPDS.sources) do
+        if not tostring(id):match("^user_") then
+            for _, k in ipairs({ "home", "search", "newest" }) do
+                if src[k] and hostOf(src[k]) == h then return true end
+            end
+        end
+    end
+    return false
+end
+
+local function acceptLanguage()
+    local lang = tostring(G_reader_settings and G_reader_settings:readSetting("language") or "en"):gsub("_", "-")
+    if lang == "" or lang == "C" then lang = "en" end
+    local base = lang:match("^(%a+)") or "en"
+    if base == lang then return lang .. ",en;q=0.8" end
+    return lang .. "," .. base .. ";q=0.9,en;q=0.8"
+end
+
+--- The headers to send to `u`: KOReader's for a built-in library, a
+--- browser's for anything else. `accept`: what we want back.
+function OPDS.headersFor(u, accept)
+    if OPDS.isBuiltin(u) then
+        return {
             ["Accept"] = accept or "application/atom+xml, application/xml",
             ["Accept-Encoding"] = "identity",
             ["User-Agent"] = "KOReader Bookdrop/0.6",
-        },
-        sink = sink,
+        }
+    end
+    return {
+        ["User-Agent"] = OPDS.BROWSER_UA,
+        ["Accept"] = accept or "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        ["Accept-Language"] = acceptLanguage(),
+        ["Accept-Encoding"] = "identity",
+        ["Upgrade-Insecure-Requests"] = "1",
     }
-    socketutil:reset_timeout()
-    if too_large then return nil, "OPDS response exceeded 6 MiB" end
-    if not ok or tonumber(code) ~= 200 then return nil, status or ("HTTP " .. tostring(code)) end
-    local payload = table.concat(chunks)
-    if payload == "" then return nil, "Catalog returned an empty response" end
-    return payload
+end
+
+-- Set-Cookie headers (luasocket joins several with ", ") into the jar
+-- { name = value }. Attributes (Path, Expires...) are left out.
+local function keepCookies(jar, header)
+    if type(header) ~= "string" then return end
+    header = header:gsub(",%s*([%w!#$%%&'*+%-.^_`|~]+)=", "\n%1=")
+    for line in header:gmatch("[^\n]+") do
+        local name, value = line:match("^%s*([^=;%s]+)=([^;]*)")
+        if name and not ({ path = 1, domain = 1, expires = 1, ["max-age"] = 1 })[name:lower()] then
+            jar[name] = value
+        end
+    end
+end
+
+local function cookieHeader(jar)
+    local parts = {}
+    for k, v in pairs(jar) do parts[#parts + 1] = k .. "=" .. v end
+    table.sort(parts)
+    return #parts > 0 and table.concat(parts, "; ") or nil
+end
+
+--- Why a site refused us, when it's bot protection or a limit: a short
+--- reason for the store's "Couldn't reach" line, else nil.
+function OPDS.blockReason(code, headers, body)
+    code = tonumber(code) or 0
+    headers = headers or {}
+    local server = tostring(headers.server or ""):lower()
+    local b = tostring(body or ""):sub(1, 6000):lower()
+    local refused = code == 403 or code == 503 or code == 429
+    if headers["cf-mitigated"] or b:find("cf_chl_", 1, true) or b:find("challenge-platform", 1, true)
+        or (server:find("cloudflare", 1, true) and refused
+            and (b:find("just a moment", 1, true) or b:find("attention required", 1, true))) then
+        return "blocks apps: Cloudflare check"
+    end
+    if server:find("ddos-guard", 1, true) or b:find("ddos-guard", 1, true) then
+        return "blocks apps: DDoS-Guard check"
+    end
+    if refused and (b:find("captcha", 1, true) or b:find("are you a robot", 1, true)) then
+        return "blocks apps: asks for a captcha"
+    end
+    if code == 429 then return "too many requests: try again later" end
+end
+
+-- One HTTP GET, returning the body or nil, why. Refuses answers over
+-- max_response_bytes (6 MB) so a huge page can't run the Kindle out of
+-- memory. Also used for Gutendex's JSON (M.gutenbergCounts in bos_store)
+-- and for the sites people add (bos_store_libs, bos_store_web): those are
+-- asked as a browser, redirects followed here (up to 8) with their cookies.
+local function requestPayload(request_url, accept)
+    local builtin = OPDS.isBuiltin(request_url)
+    local jar, url_now, referer = {}, request_url, nil
+    local userinfo = request_url:match("^%a+://([^/@]*@)")
+    for hop = 1, 8 do
+        local chunks, received, too_large = {}, 0, false
+        local sink = function(chunk)
+            if chunk then
+                received = received + #chunk
+                if received > OPDS.max_response_bytes then
+                    too_large = true
+                    return nil, "response is too large"
+                end
+                chunks[#chunks + 1] = chunk
+            end
+            return 1
+        end
+        local headers = OPDS.headersFor(url_now, accept)
+        if not builtin then
+            headers["Cookie"] = cookieHeader(jar)
+            headers["Referer"] = referer
+        end
+        socketutil:set_timeout(socketutil.LARGE_BLOCK_TIMEOUT, socketutil.LARGE_TOTAL_TIMEOUT)
+        local ok, code, rheaders, status = http.request{
+            url = url_now,
+            method = "GET",
+            redirect = builtin,
+            headers = headers,
+            sink = sink,
+        }
+        socketutil:reset_timeout()
+        if too_large then return nil, "OPDS response exceeded 6 MiB" end
+        if not ok then return nil, tostring(code or status or "no answer") end
+        code = tonumber(code)
+        rheaders = type(rheaders) == "table" and rheaders or {}
+        local location = rheaders.location
+        if not builtin and code and code >= 300 and code < 400 and location then
+            keepCookies(jar, rheaders["set-cookie"])
+            referer = url_now
+            local next_url = url.absolute(url_now, location)
+            -- (luasocket drops a user:password@ on a redirect: kept for the same host)
+            if userinfo and not next_url:match("^%a+://[^/@]*@") and hostOf(next_url) == hostOf(request_url) then
+                next_url = next_url:gsub("^(%a+://)", "%1" .. userinfo)
+            end
+            url_now = next_url
+        else
+            local payload = table.concat(chunks)
+            if code ~= 200 then
+                return nil, (not builtin and OPDS.blockReason(code, rheaders, payload)) or status or ("HTTP " .. tostring(code))
+            end
+            if not builtin then
+                local why = OPDS.blockReason(code, rheaders, #payload < 20000 and payload or "")
+                if why then return nil, why end
+            end
+            if payload == "" then return nil, "Catalog returned an empty response" end
+            return payload
+        end
+    end
+    return nil, "too many redirects"
 end
 
 local function requestXml(request_url)
-    local payload, err = requestPayload(request_url)
+    local payload, err = requestPayload(request_url, "application/atom+xml, application/xml;q=0.9, */*;q=0.8")
     if not payload then return nil, err end
     local parsed_ok, document = pcall(parseXml, payload)
     if not parsed_ok or type(document) ~= "table" or document.name ~= "feed" then
