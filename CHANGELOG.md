@@ -2,6 +2,12 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.30.1
+
+- Settings no longer opens every menu (plugins' too) in the background as soon as it opens, only once you start a search; the search waits a moment more the first time. On a Paperwhite, Settings crashed right after opening, while that was going on.
+- Settings opened on a page by a link (the store's "Libraries, formats and language") forgets that at once, so after a crash it opens on its front page again, not on that page every time.
+- With the slow-step recorder on (koreader/settings/stui_perf), Settings writes each page drawn, row tapped and menu opened to koreader/stui_trace.log first, so a crash can be traced to the menu that caused it.
+
 ## 1.30.0
 
 - Fixed a crash in Settings: shown again after stepping aside (or reopened within ten minutes), it drew its search field, whose text and keyboard had been freed when it closed. It's now made afresh each time Settings shows again.

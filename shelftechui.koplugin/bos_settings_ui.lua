@@ -31,6 +31,21 @@ local TextWidget = require("ui/widget/textwidget")
 local TopContainer = require("ui/widget/container/topcontainer")
 local UIManager = require("ui/uimanager")
 local logger = require("logger")
+
+--- With the slow-step recorder on (koreader/settings/stui_perf): each menu
+--- the index or a page opens, written down first (koreader/stui_trace.log),
+--- so a crash inside one shows whose it was.
+local trace_on
+local function trace(what)
+    if trace_on == nil then
+        local okP, Perf = pcall(require, "bos_perf")
+        trace_on = okP and Perf.on() or false
+    end
+    if not trace_on then return end
+    local f = io.open(require("datastorage"):getDataDir() .. "/stui_trace.log", "a")
+    if f then f:write(os.date("%H:%M:%S "), tostring(what), "\n") f:close() end
+end
+
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
@@ -277,14 +292,16 @@ function HubScreen:init()
 
     self.sections = self.plugin:getSections()
     self.stack = { self:rootLevel() }
-    -- the search index, built quietly once the app is up
-    self:indexInBackground()
+    -- (the search index: only once searching starts, not on opening; it
+    -- opens every menu, plugins' too)
     -- asked to open on a section (the store's "Libraries, formats and
     -- language"): once
     local Store = require("bos_settings_store")
     local want = Store.get("settings_open_at")
     if want then
         Store.set("settings_open_at", nil)
+        -- (written now: a crash on that page mustn't open it every time)
+        pcall(function() G_reader_settings:flush() end)
         for i, sec in ipairs(self.sections) do
             if sec.id == want then self:openSection(i) return end
         end
@@ -479,6 +496,7 @@ function HubScreen:getFocusableWidgetXY() return nil end
 
 --- The search page, the keyboard up.
 function HubScreen:startSearch()
+    self:indexInBackground()
     local lvl = self.stack[#self.stack]
     if lvl.kind ~= "search" then
         self:push{ kind = "search", title = _("Search"), page = 1 }
@@ -535,6 +553,7 @@ end
 
 function HubScreen:activate(item)
     if not itemEnabled(item) then return end
+    trace("tap: " .. itemText(item))
 
     if item.tap_input or item.tap_input_func then
         local before = self:windows()
@@ -784,6 +803,7 @@ end
 
 -- ----- the index -------------------------------------------------------------
 
+
 local Utf8Proc
 local function norm(s)
     s = tostring(s or "")
@@ -846,6 +866,7 @@ function HubScreen:indexBuilder()
                     local sub = item.sub_item_table
                     if item.stui_search_shallow then sub = nil
                     elseif item.sub_item_table_func then
+                        trace("index: " .. table.concat(trail, " > ") .. " > " .. text)
                         local okS, s2 = pcall(item.sub_item_table_func)
                         sub = okS and s2 or nil
                     end
@@ -1368,6 +1389,7 @@ end
 
 function HubScreen:render()
     local lvl = self.stack[#self.stack]
+    trace("draw: " .. tostring(lvl and (lvl.title or lvl.kind)))
     local full_w = self:bodyWidth()
     local header = self:pageHeader(full_w)
     local top = VerticalGroup:new{
