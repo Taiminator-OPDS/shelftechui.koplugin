@@ -371,7 +371,14 @@ function Search.start(query, page, filters, on_update, exact)
                             end
                         end
                     end
-                    if type(result) ~= "table" then result = { books = books } else result.books = books end
+                    -- (a library that failed and whose sub-queries found
+                    -- nothing either stays failed, so its reason is shown)
+                    if type(result) ~= "table" then
+                        if #books == 0 then return nil, err end
+                        result = { books = books }
+                    else
+                        result.books = books
+                    end
                     err = (#books > 0) and nil or err
                 end
             end

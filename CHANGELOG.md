@@ -2,6 +2,10 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.32.1
+
+- The "Couldn't reach: …" line now shows for searches of two or more words. When a library failed on such a search, the store tried parts of the query too and, finding nothing, counted the library as answered with no books, so its failure was never shown (and when every library failed, it said "Nothing found" instead of "couldn't be reached").
+
 ## 1.32.0
 
 - Library priority: Settings → Connect → Store → Library priority lists every library, built-in and your own, in order. Tap one to move it to the top, up, down or to the bottom; "Back to the default order" undoes it.
