@@ -2,6 +2,10 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.29.0
+
+- Any website can be one of your libraries in the store, not only catalogues (OPDS): "Add a library by address…" with the site's address. Its search box is found on the page, and the store searches through it as you would, reading the page of results: a book's page is read when you open it for the files it offers (EPUB first), its cover and its description; a link straight to a file downloads as it is. Only results matching every word you typed are kept, so the site's menus drop out. If the search box isn't found, search the site for a word in a browser and add the address of the results with {q} where that word was.
+
 ## 1.28.0
 
 - The top panel's stars (Rating, interactive) are your Hardcover rating too: a tap there is sent to Hardcover for a book linked to it (now, or when next connected). A book not linked yet is linked first when Hardcover certainly has it. Beside your stars, Hardcover's readers' rating of the book, like "(4.4★)" (asked once a day).

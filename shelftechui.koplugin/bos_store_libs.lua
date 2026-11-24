@@ -18,6 +18,9 @@ its own to browse on the storefront.
 A catalogue behind a password: put it in the address
 (https://name:password@host/opds); it's kept in KOReader's settings on
 this device.
+
+A website without a catalogue can be added too (kind = "web",
+bos_store_web): it's searched with its own search, and its results page read.
 --]]
 
 local logger = require("logger")
@@ -80,6 +83,17 @@ end
 function M.probe(url)
     url = M.tidy(url)
     if not url then return nil, _("No address.") end
+    -- (an address with {q} in it is a website's search, not a catalogue)
+    if url:find("{q}", 1, true) or url:find("%s", 1, true) then return require("bos_store_web").find(url) end
+    local info, err = M.probeOPDS(url)
+    if info then return info end
+    -- not a catalogue: the site, searched as a person would
+    local web, werr = require("bos_store_web").find(url)
+    if web then return web end
+    return nil, werr or err
+end
+
+function M.probeOPDS(url)
     local O = OPDS()
     local document, err = O._requestXml(url)
     if not document then return nil, tostring(err) end
@@ -157,6 +171,7 @@ function M.add(info)
     for _i, lib in ipairs(l) do
         if lib.url == info.url then
             lib.name, lib.search, lib.browse, lib.on = info.name or lib.name, info.search, info.browse, true
+            lib.kind = info.kind
             save(l)
             M.register()
             return lib
@@ -164,7 +179,8 @@ function M.add(info)
     end
     local n = 0
     for _i, lib in ipairs(l) do n = math.max(n, tonumber(tostring(lib.id):match("(%d+)$")) or 0) end
-    local lib = { id = "user_" .. (n + 1), name = info.name, url = info.url, search = info.search, browse = info.browse, on = true }
+    local lib = { id = "user_" .. (n + 1), name = info.name, url = info.url, search = info.search, browse = info.browse, on = true,
+        kind = info.kind }
     table.insert(l, lib)
     save(l)
     M.register()
@@ -223,6 +239,10 @@ M._fill = fill
 function M.search(id, query, page, filters)
     local lib = M.find(id)
     if not lib then return nil, "Unknown library" end
+    if lib.kind == "web" then
+        if not (query and query:match("%S")) then return { books = {}, total = 0, has_next = false } end
+        return require("bos_store_web").search(lib, query, page)
+    end
     local O = OPDS()
     page = math.max(1, tonumber(page) or 1)
     local source = { name = lib.name }
@@ -269,6 +289,15 @@ function M.register()
                 return res, err
             end
             return orig(self, id, query, page, filters)
+        end
+        -- a website's book: its page read for the files
+        local orig_h = P.hydrate
+        P.hydrate = function(self, book)
+            if type(book) == "table" and book.web and not (book.acquisitions and #book.acquisitions > 0) then
+                return require("bos_store_web").hydrate(book)
+            end
+            if type(book) == "table" and book.web then return book end
+            return orig_h(self, book)
         end
     end
 end

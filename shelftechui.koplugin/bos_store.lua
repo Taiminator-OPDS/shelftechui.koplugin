@@ -1990,7 +1990,7 @@ function M.addLibrary(done)
     local dialog
     dialog = InputDialog:new{
         title = _("Add a library"),
-        description = _("The address of its catalogue (OPDS): a Calibre, Calibre-Web, Kavita or Komga server, or a library's or publisher's feed. With a password: https://name:password@address"),
+        description = _("The address of its catalogue (OPDS: a Calibre, Calibre-Web, Kavita or Komga server, a library's or publisher's feed), or of any website with a search: it's searched as you would, through its own search box. If the site's search isn't found, search it for a word in a browser and give the address of the results, with {q} in place of that word. With a password: https://name:password@address"),
         input = "https://",
         input_hint = "https://example.org/opds",
         buttons = { {
@@ -1999,7 +1999,7 @@ function M.addLibrary(done)
                 local url = Libs.tidy(dialog:getInputText())
                 UIManager:close(dialog)
                 if not url or url == "https://" then return end
-                local msg = InfoMessage:new{ text = T(_("Reading the catalogue at %1…"), Libs.host(url)) }
+                local msg = InfoMessage:new{ text = T(_("Reading %1…"), Libs.host(url)) }
                 UIManager:show(msg)
                 local function go()
                     Async.run(function() return Libs.probe(url) end, function(ok, info, err)
@@ -2007,7 +2007,8 @@ function M.addLibrary(done)
                         if ok and type(info) == "table" then
                             local lib = Libs.add(info)
                             UIManager:show(InfoMessage:new{ text = T(_("%1 is added.\n\n%2"), lib.name,
-                                (lib.search and lib.browse) and _("It's asked when you search, and has a shelf under Browse.")
+                                lib.kind == "web" and _("It's a website: it's searched through its own search when you search, and a book's page is read for its files when you open it.")
+                                or (lib.search and lib.browse) and _("It's asked when you search, and has a shelf under Browse.")
                                 or lib.search and _("It's asked when you search.")
                                 or _("It has a shelf under Browse (this catalogue can't be searched).")) })
                             if done then done(lib) end
@@ -2034,7 +2035,7 @@ function M.libraryItems()
         local id = lib.id
         table.insert(items, {
             text = lib.name,
-            description = Libs.host(lib.url) .. " · " .. ((lib.search and lib.browse) and _("search and browse")
+            description = Libs.host(lib.url) .. " · " .. (lib.kind == "web" and _("website, searched") or (lib.search and lib.browse) and _("search and browse")
                 or lib.search and _("search") or _("browse")),
             mandatory_func = function() local l = Libs.find(id) return l and l.on ~= false and _("On") or _("Off") end,
             sub_item_table_func = function()
@@ -2061,7 +2062,7 @@ function M.libraryItems()
     end
     table.insert(items, {
         text = _("Add a library by address…"),
-        description = _("Any catalogue that speaks OPDS, the open standard e-book catalogues use: your own Calibre, Calibre-Web, Kavita or Komga server, or a library's or publisher's feed."),
+        description = _("A catalogue that speaks OPDS (your own Calibre, Calibre-Web, Kavita or Komga server, a library's or publisher's feed), or any website with a search, searched through its own search box."),
         callback = function() M.addLibrary() end,
     })
     return items

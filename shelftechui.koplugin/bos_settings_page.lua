@@ -30,7 +30,7 @@ local S = UI.S
 
 local Page = {}
 
-Page.VERSION = "1.28.0"
+Page.VERSION = "1.29.0"
 
 -- Dispatcher's sub-menus edit tables in place and flag `caller.updated`.
 local saver = setmetatable({}, { __newindex = function() Store.save() end })
@@ -1017,7 +1017,7 @@ function Page.sections(plugin)
                 -- right after the built-in libraries: yours
                 table.insert(connect.items, {
                     text = _("Your libraries"),
-                    description = _("Libraries you've added by the address of their catalogue (OPDS). They're asked when you search, and each has a shelf in the store."),
+                    description = _("Libraries you've added by their address: catalogues (OPDS), each with a shelf in the store, and websites searched through their own search. All are asked when you search."),
                     mandatory_func = function()
                         local n = #require("bos_store_libs").list()
                         return n == 0 and _("None") or tostring(n)
