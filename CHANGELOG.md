@@ -2,6 +2,10 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.32.4
+
+- Home's top panel: the progress bar fills again. With the Retro theme on a sharp screen (a Paperwhite), the bar's frame and padding grew with the screen but the bar itself didn't, so a bar the height of its line of text was all frame and looked empty at any percentage. A thin bar now gets a lighter frame and a solid fill; bars with room look as before.
+
 ## 1.32.3
 
 - Libraries you add (catalogues and websites) are now asked the way a web browser asks: a browser's identification and language, cookies kept while following the site's redirects, and the page a book came from sent along with its download. Sites that simply refused unfamiliar apps (a bare "403 Forbidden") now answer. The built-in libraries are still asked as KOReader.

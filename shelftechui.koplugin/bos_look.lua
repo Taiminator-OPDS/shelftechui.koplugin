@@ -493,12 +493,29 @@ function L.track(bb, x, y, w, h, frac, opts)
     local b = opts.border or L.LINE
     frac = math.max(0, math.min(1, frac or 0))
     if th.track == "stripes" then
+        -- The frame and padding scale with the screen's density, but a bar's
+        -- height may not (Home's top panel sizes it from the text's point
+        -- size). On a sharp screen a thin bar was all frame: the fill came
+        -- out a pixel tall, under the pinstripes' spacing, and the bar looked
+        -- empty at any percentage. A bar with no room for three stripes now
+        -- gets a lighter frame (a sixth of its height), one pixel of padding
+        -- and a solid fill. Bars that had the room look as before.
+        local pad = math.max(1, S(2))
+        local solid = h - 2 * b - 2 * pad < 3 * S(3)
+        if solid then
+            pad = 1
+            b = math.max(1, math.min(b, math.floor(h / 6)))
+        end
         L.box(bb, x, y, w, h, { border = b })
         local ix, iw = x + b, w - 2 * b
         local fw = math.floor(iw * frac + 0.5)
-        if fw > 0 then
-            local pad = math.max(1, S(2))
-            L.fill(bb, ix, y + b + pad, fw, h - 2 * b - 2 * pad)
+        local fh = h - 2 * b - 2 * pad
+        if fw > 0 and fh > 0 then
+            if solid then
+                bb:paintRect(ix + pad, y + b + pad, math.max(0, math.min(fw, iw - 2 * pad)), fh, BLACK)
+            else
+                L.fill(bb, ix, y + b + pad, fw, fh)
+            end
         end
         return ix, iw
     end
