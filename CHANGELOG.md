@@ -2,6 +2,10 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.33.0
+
+- A chip with books from several places: in the chip editor, Source → More → Several sources. Tick the places to combine: the Home library, Favorites, Recently read, the Kindle Virtual Library (on a Kindle), the Kobo library (on a Kobo), and any folders you add (each with everything under it). Their books show together in one shelf, sorted and filtered as the chip says; a book in two of the places shows once. Kindle books still open the Kindle's way; the others are ordinary books.
+
 ## 1.32.5
 
 - Details from Hardcover: Home now shows them, and the book keeps its cover. The details were saved, but Home kept showing the old ones and the book lost its thumbnail: it was taken out of the cover cache to be read again, but a snapshot of that cache Home keeps (to start quickly) still had the old entry, so Home never read the book again. The same could happen with Home's own "Refresh metadata". Now a refreshed book is read again at once: its cover comes back and the new title, author and description show, in the top panel too.
