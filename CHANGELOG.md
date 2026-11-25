@@ -2,6 +2,11 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.32.5
+
+- Details from Hardcover: Home now shows them, and the book keeps its cover. The details were saved, but Home kept showing the old ones and the book lost its thumbnail: it was taken out of the cover cache to be read again, but a snapshot of that cache Home keeps (to start quickly) still had the old entry, so Home never read the book again. The same could happen with Home's own "Refresh metadata". Now a refreshed book is read again at once: its cover comes back and the new title, author and description show, in the top panel too.
+- The store: Gutendex (Gutenberg's catalogue, asked when Gutenberg's own search is down) is given longer to answer; on the Kindle it was given up on as it started ("wantread"). A library that's too slow now says "too slow to answer".
+
 ## 1.32.4
 
 - Home's top panel: the progress bar fills again. With the Retro theme on a sharp screen (a Paperwhite), the bar's frame and padding grew with the screen but the bar itself didn't, so a bar the height of its line of text was all frame and looked empty at any percentage. A thin bar now gets a lighter frame and a solid fill; bars with room look as before.

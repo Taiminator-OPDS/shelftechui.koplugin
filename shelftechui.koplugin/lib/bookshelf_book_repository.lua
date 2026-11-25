@@ -3794,6 +3794,13 @@ local _lightmeta_refresh_pending = false
 -- every two seconds for the whole session. Set once: a session refreshes
 -- at most once.
 local _lightmeta_fresh_rows = nil
+-- (ShelfTechUI) Books whose BIM row was deleted this session (Repo.forgetBook:
+-- Refresh metadata, Details from Hardcover). Their rows in the snapshots above
+-- are stale: kept out of every map built from them, so the extraction check
+-- reads the book live, finds no row, and queues it. Without this a rebuilt
+-- map brought the old row back ("cover-ok"), the book was never read again,
+-- and it stayed without a cover, with its old details.
+Repo._forgotten = {}
 local function _scheduleLightMetaRefresh()
     if _lightmeta_refresh_pending or _lightmeta_fresh_rows then return end
     local ok_um, UIManager = pcall(require, "ui/uimanager")
@@ -3855,6 +3862,9 @@ local function _getLightMetaCache(home, depth)
     local row_map = snapshot or _loadBatchBookInfoFromBim()
     if row_map and not snapshot then
         _saveRowSnapshot(row_map)
+    end
+    if row_map then
+        for fp in pairs(Repo._forgotten) do row_map[fp] = nil end
     end
     local stale = (snapshot ~= nil) and not fresh
     local meta_map
@@ -3993,6 +4003,8 @@ function Repo.batchRowFor(fp) return _batchInfoFor(fp) end
 -- batch, the book is read live, has no row, and is queued.
 function Repo.forgetBook(fp)
     if type(fp) ~= "string" then return end
+    Repo._forgotten[fp] = true
+    if _lightmeta_fresh_rows then _lightmeta_fresh_rows[fp] = nil end
     -- %published's date, when the file is no longer the one it came from.
     pcall(function() require("lib/bookshelf_published").forget(fp) end)
     for _key, entry in pairs(_light_meta_cache) do

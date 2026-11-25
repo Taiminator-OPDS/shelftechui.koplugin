@@ -272,7 +272,18 @@ end
 -- memory. Also used for Gutendex's JSON (M.gutenbergCounts in bos_store)
 -- and for the sites people add (bos_store_libs, bos_store_web): those are
 -- asked as a browser, redirects followed here (up to 8) with their cookies.
-local function requestPayload(request_url, accept)
+-- `wait`: { block, total } seconds for a slow server (Gutendex), else
+-- KOReader's usual large-request timeouts. "wantread"/"wantwrite" from the
+-- secure connection mean the wait ran out: reported as "too slow to answer".
+local function slowWords(why)
+    why = tostring(why or "")
+    if why == "wantread" or why == "wantwrite" or why == "timeout" or why:find("timed? ?out") then
+        return "too slow to answer"
+    end
+    return why
+end
+
+local function requestPayload(request_url, accept, wait)
     local builtin = OPDS.isBuiltin(request_url)
     local jar, url_now, referer = {}, request_url, nil
     local userinfo = request_url:match("^%a+://([^/@]*@)")
@@ -294,7 +305,11 @@ local function requestPayload(request_url, accept)
             headers["Cookie"] = cookieHeader(jar)
             headers["Referer"] = referer
         end
-        socketutil:set_timeout(socketutil.LARGE_BLOCK_TIMEOUT, socketutil.LARGE_TOTAL_TIMEOUT)
+        if wait then
+            socketutil:set_timeout(wait[1], wait[2])
+        else
+            socketutil:set_timeout(socketutil.LARGE_BLOCK_TIMEOUT, socketutil.LARGE_TOTAL_TIMEOUT)
+        end
         local ok, code, rheaders, status = http.request{
             url = url_now,
             method = "GET",
@@ -304,7 +319,7 @@ local function requestPayload(request_url, accept)
         }
         socketutil:reset_timeout()
         if too_large then return nil, "OPDS response exceeded 6 MiB" end
-        if not ok then return nil, tostring(code or status or "no answer") end
+        if not ok then return nil, slowWords(code or status or "no answer") end
         code = tonumber(code)
         rheaders = type(rheaders) == "table" and rheaders or {}
         local location = rheaders.location
@@ -832,7 +847,9 @@ local function searchGutendex(source, query, page, filters)
     end
     if filters and filters.sort == "newest" then parts[#parts + 1] = "sort=descending"
     elseif filters and filters.sort == "oldest" then parts[#parts + 1] = "sort=ascending" end
-    local payload, err = requestPayload(OPDS.gutendex .. "/books/?" .. table.concat(parts, "&"), "application/json")
+    -- (Gutendex is often slow to start answering: 15 s to begin, 35 s in all,
+    -- inside the store's 45 s per library)
+    local payload, err = requestPayload(OPDS.gutendex .. "/books/?" .. table.concat(parts, "&"), "application/json", { 15, 35 })
     if not payload then return nil, "Gutendex: " .. tostring(err) end
     local ok, data = pcall(function() return require("rapidjson").decode(payload) end)
     if not ok or type(data) ~= "table" or type(data.results) ~= "table" then

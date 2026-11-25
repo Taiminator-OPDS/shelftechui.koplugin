@@ -60,28 +60,54 @@ function M.write(file, d)
     return true
 end
 
---- Everything that shows the book reads it again.
+--- Everything that shows the book reads it again: the same steps as Home's
+--- own "Refresh metadata" (lib/bookshelf_widget.lua, refresh_btn). The
+--- book's cached row (cover and details) is dropped, so it's read again
+--- from the file and its custom details; the cover may be fetched again;
+--- Home's caches of the book, its progress record and the top panel's
+--- remembered book are dropped; then Home is built again, which queues the
+--- book to be read. (Before, only the row was dropped: the top panel kept the
+--- old details and, on the device, the book's cover didn't come back.)
 local function changed(file)
     local Event = require("ui/event")
     pcall(function()
         local ok_bim, BIM = pcall(require, "bookinfomanager")
         if ok_bim and BIM and BIM.deleteBookInfo then BIM:deleteBookInfo(file) end
     end)
-    pcall(function()
-        local Repo = require("lib/bookshelf_book_repository")
-        if Repo.forgetBook then Repo.forgetBook(file) end
-        if Repo.invalidateBookCache then Repo.invalidateBookCache("hardcover-details") end
-        pcall(function() require("lib/bookshelf_scaled_cover_cache"):drop(file) end)
-    end)
+    local okR, Repo = pcall(require, "lib/bookshelf_book_repository")
+    if okR then
+        pcall(Repo.forgetBook, file)
+        pcall(function() Repo.invalidateLightMeta() end)
+        pcall(function() Repo.invalidateProgressCache(file) end)
+        pcall(function() Repo.invalidateBookCache("hardcover-details") end)
+    end
+    pcall(function() require("lib/bookshelf_scaled_cover_cache"):drop(file) end)
+    local bw
+    pcall(function() bw = require("bos_shelf").shelfWidget() end)
+    if bw then
+        pcall(function() bw:_allowCoverFetch(file) end)
+        if bw._hero_current_memo and bw._hero_current_memo.fp == file then bw._hero_current_memo = nil end
+        -- Home notes the books it has checked as fully read ("cover-ok") and
+        -- doesn't look at them again; the note is cleared through a hook tied
+        -- to one Home widget, which may not be the one showing. Cleared here
+        -- on the live one, or the book is never read again: no cover, and
+        -- the old details (what the Kindle showed).
+        local memo = bw._bim_check_memo
+        if memo then
+            local prefix = file .. "|"
+            for k in pairs(memo) do
+                if k:sub(1, #prefix) == prefix then memo[k] = nil end
+            end
+        end
+    end
     UIManager:broadcastEvent(Event:new("InvalidateMetadataCache", file))
-    UIManager:broadcastEvent(Event:new("BookMetadataChanged"))
-    pcall(function()
-        local bw = require("bos_shelf").shelfWidget()
-        if bw then
+    UIManager:broadcastEvent(Event:new("BookMetadataChanged", { filepath = file }))
+    if bw then
+        pcall(function()
             bw:_rebuild()
             UIManager:setDirty(bw, "ui")
-        end
-    end)
+        end)
+    end
 end
 
 --- The cover from Hardcover, as the book's custom cover; cb(ok).
