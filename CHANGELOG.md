@@ -2,6 +2,10 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.33.1
+
+- Finding slow wakes: with the slow-step recorder on (the file koreader/settings/stui_perf), any call that can hold the screen for seconds is now timed and, when it takes over a second, written to crash.log with who made it: a network name lookup, a web request, a call to the Kindle's system services (lipc), a shell command. A step that runs past 3 seconds is also caught where it is, when possible. This is for tracking down the ~10 second wait when Home is woken after a long sleep. Off by default; nothing changes for anyone without the file.
+
 ## 1.33.0
 
 - A chip with books from several places: in the chip editor, Source → More → Several sources. Tick the places to combine: the Home library, Favorites, Recently read, the Kindle Virtual Library (on a Kindle), the Kobo library (on a Kobo), and any folders you add (each with everything under it). Their books show together in one shelf, sorted and filtered as the chip says; a book in two of the places shows once. Kindle books still open the Kindle's way; the others are ordinary books.
