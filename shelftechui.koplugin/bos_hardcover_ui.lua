@@ -6,9 +6,10 @@ Hardcover's screens (the talking to Hardcover is bos_hardcover).
                          FRIENDS · READING · WANT · READ · EXPLORE (browse by
                          genre or mood), a search; or the sign-in screen
   M.browseTag(key, name) the app on the books with a genre or a mood
-  M.openBook(book)       a book: your shelf and rating for it, the quotes
+  M.openBook(book, file) a book: your shelf and rating for it, the quotes
                          readers liked most, reviews, and the way to the store
-  M.tab(bw, book, modal) the "Hardcover" tab of Bookshelf's book window
+  M.openForFile(book)    the page of a book of yours (Bookshelf's record):
+                         the one it's linked to, else found and linked
   M.rateDialog(title, cur, done)   five stars, by halves
 
 All of it draws from what's already here and fetches in the background:
@@ -18,8 +19,7 @@ a tab shows "Loading…" until its answer comes, never a frozen screen.
 local Blitbuffer = require("ffi/blitbuffer")
 local Device = require("device")
 local Geom = require("ui/geometry")
-local GestureRange = require("ui/gesturerange")
-local InputContainer = require("ui/widget/container/inputcontainer")
+local InfoMessage = require("ui/widget/infomessage")
 local UIManager = require("ui/uimanager")
 local logger = require("logger")
 local _ = require("gettext")
@@ -1518,7 +1518,9 @@ local function fetchBook(o, redraw)
     end)
 end
 
-function M.openBook(book)
+--- A book's page on Hardcover; `linked_to`: a file of yours that is this
+--- book (putting it on a shelf there keeps the link up to date).
+function M.openBook(book, linked_to)
     local o = { book = book }
     local page
     page = Page:new{ caption = _("Hardcover"),
@@ -1550,96 +1552,49 @@ function M.openBook(book)
             end
         end }
     page.redraw = function(self) if not self.closed then self:refresh("ui") end end
-    o.on_change = function() o.changed = true end
+    o.on_change = function(nb)
+        o.changed = true
+        if linked_to and nb then
+            local l = HC.linkFor(linked_to) or { id = nb.id, title = nb.title, author = nb.author, pages = nb.pages }
+            if nb.mine then l.entry, l.status = nb.mine.id, nb.mine.status end
+            HC.setLink(linked_to, l)
+        end
+    end
     page:show()
     fetchBook(o, function() page:redraw() end)
     return page
 end
 
--- ---------------------------------------------------------------- the book window's tab
+-- ---------------------------------------------------------------- from a book of yours
 
-local Tab = InputContainer:extend{ width = 0, height = 0, book = nil, show_parent = nil }
-
-function Tab:init()
-    self.dimen = Geom:new{ x = 0, y = 0, w = self.width, h = self.height }
-    self.hits = {}
-    self.ges_events = {
-        HTap = { GestureRange:new{ ges = "tap", range = function() return self.dimen end } },
-        HSwipe = { GestureRange:new{ ges = "swipe", range = function() return self.dimen end } },
-    }
-    self.o = nil
-    self.note = nil
-    if HC.signedIn() then self:find() end
-end
-
-function Tab:hit(rect, fn) table.insert(self.hits, { rect = rect, fn = fn }) end
-
-function Tab:redraw()
-    if self.dimen and self.dimen.x then
-        UIManager:setDirty(self.show_parent or "all", function() return "ui", self.dimen end)
-    end
-end
-
---- Which Hardcover book this file is: the one it was linked to, or the
---- likeliest by title and author (kept when it's certain).
-function Tab:find()
-    local file = self.book.filepath
-    local link = HC.linkFor(file)
-    local function show(b)
-        self.o = { book = b, compact = true, no_store = true, on_change = function(nb)
-            local l = HC.linkFor(file) or { id = nb.id, title = nb.title, author = nb.author, pages = nb.pages }
-            if nb.mine then l.entry, l.status = nb.mine.id, nb.mine.status end
-            HC.setLink(file, l)
-        end }
-        fetchBook(self.o, function() self:redraw() end)
-        self:redraw()
-    end
-    if link then return show({ id = link.id, title = link.title, author = link.author, pages = link.pages }) end
-    self.note = _("Looking on Hardcover…")
-    HC.match(self.book.title, self.book.author, function(b, sure, why)
-        self.note = nil
-        if not b then
-            self.note = why or _("Hardcover doesn't seem to have this book. Search for it to link it.")
-        elseif sure then
-            HC.setLink(file, { id = b.id, title = b.title, author = b.author, pages = b.pages })
-            show(b)
-        else
-            self.guess = b
-            HC.fetchCovers({ b }, function() self:redraw() end, 1)
-        end
-        self:redraw()
-    end)
-end
-
---- Pick the book by hand: a search, then a list to choose from.
-function Tab:choose()
+--- Hardcover's search for a book of yours, to pick the right one by hand;
+--- the one picked is linked to the file and opened.
+local function chooseFor(book)
     local InputDialog = require("ui/widget/inputdialog")
     local dlg
     dlg = InputDialog:new{
         title = _("Find this book on Hardcover"),
-        input = self.book.title or "",
+        input = book.title or "",
         buttons = { {
             { text = _("Cancel"), id = "close", callback = function() UIManager:close(dlg) end },
             { text = _("Search"), is_enter_default = true, callback = function()
                 local q = dlg:getInputText()
                 UIManager:close(dlg)
-                self.note, self.guess, self.o = _("Searching…"), nil, nil
-                self:redraw()
                 HC.search(q, function(list, why)
-                    self.note = nil
-                    if not list or #list == 0 then self.note = why or _("Nothing found.") self:redraw() return end
+                    if not list or #list == 0 then
+                        UIManager:show(InfoMessage:new{ text = why or _("Nothing found."), timeout = 3 })
+                        return
+                    end
                     local items = {}
                     for i = 1, math.min(8, #list) do
                         local b = list[i]
                         items[#items + 1] = { text = b.title .. (b.author and ("  ·  " .. b.author) or "") .. (b.year and ("  ·  " .. b.year) or ""),
                             callback = function()
-                                HC.setLink(self.book.filepath, { id = b.id, title = b.title, author = b.author, pages = b.pages })
-                                self.guess = nil
-                                self:find()
+                                HC.setLink(book.filepath, { id = b.id, title = b.title, author = b.author, pages = b.pages })
+                                M.openBook(b, book.filepath)
                             end }
                     end
                     UI.openList(items, nil)
-                    self:redraw()
                 end)
             end },
         } },
@@ -1648,102 +1603,44 @@ function Tab:choose()
     dlg:onShowKeyboard()
 end
 
-function Tab:getSize() return Geom:new{ w = self.width, h = self.height } end
-
-function Tab:paintTo(bb, x, y)
-    self.dimen = Geom:new{ x = x, y = y, w = self.width, h = self.height }
-    self.hits = {}
-    bb:paintRect(x, y, self.width, self.height, WHITE)
-    local pad = S(18)
-    local w = self.width - 2 * pad
-    local ok, err = pcall(function()
-        if not HC.signedIn() then
-            local h = Page.wrap(bb, _("Sign in to Hardcover to put this book on your shelves, rate it, and see the quotes readers liked most."),
-                Look.serif(16, false, true), x + pad, y + S(22), w, 4, S(25), Look.GRAY)
-            local r = Look.button(bb, x + pad, y + S(22) + h + S(16), S(220), S(44), _("Sign in"), { size = 13, on = true })
-            self:hit(r, function() self:leave(function() M.open() end) end)
-            return
-        end
-        if self.o then
-            drawBook(self, bb, x + pad, y + S(14), w, y + self.height - S(6), self.o)
-            -- (the wrong book? a small key to choose another)
-            local r = Geom:new{ x = x + self.width - pad - S(150), y = y + self.height - S(46), w = S(150), h = S(36) }
-            Look.button(bb, r.x, r.y, r.w - Look.SHADOW_SMALL, S(36), _("Not this book?"), { size = 10 })
-            self:hit(r, function() self:choose() end)
-            return
-        end
-        if self.guess then
-            local b = self.guess
-            Look.label(bb, _("Is it this one?"), x + pad, y + S(14), w, S(20), 11, { color = Look.GRAY })
-            local cw, ch = S(92), S(138)
-            drawCover(bb, b, x + pad, y + S(44), cw, ch)
-            local tx = x + pad + cw + S(18)
-            local th = Page.wrap(bb, b.title, Look.serif(18, true), tx, y + S(44), w - cw - S(18), 3, S(25))
-            if b.author then Page.wrap(bb, b.author, Look.serif(14, false, true), tx, y + S(48) + th, w - cw - S(18), 1, S(22), Look.GRAY) end
-            local by = y + S(44) + ch + S(20)
-            local r1 = Look.button(bb, x + pad, by, S(150), S(42), _("Yes"), { size = 13, on = true })
-            self:hit(r1, function()
-                HC.setLink(self.book.filepath, { id = b.id, title = b.title, author = b.author, pages = b.pages })
-                self.guess = nil
-                self:find()
-            end)
-            local r2 = Look.button(bb, x + pad + S(170), by, S(190), S(42), _("No, search"), { size = 13 })
-            self:hit(r2, function() self:choose() end)
-            return
-        end
-        local h = Page.wrap(bb, self.note or "", Look.serif(16, false, true), x + pad, y + S(22), w, 4, S(25), Look.GRAY)
-        if self.note and not self.note:find("…", 1, true) then
-            local r = Look.button(bb, x + pad, y + S(22) + h + S(16), S(220), S(44), _("Search Hardcover"), { size = 13, on = true })
-            self:hit(r, function() self:choose() end)
-        end
-    end)
-    if not ok then logger.warn("ShelfTechUI: Hardcover tab:", err) end
-end
-
---- Close the book window, then do something.
-function Tab:leave(fn)
-    local modal = self.modal and self.modal()
-    UIManager:nextTick(function()
-        if modal then pcall(function() if modal.onClose then modal:onClose() else UIManager:close(modal) end end) end
-        UIManager:nextTick(fn)
-    end)
-end
-
-function Tab:onHTap(_, ges)
-    for k = #self.hits, 1, -1 do
-        local h = self.hits[k]
-        if Page.inside(ges.pos, h.rect) then
-            UI.press(h.rect, h.fn)
-            return true
-        end
+--- A book of yours (Bookshelf's record of it) on Hardcover: the book it's
+--- linked to, else the likeliest by title and author (linked when it's
+--- certain, asked when it isn't), else a search. Signed out: the app, to
+--- sign in.
+function M.openForFile(book)
+    if type(book) ~= "table" or type(book.filepath) ~= "string" then return end
+    if not HC.signedIn() then return M.open() end
+    local link = HC.linkFor(book.filepath)
+    if link and link.id then
+        return M.openBook({ id = link.id, title = link.title, author = link.author, pages = link.pages }, book.filepath)
     end
-    return false
-end
-
-function Tab:onHSwipe(_, ges)
-    local o = self.o
-    if not o then return false end
-    if ges.direction == "west" and (o.pg or 1) < (o.pages or 1) then o.pg = o.pg + 1 self:redraw() return true end
-    if ges.direction == "east" and (o.pg or 1) > 1 then o.pg = o.pg - 1 self:redraw() return true end
-    return false
-end
-
---- The tab for Bookshelf's book window (a book of yours on the device),
---- while Hardcover is in use (signed in, or never yet declined).
-function M.tab(bw, book, modal)
-    -- (a key in the window's About tab, once you're signed in: nothing
-    -- there to tap for someone who doesn't use Hardcover)
-    if HC.get("tab_hidden") == true or not HC.signedIn() then return nil end
-    if type(book) ~= "table" or type(book.filepath) ~= "string" or book.is_remote or book.is_folder then return nil end
-    local okS, Sources = pcall(require, "lib/bookshelf_sources")
-    if okS and Sources.isRemotePath and Sources.isRemotePath(book.filepath) then return nil end
-    return {
-        id = "stui_hardcover",
-        label = _("Hardcover"),
-        widget_builder = function(avail_w, avail_h, show_parent)
-            return Tab:new{ width = avail_w, height = avail_h, book = book, modal = modal, show_parent = show_parent }
-        end,
-    }
+    local msg = InfoMessage:new{ text = _("Looking on Hardcover…") }
+    UIManager:show(msg)
+    local author = book.author or (type(book.authors) == "table" and book.authors[1]) or nil
+    HC.match(book.title, author, function(b, sure, why)
+        UIManager:close(msg)
+        if not b then
+            UIManager:show(require("ui/widget/confirmbox"):new{
+                text = why or _("Hardcover doesn't seem to have this book. Search for it?"),
+                ok_text = _("Search"),
+                ok_callback = function() chooseFor(book) end,
+            })
+        elseif sure then
+            HC.setLink(book.filepath, { id = b.id, title = b.title, author = b.author, pages = b.pages })
+            M.openBook(b, book.filepath)
+        else
+            UIManager:show(require("ui/widget/multiconfirmbox"):new{
+                text = T(_("Is it this one?\n\n%1\n%2"), b.title or "", b.author or ""),
+                choice1_text = _("No, search"),
+                choice1_callback = function() chooseFor(book) end,
+                choice2_text = _("Yes"),
+                choice2_callback = function()
+                    HC.setLink(book.filepath, { id = b.id, title = b.title, author = b.author, pages = b.pages })
+                    M.openBook(b, book.filepath)
+                end,
+            })
+        end
+    end)
 end
 
 -- ---------------------------------------------------------------- settings
@@ -1777,7 +1674,7 @@ function M.settings()
                     HC.set("library_ghosts", nxt[HC.get("library_ghosts", "reading_want")] or "reading_want")
                     pcall(function() require("bos_home").refresh() end)
                     M.settings() end },
-            { text = T(_("Hardcover in a book's window: %1"), HC.get("tab_hidden") and _("No") or _("Yes")), callback = function()
+            { text = T(_("Hardcover keys in a book's window: %1"), HC.get("tab_hidden") and _("No") or _("Yes")), callback = function()
                 HC.set("tab_hidden", not HC.get("tab_hidden") and true or nil) M.settings() end },
             { text = _("Send this device's reading history…"), callback = function() M.sendHistory() end },
             { text = HC.clientId() and _("App ID: set (link codes)") or _("App ID: none (sign in with a key)"), callback = function() M.askClientId() end },

@@ -63,9 +63,7 @@ local DESC_FONT_MAX     = 40
 local DESC_FONT_STEP    = 2
 local TAB_FONT_KEYS = {
     edit        = "edit_font_size",
-    description = DESC_FONT_KEY,
-    reviews     = "reviews_font_size",
-    tags        = "tags_font_size",
+    description = DESC_FONT_KEY,   -- the About tab
     cover       = "cover_font_size",
 }
 
@@ -859,13 +857,6 @@ function ReviewsModal:_activeBody()
     local tab = self._tabs and self._tabs[self._active_tab]
     if tab and tab.widget_builder then
         local w = tab.widget_builder(self.width, self._body_h, self)
-        -- ShelfTechUI: a gathered tab (bos_bookdetail) on one of its text
-        -- keys hands back Bookshelf's own sourced body: treated as that is
-        if type(w) == "table" and w._stui_html then
-            local hfocus = w.seg_rows and { layout = { w.seg_rows[1] },
-                disableFocusManagement = function() end } or nil
-            return w, false, hfocus
-        end
         local focus = (type(w) == "table") and (w.focus_tables or w.focus_table) or nil
         return w, true, focus
     end
@@ -1196,22 +1187,62 @@ function ReviewsModal:_renderHtml(html)
 end
 
 -- _buildTabRow(): the source tab strip, or nil when fewer than 2 sources.
+-- A tab can be `hidden`: no label in the strip, reached only from what
+-- opens it (the cover picker, from the pencil on the header's cover), with
+-- the strip showing the tab it was opened from. _visibleTabs() -> the shown
+-- tabs' indexes, in order.
+function ReviewsModal:_visibleTabs()
+    local list = {}
+    for i, t in ipairs(self._tabs or {}) do
+        if not t.hidden then list[#list + 1] = i end
+    end
+    return list
+end
+
+-- The strip's place of tab i (a hidden one: the tab it was opened from).
+function ReviewsModal:_stripPlace(i)
+    local t = self._tabs and self._tabs[i]
+    if t and t.hidden then i = self._return_tab or 1 end
+    for k, j in ipairs(self:_visibleTabs()) do
+        if j == i then return k end
+    end
+    return 1
+end
+
 function ReviewsModal:_buildTabRow()
-    if not self._tabs or #self._tabs < 2 then return nil end
+    local visible = self:_visibleTabs()
+    if #visible < 2 then return nil end
     local labels = {}
-    for i, t in ipairs(self._tabs) do labels[i] = t.label or tostring(i) end
+    for k, i in ipairs(visible) do labels[k] = self._tabs[i].label or tostring(i) end
     local active = self._tabs[self._active_tab]
     local label_scale = tonumber(Store.read(TAB_LABEL_FONT_KEY, 100)) or 100
     return TabBar:new{
         tabs        = labels,
-        active      = self._active_tab,
+        active      = self:_stripPlace(self._active_tab),
         active_dark = active and active.dark_body or false,
         width       = self.width,
         left_inset  = self._side_pad,
         font_size   = TAB_LABEL_FONT_BASE * label_scale / 100,
-        on_select   = function(i) self:_switchTab(i) end,
+        on_select   = function(k) self:_switchTab(visible[k]) end,
         band        = self._band,
     }
+end
+
+-- openHiddenTab(id): show the hidden tab with that id, coming back with
+-- backFromHidden() (or a tap on the strip) to the tab it was opened from.
+function ReviewsModal:openHiddenTab(id)
+    for i, t in ipairs(self._tabs or {}) do
+        if t.id == id then
+            if not (self._tabs[self._active_tab] or {}).hidden then self._return_tab = self._active_tab end
+            self:_switchTab(i)
+            return true
+        end
+    end
+    return false
+end
+
+function ReviewsModal:backFromHidden()
+    self:_switchTab(self._return_tab or 1)
 end
 
 -- rebuildTab(): reassemble in place (rebuilds the active body fresh). Used by
@@ -1246,7 +1277,7 @@ function ReviewsModal:_switchTab(i)
     self.font_size = self:_readFontSize()
     local tab = self._tabs[i]
     if self._tab_row then
-        self._tab_row.active = i
+        self._tab_row.active = self:_stripPlace(i)
         self._tab_row.active_dark = tab and tab.dark_body or false
     end
     if not tab.widget_builder then
@@ -1405,8 +1436,7 @@ function ReviewsModal:onSwipe(_arg, ges)
         -- you're already at that end. This makes swipe behave like every other
         -- paginated surface in the app while keeping tab-swipe reachable.
         local tb = self._tab_body
-        -- (ShelfTechUI: the cover grid is a key inside Edit now; its paging
-        -- is its own body's)
+        -- (the cover picker's grid sits under its strip: its body's _inner)
         local pager = tb and (tb._pager or (tb._inner and tb._inner._pager))
         if pager and pager.goto_page then
             if dir == "west" and pager.page < pager.total_pages then
@@ -1416,12 +1446,17 @@ function ReviewsModal:onSwipe(_arg, ges)
             end
             -- at an end: fall through to tab cycling
         end
-        if self._tabs and #self._tabs > 1 then
-            local n = #self._tabs
+        local visible = self:_visibleTabs()
+        if (self._tabs[self._active_tab] or {}).hidden then
+            -- (a hidden tab at its end: back where it was opened from)
+            self:backFromHidden(); return true
+        end
+        if #visible > 1 then
+            local n, at = #visible, self:_stripPlace(self._active_tab)
             if dir == "west" then
-                self:_switchTab(self._active_tab % n + 1); return true
+                self:_switchTab(visible[at % n + 1]); return true
             else
-                self:_switchTab((self._active_tab - 2) % n + 1); return true
+                self:_switchTab(visible[(at - 2) % n + 1]); return true
             end
         end
     end

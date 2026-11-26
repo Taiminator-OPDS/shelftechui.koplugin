@@ -788,7 +788,8 @@ end
 -- the right end of their first row (headerRow).
 --   o.text, o.icon (a symbols-font glyph, optional), o.icon_size (its face
 --   size, default font_size - 2), o.font_size (the popup's), o.inverted
---   (busy or on), o.enabled (false: greyed), o.on_tap
+--   (busy or on), o.enabled (false: greyed), o.on_tap, o.on_hold (with
+--   o.hold_always: held even while greyed)
 function Kit.headerButton(o)
     local face = Kit.sourceFace(o.font_size)
     local probe = TextWidget:new{ text = "Hg", face = face }
@@ -803,6 +804,8 @@ function Kit.headerButton(o)
         inverted   = o.inverted or false,
         enabled    = o.enabled,
         on_tap     = o.on_tap,
+        on_hold    = o.on_hold,
+        hold_always = o.hold_always,
     }
 end
 
@@ -810,7 +813,8 @@ end
 -- labelled ones (icon_size = font_size; a bigger glyph grows the button).
 function Kit.iconButton(o)
     return Kit.headerButton{ icon = o.icon, icon_size = o.font_size or 20,
-        font_size = o.font_size, inverted = o.inverted, enabled = o.enabled, on_tap = o.on_tap }
+        font_size = o.font_size, inverted = o.inverted, enabled = o.enabled, on_tap = o.on_tap,
+        on_hold = o.on_hold, hold_always = o.hold_always }
 end
 
 -- The light grey strip a tab's controls sit in, edge to edge under the tabs.

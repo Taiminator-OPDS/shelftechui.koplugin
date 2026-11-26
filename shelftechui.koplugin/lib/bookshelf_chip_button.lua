@@ -82,6 +82,8 @@ local ChipButton = {}
 --                   bottom of the screen (the layout editor's footer)
 --   opts.on_tap     function() fired on tap
 --   opts.on_hold    function() fired on a long-press (a nudge's big step)
+--   opts.hold_always the long-press works even while greyed (a download
+--                   key greyed once done keeps its "choose which" hold)
 --   opts.instant    act at once, with no pressed look first: a tap whose
 --                   result shows at once (a nudge's value), where the pressed
 --                   frame was one more refresh for every tap (maintainer)
@@ -169,7 +171,7 @@ function ChipButton.build(opts)
     if opts.on_hold then
         btn.ges_events.HoldSelect = { GestureRange:new{ ges = "hold", range = btn.dimen } }
         btn.onHoldSelect = function()
-            if opts.enabled ~= false then
+            if opts.enabled ~= false or opts.hold_always then
                 -- A nudge's hold (its big step) acts at once too.
                 if opts.instant then opts.on_hold()
                 else require("lib/bookshelf_popup_kit").pressThen(btn, frame, opts.on_hold) end

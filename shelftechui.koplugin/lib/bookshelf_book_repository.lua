@@ -424,47 +424,89 @@ end
 -- own book-info UIs refresh. Invalidates the book cache so genres re-resolve.
 function Repo.setEmbeddedGenres(filepath, genres)
     if not filepath then return end
-    local DocSettings = require("docsettings")
     local keywords = (type(genres) == "table" and #genres > 0)
         and table.concat(genres, ", ") or ""
+    Repo.setCustomProps(filepath, { keywords = keywords }, "embedded-genres")
+end
+
+-- The custom-metadata file of a book, opened (DocSettings), made when there
+-- is none yet: with a copy of the ORIGINAL doc_props (title/authors/
+-- keywords/...), as KOReader's own setCustomMetadata keeps, so a
+-- never-opened book still resolves its metadata when CoverBrowser is off and
+-- the originals can be put back. A never-opened book has no regular
+-- sidecar, so DocSettings:open() yields nothing; BIM's extracted props
+-- (originals, no custom file exists yet to overlay) stand in, so the copy
+-- isn't empty.
+function Repo.openCustomMetadata(filepath)
+    local DocSettings = require("docsettings")
     local cmf = DocSettings:findCustomMetadataFile(filepath)
-    local cds
-    if cmf then
-        cds = DocSettings.openSettingsFile(cmf)
-    else
-        cds = DocSettings.openSettingsFile()
-        -- KOReader's own setCustomMetadata stashes a copy of the ORIGINAL
-        -- doc_props here (title/authors/keywords/...) so a never-opened book
-        -- still resolves its metadata when CoverBrowser is off. A never-opened
-        -- book has no regular sidecar, so DocSettings:open() yields nothing;
-        -- fall back to BIM's extracted props (originals, no custom file exists
-        -- yet to overlay) so the copy isn't empty.
-        local props
-        local ok, sds = pcall(function() return DocSettings:open(filepath) end)
-        if ok and sds then props = sds:readSetting("doc_props") end
-        if not props or next(props) == nil then
-            local ok_bim, BookInfoManager = pcall(require, "bookinfomanager")
-            if ok_bim and BookInfoManager and BookInfoManager.getDocProps then
-                local bim_props = BookInfoManager:getDocProps(filepath)
-                if bim_props and next(bim_props) ~= nil then props = bim_props end
-            end
+    if cmf then return DocSettings.openSettingsFile(cmf) end
+    local cds = DocSettings.openSettingsFile()
+    local props
+    local ok, sds = pcall(function() return DocSettings:open(filepath) end)
+    if ok and sds then props = sds:readSetting("doc_props") end
+    if not props or next(props) == nil then
+        local ok_bim, BookInfoManager = pcall(require, "bookinfomanager")
+        if ok_bim and BookInfoManager and BookInfoManager.getDocProps then
+            local bim_props = BookInfoManager:getDocProps(filepath)
+            if bim_props and next(bim_props) ~= nil then props = bim_props end
         end
-        cds:saveSetting("doc_props", props or {})  -- originals, for restore/“customized”
     end
+    cds:saveSetting("doc_props", props or {})  -- originals, for restore/“customized”
+    return cds
+end
+
+-- A book's metadata as KOReader shows it, field by field (title, authors,
+-- series, series_index, language, keywords, description, publisher):
+-- returns (shown, original, custom) -- the values in effect, the
+-- document's own, and the overridden ones (custom_props).
+function Repo.bookProps(filepath)
+    local custom = _customPropsFor(filepath) or {}
+    local original
+    local DocSettings = require("docsettings")
+    local cmf = DocSettings:findCustomMetadataFile(filepath)
+    if cmf then
+        pcall(function() original = DocSettings.openSettingsFile(cmf):readSetting("doc_props") end)
+    end
+    if type(original) ~= "table" or next(original) == nil then
+        local ok_bim, BookInfoManager = pcall(require, "bookinfomanager")
+        if ok_bim and BookInfoManager and BookInfoManager.getDocProps then
+            original = BookInfoManager:getDocProps(filepath)
+        end
+    end
+    original = type(original) == "table" and original or {}
+    local shown = {}
+    for k, v in pairs(original) do shown[k] = v end
+    for k, v in pairs(custom) do shown[k] = v end
+    return shown, original, custom
+end
+
+-- setCustomProps(filepath, fields, reason): KOReader's custom metadata of a
+-- book (the same fields Show info edits), shared both ways. Each field is
+-- set; `false` takes the override away (back to the document's own). The
+-- file is flushed, the book's caches and the light-meta records dropped
+-- (invalidateBookCache keeps the latter warm), so its details re-resolve
+-- from the new values on the next read, and KOReader's own book-info UIs
+-- are told.
+function Repo.setCustomProps(filepath, fields, reason)
+    if not filepath then return end
+    local cds = Repo.openCustomMetadata(filepath)
     local custom_props = cds:readSetting("custom_props", {})
-    custom_props.keywords = keywords
+    for k, v in pairs(fields or {}) do
+        if v == false then custom_props[k] = nil else custom_props[k] = v end
+    end
     cds:flushCustomMetadata(filepath)
-    -- The file's effective keywords changed: drop the grouping caches AND the
-    -- light-meta records (invalidateBookCache keeps the latter warm) so genres
-    -- re-resolve from the new override on the next read.
-    Repo.invalidateBookCache("embedded-genres")
+    Repo.invalidateBookCache(reason or "custom-metadata")
     Repo.invalidateLightMeta()
+    -- (and out of the kept snapshot rows, which would bring the old values
+    -- back: see forgetBook)
+    Repo.forgetBook(filepath)
     local ok_ev, Event = pcall(require, "ui/event")
     local ok_um, UIManager = pcall(require, "ui/uimanager")
     if ok_ev and ok_um then
         -- InvalidateMetadataCache deletes BIM's cached row so its next
-        -- getDocProps re-extracts and overlays the new keywords; without it
-        -- KOReader's Show-info keeps showing the pre-edit keywords (it reads
+        -- getDocProps re-extracts and overlays the new values; without it
+        -- KOReader's Show-info keeps showing the pre-edit ones (it reads
         -- the stale cached row). BookMetadataChanged then refreshes the UIs.
         UIManager:broadcastEvent(Event:new("InvalidateMetadataCache", filepath))
         UIManager:broadcastEvent(Event:new("BookMetadataChanged", { filepath = filepath }))

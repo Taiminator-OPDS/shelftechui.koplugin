@@ -2,6 +2,17 @@
 
 Each version's section is its release notes (GitHub releases and Storefront show them).
 
+## 1.34.0
+
+The book window (hold a book) is reorganised: two tabs, About and Edit (plus Highlights when the book has some).
+
+- About shows the description (Embedded or Hardcover, when there are both), similar books in a row under it, then the reading status and ratings (moved from Edit), then the tags (author, series, collections, genres, folder) at the bottom, with their Edit key.
+- At the top of About, a Hardcover key opens the book's Hardcover page (its reviews are there). The book is found and linked if it wasn't already. Beside it, a small download key takes the book's details from Hardcover; it turns grey once the book has them. Hold it to choose which edition's details to take: each edition is listed with its format, year, length, language and publisher.
+- The Reviews and My review tabs, and the separate Hardcover tab, are gone.
+- The favourite heart (or star) is now beside the title in the header; tap it to add or remove the book.
+- A pencil on the cover's bottom-right corner opens the cover picker; Back returns. The Cover tab is gone.
+- Edit has a new Edit metadata card: title, authors, series, number in series, language, keywords and description, each with a pencil, and Reset for any you've changed. Changes are saved as KOReader's own custom metadata, so Book information shows them too, and Home updates straight away. The Favorite card has moved to the header.
+
 ## 1.33.1
 
 - Finding slow wakes: with the slow-step recorder on (the file koreader/settings/stui_perf), any call that can hold the screen for seconds is now timed and, when it takes over a second, written to crash.log with who made it: a network name lookup, a web request, a call to the Kindle's system services (lipc), a shell command. A step that runs past 3 seconds is also caught where it is, when possible. This is for tracking down the ~10 second wait when Home is woken after a long sleep. Off by default; nothing changes for anyone without the file.

@@ -950,7 +950,41 @@ end
 --- {…}, description, series, series_index, genres = {…}, year, pages, image }
 --- | nil, why). Series where Hardcover has one (asked apart: the book's
 --- details come even if that part is refused).
-function M.details(id, cb)
+--- The editions of book `id` (most read first): cb(list) with
+--- { id, title, subtitle, format, pages, year, isbn, language, publisher,
+--- image } each, or cb(nil, why).
+function M.editions(id, cb)
+    call("query { me { id } }", nil, cb, function(_data, token)
+        local q = [[query ($id: Int!) {
+          editions(where: {book_id: {_eq: $id}}, order_by: {users_count: desc_nulls_last}, limit: 40) {
+            id title subtitle pages release_date edition_format isbn_13 isbn_10 cached_image%s
+          }
+        }]]
+        -- (language and publisher are their own tables: asked for, and left
+        -- out if Hardcover won't have them)
+        local d = graphql(token, q:format(" language { language } publisher { name }"), { id = id })
+            or graphql(token, q:format(""), { id = id })
+        if not (d and type(d.editions) == "table") then return nil, "server" end
+        local out = {}
+        for _i, e in ipairs(d.editions) do
+            if type(e) == "table" and e.id then
+                out[#out + 1] = { id = e.id, title = e.title, subtitle = e.subtitle,
+                    format = e.edition_format, pages = tonumber(e.pages),
+                    year = type(e.release_date) == "string" and tonumber(e.release_date:match("^(%d%d%d%d)")) or nil,
+                    isbn = e.isbn_13 or e.isbn_10,
+                    language = type(e.language) == "table" and e.language.language or nil,
+                    publisher = type(e.publisher) == "table" and e.publisher.name or nil,
+                    image = imageUrl(e.cached_image) }
+            end
+        end
+        return out
+    end)
+end
+
+--- A book's details: title, authors, description, genres, series, cover…
+--- With `edition` (one of M.editions'), that edition's title, length,
+--- year, cover, language and publisher in place of the book's.
+function M.details(id, cb, edition)
     call("query { me { id } }", nil, cb, function(_data, token)
         local d = graphql(token, [[query ($id: Int!) {
           books_by_pk(id: $id) { id title subtitle description release_year pages cached_image cached_contributors cached_tags }
@@ -977,6 +1011,14 @@ function M.details(id, cb)
         if s1 and type(s1.series) == "table" and s1.series.name then
             out.series = s1.series.name
             out.series_index = tonumber(s1.position)
+        end
+        if type(edition) == "table" then
+            if edition.title and edition.title ~= "" then out.title, out.subtitle = edition.title, edition.subtitle end
+            out.pages = edition.pages or out.pages
+            out.year = edition.year or out.year
+            out.image = edition.image or out.image
+            out.language, out.publisher, out.isbn = edition.language, edition.publisher, edition.isbn
+            out.edition = edition.id
         end
         return out
     end)

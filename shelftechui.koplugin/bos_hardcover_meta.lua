@@ -56,6 +56,7 @@ function M.write(file, d)
     end
     if d.description and d.description ~= "" then props.description = d.description end
     if d.genres and #d.genres > 0 then props.keywords = table.concat(d.genres, "\n") end
+    if d.language and d.language ~= "" then props.language = d.language end
     cds:flushCustomMetadata(file)
     return true
 end
@@ -157,9 +158,10 @@ local function offer(file, d, sure)
         end
         -- (a book that wasn't linked: it is now, it's been said to be this one)
         local HC = require("bos_hardcover")
-        if not HC.linkFor(file) then
-            HC.setLink(file, { id = d.id, title = d.title, author = d.authors and d.authors[1], pages = d.pages })
-        end
+        local link = HC.linkFor(file) or { id = d.id, title = d.title, author = d.authors and d.authors[1], pages = d.pages }
+        -- (noted: the book window's download key greys out once it has them)
+        link.details_at, link.edition = os.time(), d.edition or link.edition
+        HC.setLink(file, link)
         local function finish(cover_ok)
             changed(file)
             info(with_cover and not cover_ok and _("Details from Hardcover saved. The cover couldn't be downloaded.")
@@ -178,8 +180,62 @@ local function offer(file, d, sure)
     UIManager:show(dlg)
 end
 
---- Find the book on Hardcover and offer its details for `file`.
-function M.run(file, hint)
+--- Whether `file` has its details from Hardcover already.
+function M.has(file)
+    local link = require("bos_hardcover").linkFor(file)
+    return link and link.details_at ~= nil or false
+end
+
+--- The book's editions to choose from, then that edition's details.
+local function chooseEdition(file, id, sure, msg)
+    local HC = require("bos_hardcover")
+    HC.editions(id, function(list, why)
+        UIManager:close(msg)
+        if not list then return info(why or _("Hardcover didn't answer."), 4) end
+        if #list == 0 then return info(_("Hardcover lists no editions of this book."), 4) end
+        local current = (HC.linkFor(file) or {}).edition
+        local items = {}
+        for _i, e in ipairs(list) do
+            local bits = {}
+            for _j, v in ipairs({ e.format, e.year and tostring(e.year), e.pages and T(_("%1 pages"), e.pages), e.language, e.publisher }) do
+                if v and v ~= "" then bits[#bits + 1] = v end
+            end
+            items[#items + 1] = {
+                text = (e.id == current and "✓ " or "") .. (e.title or "?") .. (#bits > 0 and ("  —  " .. table.concat(bits, " · ")) or ""),
+                callback = function()
+                    local wait = require("ui/widget/infomessage"):new{ text = _("Asking Hardcover…") }
+                    UIManager:show(wait)
+                    HC.details(id, function(d, why2)
+                        UIManager:close(wait)
+                        if not d then return info(why2 or _("Hardcover didn't answer."), 4) end
+                        offer(file, d, sure)
+                    end, e)
+                end,
+            }
+        end
+        -- (KOReader's list: dozens of editions page through)
+        local Menu = require("ui/widget/menu")
+        local Screen = require("device").screen
+        local menu
+        menu = Menu:new{
+            title = _("Which edition?"),
+            item_table = items,
+            width = Screen:getWidth(), height = Screen:getHeight(),
+            covers_fullscreen = true, is_borderless = true, is_popout = false,
+            items_max_lines = 2, -- (a title, then format, year, length…: two lines)
+            onMenuSelect = function(_self, item)
+                UIManager:close(menu)
+                item.callback()
+                return true
+            end,
+        }
+        UIManager:show(menu)
+    end)
+end
+
+--- Find the book on Hardcover and offer its details for `file`. With
+--- opts.edition, the book's editions are listed first, to take one's.
+function M.run(file, hint, opts)
     local HC = require("bos_hardcover")
     if not HC.signedIn() then
         return info(_("Sign in to Hardcover first (Settings → Connect → Hardcover)."), 4)
@@ -187,6 +243,7 @@ function M.run(file, hint)
     local msg = require("ui/widget/infomessage"):new{ text = _("Asking Hardcover…") }
     UIManager:show(msg)
     local function got(id, sure)
+        if opts and opts.edition then return chooseEdition(file, id, sure, msg) end
         HC.details(id, function(d, why)
             UIManager:close(msg)
             if not d then return info(why or _("Hardcover didn't answer."), 4) end
